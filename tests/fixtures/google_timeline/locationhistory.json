@@ -1,0 +1,33 @@
+[
+  {
+    "startTime": "2023-03-15T10:00:00Z",
+    "endTime": "2023-03-15T11:00:00Z",
+    "visit": {
+      "topCandidate": {
+        "placeLocation": {"latLng": "40.7128°N, 74.0060°W"},
+        "semanticType": "INFERRED_WORK"
+      },
+      "hierarchyLevel": 1
+    }
+  },
+  {
+    "startTime": "2023-03-15T11:30:00Z",
+    "endTime": "2023-03-15T12:00:00Z",
+    "activity": {
+      "topCandidate": {
+        "type": "IN_PASSENGER_VEHICLE",
+        "probability": 0.95
+      },
+      "distanceMeters": 5000.0
+    }
+  },
+  {
+    "startTime": "2023-03-15T12:00:00Z",
+    "endTime": "2023-03-15T12:30:00Z",
+    "timelinePath": [
+      {"point": "geo:40.7128,-74.0060", "durationMinutesOffsetFromStartTime": "0"},
+      {"point": "geo:40.7580,-73.9855", "durationMinutesOffsetFromStartTime": "15"},
+      {"point": "geo:40.7614,-73.9776", "durationMinutesOffsetFromStartTime": "30"}
+    ]
+  }
+]

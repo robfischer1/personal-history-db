@@ -1,0 +1,37 @@
+[
+  {
+    "ts": "2024-01-15T14:30:00Z",
+    "master_metadata_track_name": "Bohemian Rhapsody",
+    "master_metadata_album_artist_name": "Queen",
+    "master_metadata_album_album_name": "A Night at the Opera",
+    "spotify_track_uri": "spotify:track:abc123",
+    "ms_played": 354000
+  },
+  {
+    "ts": "2024-01-15T14:36:00Z",
+    "master_metadata_track_name": "Stairway to Heaven",
+    "master_metadata_album_artist_name": "Led Zeppelin",
+    "master_metadata_album_album_name": "Led Zeppelin IV",
+    "spotify_track_uri": "spotify:track:def456",
+    "ms_played": 482000
+  },
+  {
+    "ts": "2024-01-15T14:44:00Z",
+    "episode_name": "The Daily",
+    "episode_show_name": "NYT News",
+    "spotify_episode_uri": "spotify:episode:ghi789",
+    "ms_played": 1200000
+  },
+  {
+    "ts": "2024-01-15T15:04:00Z",
+    "audiobook_title": "Project Hail Mary",
+    "audiobook_chapter_title": "Chapter 1",
+    "audiobook_uri": "spotify:show:jkl012",
+    "ms_played": 2400000
+  },
+  {
+    "ts": "",
+    "master_metadata_track_name": "Bad Timestamp Song",
+    "ms_played": 100
+  }
+]

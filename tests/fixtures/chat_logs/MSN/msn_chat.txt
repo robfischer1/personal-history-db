@@ -1,0 +1,11 @@
+Session Start (MSN - testuser@example.com:friend2@example.com): Mon Jul 14 14:00:00 2003
+testuser@example.com: Hey are you there?
+friend2@example.com: Yeah what's up
+testuser@example.com: Just wanted to chat
+Session Close (friend2@example.com): Mon Jul 14 14:13:30 2003
+Session Start (MSN - testuser@example.com:friend2@example.com): Tue Jul 15 10:00:00 2003
+testuser@example.com: Morning!
+friend2@example.com: Good morning
+friend2@example.com: How did you sleep?
+testuser@example.com: Pretty well thanks
+Session Close (friend2@example.com): Tue Jul 15 10:05:00 2003

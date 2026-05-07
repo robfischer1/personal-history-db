@@ -1,0 +1,43 @@
+From test@example.com Mon Jan 15 13:00:00 2024
+Message-ID: <dir001@example.com>
+Date: Mon, 15 Jan 2024 13:00:00 +0000
+From: Test Owner <test@example.com>
+To: someone@other.com
+Subject: Outbound message
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Sent by the owner. Direction should be outbound when owner=test@example.com.
+
+From someone@other.com Tue Jan 16 13:00:00 2024
+Message-ID: <dir002@example.com>
+Date: Tue, 16 Jan 2024 13:00:00 +0000
+From: Someone Else <someone@other.com>
+To: test@example.com
+Subject: Inbound message
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Sent to the owner. Direction should be inbound when owner=test@example.com.
+
+From test@example.com Wed Jan 17 13:00:00 2024
+Message-ID: <dir003@example.com>
+Date: Wed, 17 Jan 2024 13:00:00 +0000
+From: Test Owner <test@example.com>
+To: test@example.com
+Subject: Self message
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Sent from owner to owner. Direction should be self when owner=test@example.com.
+
+From stranger@other.com Thu Jan 18 13:00:00 2024
+Message-ID: <dir004@example.com>
+Date: Thu, 18 Jan 2024 13:00:00 +0000
+From: Stranger <stranger@other.com>
+To: another@other.com
+Subject: Unknown direction message
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Neither sender nor recipient is the owner. Direction should be unknown regardless of identity settings.

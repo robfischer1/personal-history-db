@@ -1,0 +1,8 @@
+# Instance-specific filesystem paths.
+
+# db_path = "C:\\path\\to\\personal-history.db"
+# data_dir = "C:\\path\\to\\personal-history-data"
+# log_level = "INFO"
+
+# Adapter discovery paths (directories containing .py adapter files)
+# adapter_paths = ["C:\\path\\to\\personal-history-instance\\adapters"]

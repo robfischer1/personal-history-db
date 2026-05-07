@@ -1,0 +1,68 @@
+From alice@example.com Mon Jan 15 10:00:00 2024
+Message-ID: <msg001@example.com>
+Date: Mon, 15 Jan 2024 10:00:00 +0000
+From: Alice Smith <alice@example.com>
+To: bob@example.com
+Subject: Meeting notes
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_boundary_msg001_mixed"
+
+--=_boundary_msg001_mixed
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi Bob,
+
+Please find the meeting notes attached.
+
+Best,
+Alice
+
+--=_boundary_msg001_mixed
+Content-Type: application/pdf; name="report.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="report.pdf"
+
+JVBERi0xLjQgc3ludGhldGljIGZpeHR1cmUgYXR0YWNobWVudCBmb3IgdGVzdGluZyBvbmx5
+
+--=_boundary_msg001_mixed--
+
+From bob@example.com Tue Feb 20 19:30:00 2024
+Message-ID: <msg002@example.com>
+Date: Tue, 20 Feb 2024 14:30:00 -0500
+From: bob@example.com
+To: alice@example.com
+Cc: carol@example.com
+Subject: Project update
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_boundary_msg002_alt"
+
+--=_boundary_msg002_alt
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi Alice,
+
+The project is on track. We expect to finish by end of month.
+
+-- Bob
+
+--=_boundary_msg002_alt
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><p>Hi Alice,</p><p>The project is on track. We expect to finish by end of month.</p><p>-- Bob</p></body></html>
+
+--=_boundary_msg002_alt--
+
+From news@company.com Sun Mar 10 08:15:00 2024
+Message-ID: <msg003@example.com>
+Date: Sun, 10 Mar 2024 08:15:00 +0000
+From: news@company.com
+To: alice@example.com
+Bcc: secret@example.com
+Subject: Newsletter
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><h1>Company Newsletter</h1><p>Welcome to the monthly newsletter. This month we have exciting updates.</p><p>Thank you for subscribing.</p></body></html>

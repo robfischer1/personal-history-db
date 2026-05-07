@@ -1,0 +1,70 @@
+From notify@service.example.com Mon Jan 15 11:00:00 2024
+Message-ID: <bulk001@example.com>
+Date: Mon, 15 Jan 2024 11:00:00 +0000
+From: Notifications <notify@service.example.com>
+To: user@example.com
+Subject: Your weekly digest
+List-Unsubscribe: <mailto:unsubscribe@service.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a synthetic automated notification message. It contains enough text to exercise the 280-character snippet truncation limit that the mbox adapter applies to bulk messages. The body continues well beyond the snippet cutoff to ensure the cap is tested properly. Additional filler text follows to guarantee the character count exceeds 280. End of filler content.
+
+From list@mailing.example.com Tue Jan 16 11:00:00 2024
+Message-ID: <bulk002@example.com>
+Date: Tue, 16 Jan 2024 11:00:00 +0000
+From: Mailing List <list@mailing.example.com>
+To: user@example.com
+Subject: List announcement
+List-Id: <announcements.mailing.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a synthetic automated notification message. It contains enough text to exercise the 280-character snippet truncation limit that the mbox adapter applies to bulk messages. The body continues well beyond the snippet cutoff to ensure the cap is tested properly. Additional filler text follows to guarantee the character count exceeds 280. End of filler content.
+
+From sender@bulk.example.com Wed Jan 17 11:00:00 2024
+Message-ID: <bulk003@example.com>
+Date: Wed, 17 Jan 2024 11:00:00 +0000
+From: Bulk Sender <sender@bulk.example.com>
+To: user@example.com
+Subject: Bulk mail test
+Precedence: bulk
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a synthetic automated notification message. It contains enough text to exercise the 280-character snippet truncation limit that the mbox adapter applies to bulk messages. The body continues well beyond the snippet cutoff to ensure the cap is tested properly. Additional filler text follows to guarantee the character count exceeds 280. End of filler content.
+
+From autoresponder@company.example.com Thu Jan 18 11:00:00 2024
+Message-ID: <bulk004@example.com>
+Date: Thu, 18 Jan 2024 11:00:00 +0000
+From: Auto Responder <autoresponder@company.example.com>
+To: user@example.com
+Subject: Out of office
+Auto-Submitted: auto-replied
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a synthetic automated notification message. It contains enough text to exercise the 280-character snippet truncation limit that the mbox adapter applies to bulk messages. The body continues well beyond the snippet cutoff to ensure the cap is tested properly. Additional filler text follows to guarantee the character count exceeds 280. End of filler content.
+
+From system@corp.example.com Fri Jan 19 11:00:00 2024
+Message-ID: <bulk005@example.com>
+Date: Fri, 19 Jan 2024 11:00:00 +0000
+From: Corp System <system@corp.example.com>
+To: user@example.com
+Subject: System notification
+X-Auto-Response-Suppress: All
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a synthetic automated notification message. It contains enough text to exercise the 280-character snippet truncation limit that the mbox adapter applies to bulk messages. The body continues well beyond the snippet cutoff to ensure the cap is tested properly. Additional filler text follows to guarantee the character count exceeds 280. End of filler content.
+
+From noreply@example.com Sat Jan 20 11:00:00 2024
+Message-ID: <bulk006@example.com>
+Date: Sat, 20 Jan 2024 11:00:00 +0000
+From: noreply@example.com
+To: user@example.com
+Subject: Automated message from example.com
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a synthetic automated notification message. It contains enough text to exercise the 280-character snippet truncation limit that the mbox adapter applies to bulk messages. The body continues well beyond the snippet cutoff to ensure the cap is tested properly. Additional filler text follows to guarantee the character count exceeds 280. End of filler content.

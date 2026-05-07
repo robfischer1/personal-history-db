@@ -1,0 +1,311 @@
+"""Tests for the chat_logs adapter."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from phdb.adapters.chat_logs import (
+    ChatLogsAdapter,
+    _combine_date_and_time,
+    _detect_format,
+    _html_unescape,
+    _infer_filename_date,
+    _normalize_handle,
+    _parse_aim_html,
+    _parse_bracketed_time_log,
+    _parse_plaintext_log,
+    _parse_session_handle,
+    _parse_session_timestamp,
+    _strip_html_tags,
+    _strip_msn_color_codes,
+)
+from phdb.db import connect
+from phdb.migrations.runner import MigrationRunner
+from phdb.settings import IdentitySettings, Settings
+
+FIXTURES = Path(__file__).parent / "fixtures" / "chat_logs"
+
+
+# ---- Unit tests for helper functions ----
+
+
+class TestNormalizeHandle:
+    def test_basic(self) -> None:
+        assert _normalize_handle("GuitarFreak63") == "guitarfreak63"
+
+    def test_mailto(self) -> None:
+        assert _normalize_handle("mailto:test@example.com") == "test@example.com"
+
+    def test_none(self) -> None:
+        assert _normalize_handle(None) is None
+
+
+class TestParseSessionHandle:
+    def test_full_trillian(self) -> None:
+        proto, my, remote = _parse_session_handle("MSN - my@msn.com:friend@msn.com")
+        assert proto == "msn"
+        assert my == "my@msn.com"
+        assert remote == "friend@msn.com"
+
+    def test_no_proto(self) -> None:
+        proto, my, remote = _parse_session_handle("JaneDoe")
+        assert proto is None
+        assert remote == "janedoe"
+
+    def test_none(self) -> None:
+        assert _parse_session_handle(None) == (None, None, None)
+
+
+class TestParseSessionTimestamp:
+    def test_standard(self) -> None:
+        assert _parse_session_timestamp("Mon Jul 14 14:13:30 2003") == "2003-07-14T14:13:30"
+
+    def test_date_only(self) -> None:
+        assert _parse_session_timestamp("Tuesday, November 18, 2003") == "2003-11-18"
+
+    def test_none(self) -> None:
+        assert _parse_session_timestamp(None) is None
+
+
+class TestHtmlHelpers:
+    def test_unescape(self) -> None:
+        assert _html_unescape("&amp; &lt; &gt;") == "& < >"
+
+    def test_strip_tags(self) -> None:
+        assert _strip_html_tags("<b>Hello</b> <i>world</i>") == "Hello world"
+
+
+class TestStripMsnColors:
+    def test_basic(self) -> None:
+        result = _strip_msn_color_codes("Hello\x03(0, 128, 255) world")
+        assert "Hello" in result
+        assert "world" in result
+        assert "\x03" not in result
+
+
+class TestFilenameDate:
+    def test_standard(self) -> None:
+        d = _infer_filename_date(Path("chat/2003-07-14 [Monday].htm"))
+        assert d is not None
+        assert d.year == 2003
+        assert d.month == 7
+        assert d.day == 14
+
+    def test_month_year(self) -> None:
+        d = _infer_filename_date(Path("chat/July 2003.txt"))
+        assert d is not None
+        assert d.year == 2003
+        assert d.month == 7
+
+
+class TestCombineDateAndTime:
+    def test_pm(self) -> None:
+        from datetime import datetime
+
+        d = datetime(2003, 7, 14)
+        result = _combine_date_and_time(d, "5:03:16 PM")
+        assert result == "2003-07-14T17:03:16"
+
+    def test_am(self) -> None:
+        from datetime import datetime
+
+        d = datetime(2003, 7, 14)
+        result = _combine_date_and_time(d, "9:30:00 AM")
+        assert result == "2003-07-14T09:30:00"
+
+    def test_no_date(self) -> None:
+        assert _combine_date_and_time(None, "5:03:16 PM") is None
+
+
+class TestDetectFormat:
+    def test_aim_html(self) -> None:
+        assert _detect_format(Path("test.htm"), b"<HTML><BODY>") == "aim_html"
+
+    def test_plaintext(self) -> None:
+        assert _detect_format(Path("test.txt"), b"Session Start (MSN - a:b): Mon Jul 14") == "plaintext"
+
+    def test_bracketed(self) -> None:
+        assert _detect_format(Path("test.log"), b"[14:30] User: hello\n[14:31] Other: hi") == "bracketed_time"
+
+
+class TestParseAimHtml:
+    def test_basic(self) -> None:
+        content = (FIXTURES / "AIM" / "TestUser" / "Friend1" / "2003-07-14 [Monday].htm").read_text()
+        from datetime import datetime
+
+        result = _parse_aim_html(
+            content,
+            FIXTURES / "AIM" / "TestUser" / "Friend1" / "2003-07-14 [Monday].htm",
+            datetime(2003, 7, 14),
+        )
+        assert result is not None
+        assert result["protocol"] == "aim"
+        assert result["my_handle"] == "testuser"
+        assert result["remote_handle"] == "friend1"
+        msgs = result["messages"]
+        assert isinstance(msgs, list)
+        assert len(msgs) == 4
+
+
+class TestParsePlaintextLog:
+    def test_multi_session(self) -> None:
+        content = (FIXTURES / "MSN" / "msn_chat.txt").read_text()
+        sessions = _parse_plaintext_log(content, FIXTURES / "MSN" / "msn_chat.txt", None)
+        assert len(sessions) == 2
+        s1_msgs = sessions[0].get("messages")
+        assert isinstance(s1_msgs, list)
+        assert len(s1_msgs) == 3
+        s2_msgs = sessions[1].get("messages")
+        assert isinstance(s2_msgs, list)
+        assert len(s2_msgs) == 4
+
+
+class TestParseBracketedTimeLog:
+    def test_basic(self) -> None:
+        from datetime import datetime
+
+        content = (FIXTURES / "MSN" / "bracketed_2003-08-01.log").read_text()
+        sessions = _parse_bracketed_time_log(
+            content, FIXTURES / "MSN" / "bracketed_2003-08-01.log", datetime(2003, 8, 1)
+        )
+        assert len(sessions) == 1
+        msgs = sessions[0].get("messages")
+        assert isinstance(msgs, list)
+        assert len(msgs) == 4
+        assert "multi-line" in str(msgs[2].get("body_text"))
+        assert "continuation" in str(msgs[2].get("body_text"))
+
+
+# ---- Integration tests ----
+
+
+@pytest.fixture
+def chat_settings(tmp_path: Path) -> Settings:
+    return Settings(
+        db_path=tmp_path / "test.db",
+        identity=IdentitySettings(
+            owner_names={"testuser", "testuser@example.com"},
+            owner_emails={"testuser@example.com"},
+            owner_phones=set(),
+            owner_handles={"aim": {"testuser"}, "msn": {"testuser@example.com"}},
+        ),
+    )
+
+
+@pytest.fixture
+def chat_db(tmp_path: Path) -> Path:
+    db_path = tmp_path / "test.db"
+    with connect(db_path) as conn:
+        runner = MigrationRunner(conn)
+        runner.apply_pending()
+    return db_path
+
+
+class TestChatLogsAdapterIntegration:
+    def test_basic_ingest(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            report = adapter.run(FIXTURES, conn, chat_settings)
+
+        assert report.rows_inserted > 0
+        assert report.threads_created > 0
+
+    def test_aim_html_parsed(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            report = adapter.run(FIXTURES, conn, chat_settings)
+            aim_msgs = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE body_text_source = 'chat-log'"
+            ).fetchone()[0]
+        assert aim_msgs == report.rows_inserted
+
+    def test_direction_inference(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+            outbound = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE direction = 'outbound'"
+            ).fetchone()[0]
+            inbound = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE direction = 'inbound'"
+            ).fetchone()[0]
+        assert outbound > 0
+        assert inbound > 0
+
+    def test_threads_created(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+            threads = conn.execute(
+                "SELECT thread_key, message_count FROM threads ORDER BY thread_key"
+            ).fetchall()
+        assert len(threads) >= 3
+        for _key, count in threads:
+            assert count > 0
+
+    def test_recipients_recorded(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+            rcpts = conn.execute("SELECT DISTINCT address FROM recipients").fetchall()
+        assert len(rcpts) >= 1
+
+    def test_idempotent_rerun(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+
+        adapter2 = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            r2 = adapter2.run(FIXTURES, conn, chat_settings)
+
+        assert r2.rows_inserted == 0
+        assert r2.rows_yielded == 0
+
+    def test_thread_aggregates(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+            threads = conn.execute(
+                "SELECT date_first, date_last FROM threads"
+            ).fetchall()
+        for first, last in threads:
+            assert first is not None
+            assert last is not None
+            assert first <= last
+
+    def test_message_thread_bridge(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+            bridges = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            msgs = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        assert bridges == msgs
+
+    def test_time_budget(self, chat_db: Path, chat_settings: Settings) -> None:
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter(max_seconds=0.001)
+        with connect(chat_db) as conn:
+            report = adapter.run(FIXTURES, conn, chat_settings)
+        assert report.rows_yielded >= 0
+
+    def test_multi_session_file(self, chat_db: Path, chat_settings: Settings) -> None:
+        """The MSN plaintext file has 2 sessions — both should create separate threads."""
+        chat_settings.db_path = chat_db
+        adapter = ChatLogsAdapter()
+        with connect(chat_db) as conn:
+            adapter.run(FIXTURES, conn, chat_settings)
+            msn_threads = conn.execute(
+                "SELECT thread_key FROM threads WHERE thread_key LIKE 'msn:%'"
+            ).fetchall()
+        assert len(msn_threads) == 2

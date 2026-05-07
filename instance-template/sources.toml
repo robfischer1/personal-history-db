@@ -1,0 +1,11 @@
+# Source registration. Each [sources.<name>] section configures a data source.
+# The framework does not auto-discover sources from this file yet;
+# this is a registry for documentation and future CLI integration.
+#
+# [sources.gmail]
+# path = "C:\\path\\to\\All-Mail.mbox"
+# adapter = "mbox"
+#
+# [sources.discord]
+# path = "C:\\path\\to\\discord-export"
+# adapter = "discord"

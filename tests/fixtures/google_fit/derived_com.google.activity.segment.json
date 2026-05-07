@@ -1,0 +1,18 @@
+{
+  "Data Points": [
+    {
+      "startTimeNanos": "1678886400000000000",
+      "endTimeNanos": "1678890000000000000",
+      "fitValue": [{"value": {"intVal": 7}}],
+      "dataTypeName": "com.google.activity.segment",
+      "originDataSourceId": "raw:com.google.activity.segment:test"
+    },
+    {
+      "startTimeNanos": "1678972800000000000",
+      "endTimeNanos": "1678976400000000000",
+      "fitValue": [{"value": {"intVal": 8}}],
+      "dataTypeName": "com.google.activity.segment",
+      "originDataSourceId": "raw:com.google.activity.segment:test"
+    }
+  ]
+}

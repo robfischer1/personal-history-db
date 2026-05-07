@@ -1,0 +1,84 @@
+[
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "msg001@example.com",
+    "subject": "Meeting notes",
+    "sender_address": "alice@example.com",
+    "sender_name": "Alice Smith",
+    "sender_domain": "example.com",
+    "date_sent": "2024-01-15T10:00:00+00:00",
+    "is_bulk": 0,
+    "bulk_signal": null,
+    "is_multipart": 1,
+    "has_attachments": 1,
+    "attachment_count": 1,
+    "body_text_source": "plain",
+    "recipients": [
+      {
+        "address": "bob@example.com",
+        "name": null,
+        "rtype": "to"
+      }
+    ],
+    "attachments": [
+      {
+        "filename": "report.pdf",
+        "content_type": "application/pdf"
+      }
+    ]
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "msg002@example.com",
+    "subject": "Project update",
+    "sender_address": "bob@example.com",
+    "sender_name": null,
+    "sender_domain": "example.com",
+    "date_sent": "2024-02-20T14:30:00-05:00",
+    "is_bulk": 0,
+    "bulk_signal": null,
+    "is_multipart": 1,
+    "has_attachments": 0,
+    "attachment_count": 0,
+    "body_text_source": "plain",
+    "recipients": [
+      {
+        "address": "alice@example.com",
+        "name": null,
+        "rtype": "to"
+      },
+      {
+        "address": "carol@example.com",
+        "name": null,
+        "rtype": "cc"
+      }
+    ]
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "msg003@example.com",
+    "subject": "Newsletter",
+    "sender_address": "news@company.com",
+    "sender_name": null,
+    "sender_domain": "company.com",
+    "date_sent": "2024-03-10T08:15:00+00:00",
+    "is_bulk": 0,
+    "bulk_signal": null,
+    "is_multipart": 0,
+    "has_attachments": 0,
+    "attachment_count": 0,
+    "body_text_source": "html2text",
+    "recipients": [
+      {
+        "address": "alice@example.com",
+        "name": null,
+        "rtype": "to"
+      },
+      {
+        "address": "secret@example.com",
+        "name": null,
+        "rtype": "bcc"
+      }
+    ]
+  }
+]

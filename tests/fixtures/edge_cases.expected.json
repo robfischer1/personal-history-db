@@ -1,0 +1,44 @@
+[
+  {
+    "rfc822_message_id": null,
+    "subject": "Message without Message-ID",
+    "is_bulk": 0,
+    "note": "NULL Message-ID — partial unique index allows insert"
+  },
+  {
+    "rfc822_message_id": "edge002@example.com",
+    "subject": "Héllo Wörld",
+    "is_bulk": 0,
+    "note": "RFC 2047 encoded Subject decoded correctly"
+  },
+  {
+    "rfc822_message_id": "edge003@example.com",
+    "date_sent": null,
+    "is_bulk": 0,
+    "note": "Missing Date header — date_sent must be None"
+  },
+  {
+    "rfc822_message_id": "edge004@example.com",
+    "body_text": null,
+    "body_text_source": "empty",
+    "has_attachments": 1,
+    "attachment_count": 1,
+    "note": "Attachment-only message — no text or HTML parts"
+  },
+  {
+    "rfc822_message_id": "edge005@example.com",
+    "body_text_length": 200000,
+    "note": "Body capped at MAX_BODY_LEN=200000"
+  },
+  {
+    "rfc822_message_id": "duplicate@example.com",
+    "subject": "First duplicate",
+    "note": "First occurrence — inserts"
+  },
+  {
+    "rfc822_message_id": "duplicate@example.com",
+    "subject": "Second duplicate — different content, same Message-ID",
+    "note": "Second occurrence — skipped by INSERT OR IGNORE",
+    "expected_insert": false
+  }
+]

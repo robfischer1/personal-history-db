@@ -1,0 +1,6 @@
+# Embedding model configuration.
+
+[embedding]
+model = "nomic-embed-text"
+dim = 768
+endpoint = "http://localhost:11434"

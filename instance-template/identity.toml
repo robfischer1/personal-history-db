@@ -1,0 +1,15 @@
+# Owner identity for direction inference.
+# The framework uses these to classify messages as inbound/outbound/self.
+
+[identity]
+owner_names = ["Your Name"]
+owner_emails = ["you@example.com"]
+owner_phones = []
+
+# Platform handles for direction inference on platform-specific sources.
+# Key = platform prefix used in sender_address (e.g., "discord", "twitter")
+# Value = list of your handles on that platform
+[identity.owner_handles]
+# discord = ["your_discord_handle"]
+# twitter = ["your_twitter_handle"]
+# aim = ["your_aim_handle"]

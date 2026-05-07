@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<smses count="6">
+  <sms protocol="0" address="+15551234567" date="1700000000000" type="1" subject="null" body="Hey, are you coming tonight?" read="1" contact_name="Jane Doe" />
+  <sms protocol="0" address="+15551234567" date="1700001000000" type="2" subject="null" body="Yeah, I'll be there at 8." read="1" contact_name="Jane Doe" />
+  <sms protocol="0" address="+15559876543" date="1700002000000" type="1" subject="null" body="Check out this link" read="1" contact_name="Bob Smith" />
+  <sms protocol="0" address="+15559876543~+15551111111" date="1700003000000" type="1" subject="null" body="Group message test" read="1" contact_name="Bob Smith" />
+  <sms protocol="0" address="+15550000000" date="1700004000000" type="1" subject="null" body="null" read="1" contact_name="(Unknown)" />
+  <mms date="1700005000000" msg_box="1" address="+15551234567" contact_name="Jane Doe">
+    <parts>
+      <part seq="0" ct="application/smil" text="null" />
+      <part seq="1" ct="text/plain" text="MMS text content here" />
+      <part seq="2" ct="image/jpeg" name="photo.jpg" />
+    </parts>
+  </mms>
+</smses>

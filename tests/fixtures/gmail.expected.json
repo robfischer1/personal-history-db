@@ -1,0 +1,14 @@
+[
+  {
+    "rfc822_message_id": "gmail001@example.com",
+    "gmail_thread_id": "1234567890",
+    "gmail_labels": "[\"Important\", \"Starred\", \"Personal\"]",
+    "note": "Gmail headers parsed — labels stored as JSON array string"
+  },
+  {
+    "rfc822_message_id": "gmail002@example.com",
+    "gmail_thread_id": null,
+    "gmail_labels": null,
+    "note": "No Gmail headers — both fields are None"
+  }
+]

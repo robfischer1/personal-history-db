@@ -1,0 +1,7 @@
+# Custom atom @types that extend the project's canonical registry.
+# Project ships standard Schema.org types; add instance-specific types here.
+#
+# [types.MyCustomType]
+# table = "messages"
+# identity_columns = ["source_file_id", "raw_hash"]
+# description = "What this type represents"

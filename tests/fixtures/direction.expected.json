@@ -1,0 +1,26 @@
+[
+  {
+    "rfc822_message_id": "dir001@example.com",
+    "direction_with_identity": "outbound",
+    "direction_without_identity": "unknown",
+    "note": "Sender is owner — outbound when identity configured"
+  },
+  {
+    "rfc822_message_id": "dir002@example.com",
+    "direction_with_identity": "inbound",
+    "direction_without_identity": "unknown",
+    "note": "Recipient is owner — inbound when identity configured"
+  },
+  {
+    "rfc822_message_id": "dir003@example.com",
+    "direction_with_identity": "self",
+    "direction_without_identity": "unknown",
+    "note": "Sender and recipient both owner — self when identity configured"
+  },
+  {
+    "rfc822_message_id": "dir004@example.com",
+    "direction_with_identity": "unknown",
+    "direction_without_identity": "unknown",
+    "note": "Neither party is owner — always unknown"
+  }
+]

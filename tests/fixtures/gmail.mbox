@@ -1,0 +1,23 @@
+From sender@example.com Mon Jan 15 12:00:00 2024
+Message-ID: <gmail001@example.com>
+Date: Mon, 15 Jan 2024 12:00:00 +0000
+From: Sender Name <sender@example.com>
+To: owner@example.com
+Subject: Gmail message with labels
+X-GM-THRID: 1234567890
+X-Gmail-Labels: Important,Starred,Personal
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This message has Gmail-specific headers: X-GM-THRID and X-Gmail-Labels.
+
+From generic@otherprovider.example.com Tue Jan 16 12:00:00 2024
+Message-ID: <gmail002@example.com>
+Date: Tue, 16 Jan 2024 12:00:00 +0000
+From: Generic Sender <generic@otherprovider.example.com>
+To: owner@example.com
+Subject: Generic mbox message without Gmail headers
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is a generic RFC 2822 message with no Gmail-specific headers.

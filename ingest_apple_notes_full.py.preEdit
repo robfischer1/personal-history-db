@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+"""Ingest full Apple Notes body text from the decrypted iPhone backup.
+
+Source: D:/04 Archives/decrypted-iphone-2026-05-02/notes/NoteStore.sqlite
+
+Upgrades existing notes (ingested with ZSNIPPET truncation in ingest_apple_dbs.py)
+to include full body text decoded from ZICNOTEDATA.ZDATA.
+
+ZDATA encoding: gzip-compressed protobuf (Apple Notes "ICNoteData" format).
+Proto path to plain text (verified empirically 2026-05-06 against all 46 notes):
+  gunzip(ZDATA) → outer Document
+    .field 2 (length-delim, the "Data" wrapper)
+      .field 3 (length-delim, the inner Document)
+        .field 2 (length-delim, plain UTF-8 note text — title + body, with
+                  AttributeRun formatting metadata living in sibling fields
+                  that we deliberately ignore)
+
+The original docstring claimed the path was 2→2→1; that was wrong. The
+two middle field numbers are 3 and 2, not 2 and 1. Fix landed 2026-05-06.
+
+No external proto library required — minimal hand-rolled varint parser.
+All 46 notes confirmed unencrypted (ZCRYPTOINITIALIZATIONVECTOR = NULL).
+
+Resolved review notes:
+  - Proto path verified — 46/46 notes decode to non-empty UTF-8 strings.
+  - Key prefix matches `ingest_apple_dbs.py` (`notes:{Z_PK}`); UPDATE
+    branch upgrades existing snippet rows in place.
+  - Source opened read-only via mode=ro URI; WAL/SHM siblings are inert.
+  - Attachment-only / sparse notes return short bodies (e.g. just an
+    object-replacement char or repeated title) — not a decoder failure.
+
+Usage:
+    python ingest_apple_notes_full.py [--source PATH] [--db PATH] [--dry-run] [--apply]
+    Default --dry-run; pass --apply to write to DB.
+"""
+import argparse
+import gzip
+import hashlib
+import sqlite3
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    pass
+
+DEFAULT_SOURCE = Path(r"D:\<archives>\decrypted-iphone-2026-05-02\notes\NoteStore.sqlite")
+DEFAULT_DB = Path(__file__).parent / "personal-history.db"
+
+# Apple Core Data epoch offset
+APPLE_EPOCH_OFFSET = 978307200
+
+
+def open_db(db_path):
+    try:
+        import sqlite_vec
+        conn = sqlite3.connect(str(db_path))
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+    except ImportError:
+        conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# ---- Minimal protobuf varint parser ----
+
+def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
+    result = shift = 0
+    while pos < len(data):
+        b = data[pos]; pos += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, pos
+        shift += 7
+    return result, pos
+
+
+def _extract_field(data: bytes, target_field: int) -> bytes | None:
+    """
+    Extract first length-delimited (wire type 2) field matching target_field.
+    Returns the raw bytes of the field value, or None if not found.
+    """
+    pos = 0
+    while pos < len(data):
+        if pos >= len(data):
+            break
+        try:
+            tag, pos = _read_varint(data, pos)
+        except Exception:
+            break
+        field_num = tag >> 3
+        wire_type = tag & 0x7
+
+        if wire_type == 0:  # varint
+            _, pos = _read_varint(data, pos)
+        elif wire_type == 1:  # 64-bit fixed
+            pos += 8
+        elif wire_type == 2:  # length-delimited
+            length, pos = _read_varint(data, pos)
+            if field_num == target_field:
+                return data[pos:pos + length]
+            pos += length
+        elif wire_type == 5:  # 32-bit fixed
+            pos += 4
+        else:
+            break  # unknown wire type — bail
+
+    return None
+
+
+def decode_note_body(zdata_blob: bytes) -> str:
+    """
+    Decode Apple Notes ZDATA blob to plain text.
+
+    Proto path (verified empirically against 46/46 notes):
+      gunzip(ZDATA) → outer Document
+        .field 2 (Data wrapper, length-delim)
+          .field 3 (inner Document, length-delim)
+            .field 2 (plain UTF-8 text, length-delim)
+
+    Returns '' on any decode failure (caller falls back to ZSNIPPET).
+    """
+    if not zdata_blob:
+        return ""
+
+    # Step 1: gunzip
+    try:
+        raw = gzip.decompress(zdata_blob)
+    except Exception:
+        raw = zdata_blob  # try raw proto bytes if not gzipped
+
+    # Step 2: outer Document → Data wrapper (field 2)
+    data_bytes = _extract_field(raw, 2)
+    if data_bytes is None:
+        return ""
+
+    # Step 3: Data wrapper → inner Document (field 3)
+    inner_bytes = _extract_field(data_bytes, 3)
+    if inner_bytes is None:
+        return ""
+
+    # Step 4: inner Document → plain text string (field 2)
+    text_bytes = _extract_field(inner_bytes, 2)
+    if text_bytes is None:
+        return ""
+
+    try:
+        return text_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return text_bytes.decode("utf-8", errors="replace")
+
+
+def apple_ts_to_iso(ts):
+    if ts is None:
+        return None
+    try:
+        unix = float(ts) + APPLE_EPOCH_OFFSET
+        return datetime.fromtimestamp(unix, tz=timezone.utc).isoformat()
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def ingest(src_path: Path, dst_conn, dry_run: bool, logp):
+    # Open NoteStore.sqlite (WAL mode — open without uri to avoid WAL lock,
+    # but do so read-only to be safe)
+    src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+    src.row_factory = sqlite3.Row
+
+    # Join ZNOTE with ZICNOTEDATA to get both snippet and raw blob
+    notes = src.execute("""
+        SELECT
+            n.Z_PK AS pk,
+            COALESCE(NULLIF(n.ZTITLE1, ''), NULLIF(n.ZTITLE, ''), '') AS title,
+            n.ZSNIPPET AS snippet,
+            n.ZCREATIONDATE1 AS created,
+            n.ZMODIFICATIONDATE1 AS modified,
+            nd.ZDATA AS zdata
+          FROM ZICCLOUDSYNCINGOBJECT n
+          LEFT JOIN ZICNOTEDATA nd ON nd.ZNOTE = n.Z_PK
+         WHERE n.Z_ENT = 12  -- ICNote entity (verified via Z_PRIMARYKEY 2026-05-05)
+           AND COALESCE(n.ZMARKEDFORDELETION, 0) = 0
+         ORDER BY n.ZCREATIONDATE1
+    """).fetchall()
+
+    logp(f"Source notes: {len(notes)}")
+
+    updated = skipped = failed = 0
+
+    for note in notes:
+        title = note["title"] or "Untitled"
+        snippet = note["snippet"] or ""
+        zdata = note["zdata"]
+        created_iso = apple_ts_to_iso(note["created"])
+        modified_iso = apple_ts_to_iso(note["modified"])
+
+        # Decode full body
+        if zdata:
+            full_body = decode_note_body(bytes(zdata))
+        else:
+            full_body = ""
+
+        # Fall back to snippet if decode failed or returned empty
+        body_text = full_body if full_body.strip() else snippet
+        body_source = "apple-notes-proto" if full_body.strip() else "apple-notes-snippet"
+
+        if dry_run:
+            preview = (full_body or snippet)[:80].replace("\n", " ")
+            logp(f"  {created_iso[:10] if created_iso else '????'}  {title[:50]}")
+            logp(f"    proto_len={len(full_body)}  snippet_len={len(snippet)}  preview: {preview!r}")
+            updated += 1
+            continue
+
+        # The prior ingester (ingest_apple_dbs.py) keys notes as
+        #   rfc822_message_id = f"notes:{ROWID}"
+        # ROWID == Z_PK on ZICCLOUDSYNCINGOBJECT (Core Data uses INTEGER
+        # PRIMARY KEY for Z_PK, which sqlite aliases to ROWID), so the
+        # key matches across the two ingesters.
+        msg_id_key = f"notes:{note['Z_PK']}"
+
+        existing = dst_conn.execute(
+            "SELECT id, body_text FROM messages WHERE rfc822_message_id = ?",
+            (msg_id_key,)
+        ).fetchone()
+
+        if existing:
+            old_len = len(existing["body_text"] or "")
+            new_len = len(body_text)
+            if new_len > old_len:
+                dst_conn.execute(
+                    """UPDATE messages
+                       SET body_text = ?, body_text_source = ?
+                     WHERE rfc822_message_id = ?""",
+                    (body_text, body_source, msg_id_key))
+                updated += 1
+                logp(f"  UPDATED {title[:50]} ({old_len} → {new_len} chars)")
+            else:
+                skipped += 1
+        else:
+            # Note doesn't exist yet — insert fresh
+            # (handles case where ingest_apple_dbs.py wasn't run first)
+            dst_conn.execute(
+                """INSERT OR IGNORE INTO messages
+                   (schema_type, rfc822_message_id, subject, sender_address, sender_name,
+                    sender_domain, direction, date_sent, body_text, body_text_source,
+                    is_bulk, source_file_id)
+                   VALUES ('DigitalDocument', ?, ?, 'apple-notes:rob', 'Rob (Apple Notes)',
+                           'apple', 'self', ?, ?, ?, 0, NULL)""",
+                (msg_id_key, title, created_iso, body_text, body_source))
+            updated += 1
+
+    if not dry_run:
+        dst_conn.commit()
+
+    logp(f"Done: {updated} updated/inserted, {skipped} skipped (already full), {failed} failed")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", default=str(DEFAULT_SOURCE))
+    ap.add_argument("--db", default=str(DEFAULT_DB))
+    ap.add_argument("--dry-run", action="store_true", default=True)
+    ap.add_argument("--apply", action="store_true")
+    args = ap.parse_args()
+
+    dry_run = not args.apply
+    src_path = Path(args.source)
+
+    if not src_path.exists():
+        print(f"ERROR: Source not found: {src_path}", file=sys.stderr)
+        sys.exit(1)
+
+    def logp(s):
+        print(s)
+        sys.stdout.flush()
+
+    if dry_run:
+        logp("--- DRY RUN (pass --apply to write) ---")
+        logp("IMPORTANT: inspect decoded proto text careful

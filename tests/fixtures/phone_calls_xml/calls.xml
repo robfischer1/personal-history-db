@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<calls count="6">
+  <call number="+15551234567" duration="120" date="1700000000000" type="1" contact_name="Jane Doe" />
+  <call number="+15551234567" duration="60" date="1700001000000" type="2" contact_name="Jane Doe" />
+  <call number="+15559876543" duration="0" date="1700002000000" type="3" contact_name="Bob Smith" />
+  <call number="+15550000000" duration="45" date="1700003000000" type="4" contact_name="(Unknown)" />
+  <call number="+15551111111" duration="0" date="1700004000000" type="5" contact_name="Spam Caller" />
+  <call number="+15552222222" duration="0" date="1700005000000" type="6" contact_name="Refused Name" />
+</calls>

@@ -1,0 +1,44 @@
+[
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "bulk001@example.com",
+    "is_bulk": 1,
+    "bulk_signal": "list-unsubscribe",
+    "body_text_length_max": 280
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "bulk002@example.com",
+    "is_bulk": 1,
+    "bulk_signal": "list-id",
+    "body_text_length_max": 280
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "bulk003@example.com",
+    "is_bulk": 1,
+    "bulk_signal": "precedence",
+    "body_text_length_max": 280
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "bulk004@example.com",
+    "is_bulk": 1,
+    "bulk_signal": "auto-submitted",
+    "body_text_length_max": 280
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "bulk005@example.com",
+    "is_bulk": 1,
+    "bulk_signal": "x-auto-response-suppress",
+    "body_text_length_max": 280
+  },
+  {
+    "schema_type": "EmailMessage",
+    "rfc822_message_id": "bulk006@example.com",
+    "is_bulk": 1,
+    "bulk_signal": "noreply-pattern",
+    "body_text_length_max": 280
+  }
+]
