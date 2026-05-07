@@ -466,7 +466,7 @@ def parse_session_buddy_json(path: Path) -> Iterator[dict[str, object]]:
 
 
 def parse_safari_db(path: Path) -> Iterator[dict[str, object]]:
-    con = sqlite3.connect(str(path))
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         rows = con.execute(
             """SELECT id, parent, type, title, url, added, last_modified

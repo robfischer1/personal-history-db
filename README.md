@@ -1,30 +1,74 @@
 # personal-history-db
 
-A framework for ingesting, deduplicating, and querying personal communication archives in SQLite.
+A framework for ingesting, deduplicating, embedding, and querying personal digital history across dozens of source formats — email archives, chat logs, social media exports, phone backups, fitness trackers, and more.
 
-## Architecture
+Built around SQLite + [sqlite-vec](https://github.com/asg017/sqlite-vec) for hybrid semantic + keyword search with reciprocal-rank fusion. Ships as both a CLI tool and an [MCP](https://modelcontextprotocol.io/) server for integration with AI assistants.
 
-Three-tier separation:
+## Features
 
-- **Project** (`src/phdb/`) — publishable framework code, adapters, migrations 0001-0999
-- **Instance** (external) — PII-bearing config (identity, API keys), migrations 1000+
-- **Data** (external) — SQLite database, embeddings, source files
+- **32 adapters** covering Gmail mbox, iMessage, Discord, Facebook, Apple Health, Google Takeout (Fit, Timeline, Voice, Activity, Drive, Contacts), Spotify, Goodreads, Strong, Raindrop bookmarks, phone SMS/MMS/call logs, Apple Notes, OneDrive, and more
+- **Hybrid retrieval** — vec0 semantic search + FTS5 keyword search + reciprocal-rank fusion (RRF)
+- **Three-tier architecture** — publishable project code (no PII), private instance config (identity, API keys), and data directory (DB, source files) live in separate directories
+- **Dedup strategies** — RFC822 Message-ID, platform-synthetic keys, source-position, content-hash
+- **Direction inference** — automatic inbound/outbound/self classification using owner identity config
+- **Embedding pipeline** — chunking, batched Ollama embedding (nomic-embed-text, 768-dim), cross-process write lock
+- **MCP server** — 11 tools for AI-assistant integration (search, lookups, stats, people queries)
+- **Dry-run by default** — all ingest commands require `--apply` for real writes
 
 ## Quickstart
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+# Clone and install
+git clone https://github.com/robfischer1/personal-history-db.git
+cd personal-history-db
+uv venv && uv pip install -e ".[dev]"
 
-# Apply migrations to a new database
-phdb migrate --db path/to/history.db
+# Create a database with schema migrations
+phdb migrate --db my-history.db
 
-# Run an adapter
-phdb ingest path/to/export.mbox --adapter mbox --db path/to/history.db
+# Ingest a Gmail mbox export (dry-run first)
+phdb ingest ~/takeout/All\ mail.mbox --adapter mbox --db my-history.db --dry-run
+phdb ingest ~/takeout/All\ mail.mbox --adapter mbox --db my-history.db --apply
 
-# Check database stats
-phdb stats --db path/to/history.db
+# Check what's in the database
+phdb stats --db my-history.db
+
+# Semantic search (requires Ollama running with nomic-embed-text)
+phdb query "that conversation about moving to New York" --db my-history.db
 ```
+
+See [docs/fresh-start.md](docs/fresh-start.md) for a complete zero-to-query walkthrough.
+
+## Architecture
+
+```
+personal-history-db/          # Project tier (this repo) — no PII
+├── src/phdb/
+│   ├── cli.py                # Click CLI: migrate, ingest, stats, query, embed
+│   ├── db.py                 # SQLite connection factory (WAL, pragmas, sqlite-vec)
+│   ├── settings.py           # Three-tier config: defaults → TOML → env vars
+│   ├── query.py              # Hybrid search, lookups, discovery, people queries
+│   ├── embed_pipeline.py     # Chunking + batched Ollama embedding
+│   ├── embed_service.py      # Ollama HTTP client
+│   ├── writelock.py          # Cross-process file lock for DB writes
+│   ├── adapters/             # 32 source-format adapters
+│   │   ├── base.py           # Adapter ABC + AdapterRow + DedupStrategy
+│   │   ├── loader.py         # Dynamic adapter discovery
+│   │   └── mbox.py ...       # One file per source format
+│   └── migrations/project/   # Schema migrations 0001–0999
+├── server.py                 # MCP server (thin wrapper around query.py)
+└── tests/                    # 563 tests, all synthetic fixtures
+
+personal-history-instance/    # Instance tier (private) — owner identity, paths
+├── identity.toml             # Emails, phones, names for direction inference
+├── paths.toml                # DB path, adapter search paths
+└── embedding.toml            # Model name, endpoint, dimensions
+
+personal-history-data/        # Data tier (private) — the actual database
+└── personal-history.db       # SQLite + sqlite-vec (WAL mode)
+```
+
+See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Writing an adapter
 
@@ -49,16 +93,35 @@ class MyAdapter(Adapter):
             )
 ```
 
-The `run()` method handles source registration, batching, dedup, direction inference, and commit.
+See [docs/writing-an-adapter.md](docs/writing-an-adapter.md) for the full guide.
+
+## MCP server
+
+The MCP server exposes 11 tools for AI assistants (Claude Code, Claude Desktop, etc.):
+
+`search`, `get_message`, `get_chunk`, `get_thread`, `list_sources`, `corpus_stats`, `nearest_neighbors`, `server_info`, `find_messages_by_participant`, `find_threads_by_subject`, `top_correspondents`
+
+See [docs/configuration.md](docs/configuration.md) for setup instructions.
 
 ## Development
 
 ```bash
-pytest                    # run tests
-ruff check src/ tests/    # lint
-mypy src/                 # type check
+uv run pytest                  # 563 tests
+uv run ruff check src/ tests/  # lint
+uv run mypy src/               # type check
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — three-tier design, module map, data flow
+- [Configuration](docs/configuration.md) — TOML settings, env vars, MCP server setup
+- [Writing an Adapter](docs/writing-an-adapter.md) — adapter contract, dedup strategies, testing
+- [Fresh Start](docs/fresh-start.md) — zero-to-query walkthrough for new adopters
+- [Database Schema](CURRENT-SCHEMA.md) — table definitions and relationships
+- [MCP Contract](MCP-CONTRACT.md) — MCP tool signatures and behavior
 
 ## License
 
-MIT
+[MIT](LICENSE)

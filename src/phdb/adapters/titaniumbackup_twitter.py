@@ -21,8 +21,7 @@ from phdb.log import get_logger
 
 log = get_logger("phdb.adapters.titaniumbackup_twitter")
 
-DEFAULT_OWNER_USER_ID = 72437370
-DEFAULT_DB_FILENAME = "72437370.db"
+DEFAULT_DB_FILENAME = "*.db"
 
 
 def _epoch_ms_to_iso(ms: int | None) -> str | None:
@@ -77,7 +76,7 @@ class TitaniumBackupTwitterAdapter(Adapter):
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
     batch_size = 500
 
-    owner_user_id: int = DEFAULT_OWNER_USER_ID
+    owner_user_id: int = 0
     db_filename: str = DEFAULT_DB_FILENAME
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:

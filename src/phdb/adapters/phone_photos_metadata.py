@@ -129,7 +129,7 @@ class PhonePhotosMetadataAdapter(Adapter):
             schema_type="Photograph",
             rfc822_message_id=msg_id_key,
             subject=fname[:200],
-            sender_address="phone-camera:rob",
+            sender_address=self.owner_sender("phone-camera")[0],
             sender_name="phone-camera",
             direction="self",
             date_sent=date_iso,

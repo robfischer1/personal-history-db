@@ -16,7 +16,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from phdb.db import VECTOR_DIM
 from phdb.embed_service import EmbedClient
 
 # ---- Chunking constants (match legacy embed_messages.py exactly) ----
@@ -215,7 +214,7 @@ def run_embed_pipeline(
                     (msg_id, cidx, title, content, chash, meta, client.model, now),
                 )
                 doc_id = cur.fetchone()[0]
-                vec_blob = struct.pack(f"{VECTOR_DIM}f", *emb)
+                vec_blob = struct.pack(f"{client.dim}f", *emb)
                 conn.execute("DELETE FROM doc_vectors WHERE rowid = ?", (doc_id,))
                 conn.execute(
                     "INSERT INTO doc_vectors (rowid, embedding) VALUES (?, ?)",

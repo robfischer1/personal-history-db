@@ -132,7 +132,7 @@ class PhonePhotosAdapter(Adapter):
                 schema_type="Photograph",
                 rfc822_message_id=f"phone-camera:{raw_hash}",
                 subject=p.name[:200],
-                sender_address="phone-camera:rob",
+                sender_address=self.owner_sender("phone-camera")[0],
                 sender_name="phone-camera",
                 direction="self",
                 date_sent=date_iso,

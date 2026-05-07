@@ -209,7 +209,7 @@ class PhoneSmsAdapter(Adapter):
     batch_size = 500
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
-        src = sqlite3.connect(str(source_path))
+        src = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
         source_label = source_path.name
         try:
             yield from _iter_sms(src, source_label)

@@ -11,11 +11,11 @@ import hashlib
 import re
 import zipfile
 from collections.abc import Iterator
-from datetime import datetime
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from phdb.adapters._facebook_utils import parse_fb_timestamp as _parse_fb_timestamp
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy
 from phdb.log import get_logger
 
@@ -32,21 +32,6 @@ _POSTS_THREAD_BUCKETS: dict[str, str] = {
     "1.html": "Profile Pictures",
     "0.html": "Photos",
 }
-_FB_TS_RE = re.compile(
-    r"^([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+(?:am|pm))$"
-)
-
-
-def _parse_fb_timestamp(text: str | None) -> str | None:
-    if not text:
-        return None
-    s = text.strip()
-    if not _FB_TS_RE.match(s):
-        return None
-    try:
-        return datetime.strptime(s, "%b %d, %Y %I:%M:%S %p").isoformat()
-    except ValueError:
-        return None
 
 
 def _parse_post_html(html: str) -> Iterator[dict[str, object]]:

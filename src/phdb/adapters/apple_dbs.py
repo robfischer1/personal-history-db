@@ -304,8 +304,6 @@ def _iter_notes(src_dir: Path) -> Iterator[AdapterRow]:
     src.close()
 
 
-HANDLERS: dict[str, tuple[str, type[Iterator[AdapterRow]]]] = {}
-
 _HANDLER_FUNCS = {
     "callhistory": _iter_callhistory,
     "voicemail": _iter_voicemail,

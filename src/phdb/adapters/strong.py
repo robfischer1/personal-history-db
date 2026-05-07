@@ -88,7 +88,7 @@ class StrongAdapter(Adapter):
     batch_size = 500
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
-        src = sqlite3.connect(str(source_path))
+        src = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
         try:
             workouts = src.execute(
                 """SELECT Z_PK, ZSTARTDATE, ZCOMPLETIONDATE, ZNAME, ZNOTES,

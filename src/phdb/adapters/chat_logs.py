@@ -550,7 +550,7 @@ class ChatLogsAdapter(Adapter):
         my = str(session.get("my_handle") or "unknown")
         remote = str(session.get("remote_handle") or "unknown")
         start = str(session.get("start_ts") or session.get("session_date") or "unknown")
-        path_hash = hashlib.md5(f"{file_relpath}#sess{session_index}".encode()).hexdigest()[:8]
+        path_hash = hashlib.sha256(f"{file_relpath}#sess{session_index}".encode()).hexdigest()[:8]
         thread_key = f"{proto}:{my}:{remote}:{start}:{path_hash}"
 
         msgs_list = session.get("messages")

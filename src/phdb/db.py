@@ -15,6 +15,26 @@ from pathlib import Path
 VECTOR_DIM = 768
 
 
+def _apply_pragmas(conn: sqlite3.Connection) -> None:
+    """Apply the standard pragma set to a connection."""
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA mmap_size = 268435456")
+    conn.execute("PRAGMA cache_size = -65536")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.row_factory = sqlite3.Row
+
+
+def _load_vec_ext(conn: sqlite3.Connection) -> None:
+    """Load the sqlite-vec extension."""
+    conn.enable_load_extension(True)
+    import sqlite_vec  # type: ignore[import-untyped]
+
+    sqlite_vec.load(conn)
+
+
 @contextmanager
 def connect(
     db_path: Path | str,
@@ -36,21 +56,10 @@ def connect(
     )
 
     try:
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        conn.execute("PRAGMA temp_store = MEMORY")
-        conn.execute("PRAGMA mmap_size = 268435456")
-        conn.execute("PRAGMA cache_size = -65536")
-        conn.execute("PRAGMA busy_timeout = 30000")
-        conn.execute("PRAGMA foreign_keys = ON")
-
-        conn.row_factory = sqlite3.Row
+        _apply_pragmas(conn)
 
         if load_vec:
-            conn.enable_load_extension(True)
-            import sqlite_vec  # type: ignore[import-untyped]
-
-            sqlite_vec.load(conn)
+            _load_vec_ext(conn)
 
         yield conn
     finally:
@@ -70,20 +79,10 @@ def connect_persistent(
     access.
     """
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA temp_store = MEMORY")
-    conn.execute("PRAGMA mmap_size = 268435456")
-    conn.execute("PRAGMA cache_size = -65536")
-    conn.execute("PRAGMA busy_timeout = 30000")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row
+    _apply_pragmas(conn)
 
     if load_vec:
-        conn.enable_load_extension(True)
-        import sqlite_vec
-
-        sqlite_vec.load(conn)
+        _load_vec_ext(conn)
 
     return conn
 

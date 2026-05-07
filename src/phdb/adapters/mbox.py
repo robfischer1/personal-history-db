@@ -7,7 +7,7 @@ for performance on multi-GB files. Handles resume via byte offsets.
 from __future__ import annotations
 
 import contextlib
-import email.policy
+import email.message
 import hashlib
 import json
 import re

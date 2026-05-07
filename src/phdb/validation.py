@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from phdb.settings import Settings
 
-VECTOR_DIM_DEFAULT = 768
+from phdb.db import VECTOR_DIM as VECTOR_DIM_DEFAULT
 
 
 def validate_instance(settings: Settings) -> list[str]:

@@ -103,7 +103,7 @@ class TestOneDriveIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             addrs = conn.execute("SELECT DISTINCT sender_address FROM messages").fetchall()
-        assert all(a[0] == "onedrive:rob" for a in addrs)
+        assert all(a[0] == "onedrive:test user" for a in addrs)
 
     def test_message_thread_bridge(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)

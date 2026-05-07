@@ -127,6 +127,18 @@ class Adapter(ABC):
     schema_type: str = "Message"
     dedup_strategy: DedupStrategy = DedupStrategy.CONTENT_HASH
     batch_size: int = 500
+    _settings: Settings | None = None
+
+    def owner_sender(self, platform: str) -> tuple[str, str]:
+        """Return (sender_address, sender_name) for the database owner.
+
+        Uses the first entry in IdentitySettings.owner_names when available,
+        falls back to "owner" when no identity is configured.
+        """
+        if self._settings and self._settings.identity.owner_names:
+            name = next(iter(self._settings.identity.owner_names))
+            return f"{platform}:{name.lower()}", name
+        return f"{platform}:owner", "owner"
 
     @abstractmethod
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
@@ -274,6 +286,7 @@ class Adapter(ABC):
             source_file_id=0,
         )
 
+        self._settings = settings
         source_file_id = self._register_source(conn, source_path)
         report.source_file_id = source_file_id
         log.info("[%s] Source registered: id=%d path=%s", self.name, source_file_id, source_path)
