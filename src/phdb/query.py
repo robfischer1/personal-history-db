@@ -177,7 +177,7 @@ def _hydrate(
         f"SELECT d.id AS doc_id, d.source_table, d.source_id, d.title, d.content,"
         f" d.chunk_index, d.schema_type AS doc_schema_type,"
         f" m.id AS msg_id, m.subject, m.sender_address, m.sender_name,"
-        f" m.date_sent, m.direction, m.gmail_thread_id, m.is_bulk"
+        f" m.date_sent, m.direction, m.gmail_thread_id, m.is_bulk, m.kind"
         f" FROM documents d"
         f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
         f" WHERE d.id IN ({placeholders})",
@@ -217,6 +217,7 @@ def _hydrate(
             "direction": _g(r, "direction", 12),
             "thread_id": _g(r, "gmail_thread_id", 13),
             "is_bulk": bool(is_bulk_raw) if is_bulk_raw is not None else None,
+            "kind": _g(r, "kind", 15),
         })
     return out
 
@@ -278,6 +279,7 @@ def search(
     until: str | None = None,
     mode: str = "hybrid",
     include_bulk: bool = False,
+    include_meta: bool = False,
     year_normalize: bool = False,
     snippet_chars: int = 240,
 ) -> dict[str, Any]:
@@ -331,6 +333,9 @@ def search(
 
     if not include_bulk:
         rows = [r for r in rows if not r.get("is_bulk")]
+
+    if not include_meta:
+        rows = [r for r in rows if r.get("kind") in (None, "message")]
 
     rows = rows[:k]
     for r in rows:

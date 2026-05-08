@@ -184,6 +184,78 @@ All three are siblings of the vault, sharing the `~\Obsidian\` parent.
 
 (None — Phase 0 questions all resolved 2026-05-06.)
 
+---
+
+## AI Sessions — Phase 0 decisions
+
+Resolved 2026-05-08, Rob + Sonnet. See `AI_SESSIONS_PLAN.md §Phase 0 decisions` for context.
+
+### 2026-05-08 — AI-01: Attachment policy for Gemini-web
+
+**Status:** decided
+**Decided by:** Rob
+
+**Decision:** Register Gemini-web attachments as `source_kind='gemini-web-attachment'` references; defer body ingest.
+
+**Consequences:** Phase 3b attachment sub-step registers each of the 130 hash-suffixed files in `Gemini Apps/` as a reference row only. `thread_key=<branch-key>` assignment (conversation-level, not turn-level). Body ingest is explicitly out of scope for v1.
+
+---
+
+### 2026-05-08 — AI-02: Older 2026-03-07 takeout
+
+**Status:** decided
+**Decided by:** Rob
+
+**Decision:** Skip. The 2026-03-07 takeout zip has no Gemini Apps data stream.
+
+**Consequences:** Only the 2026-04-28 takeout (`MyActivity.html`) is in scope. No additional Gemini-web history to ingest.
+
+---
+
+### 2026-05-08 — AI-03: `branch_fork` rows in default MCP retrieval
+
+**Status:** decided
+**Decided by:** Rob
+
+**Decision:** Filter `kind='branch_fork'` rows from default MCP search. Expose via `include_fork_markers=true` flag if needed.
+
+**Consequences:** Phase 5 retrieval default-filter excludes `kind IN ('branch_fork', 'summary', 'sidechain', 'system_event')`. Fork markers are plumbing, not retrievable content.
+
+---
+
+### 2026-05-08 — AI-04: Un-landmarked Gemini conversations disposition
+
+**Status:** decided
+**Decided by:** Rob
+
+**Decision:** Triage report. Rob reviews each un-landmarked conversation and decides per-conversation: stub-landmark / DB-only / drop.
+
+**Consequences:** Phase 3c produces a triage report of all `MyActivity.html` `Prompted` cells that don't match any landmark. No auto-absorption or auto-stubs. Rob must review before retirement.
+
+---
+
+### 2026-05-08 — AI-05: `kind` value for system events
+
+**Status:** decided
+**Decided by:** Rob
+
+**Decision:** `'system_event'` as the `kind` value for Gemini system events (`Created`, `Gave`, etc.).
+
+**Consequences:** System events are `is_bulk=1`, `kind='system_event'`. Filtered from default MCP retrieval (covered by AI-03 filter).
+
+---
+
+### 2026-05-08 — AI-06: Embedding policy for `kind='branch_fork'`
+
+**Status:** decided
+**Decided by:** Rob
+
+**Decision:** `is_bulk=1` for `kind='branch_fork'` rows. No embedding.
+
+**Consequences:** Only `kind='message'` rows are `is_bulk=0` and queued for embedding. All meta-kinds (`branch_fork`, `summary`, `sidechain`, `system_event`, `tool_use`, `tool_result`) are `is_bulk=1`.
+
+---
+
 ## Superseded
 
 (None yet.)

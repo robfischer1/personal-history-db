@@ -123,6 +123,7 @@ def search(
     until: str | None = None,
     mode: str = "hybrid",
     include_bulk: bool = False,
+    include_meta: bool = False,
 ) -> dict[str, Any]:
     """Hybrid retrieval over Rob's personal history corpus.
 
@@ -140,12 +141,16 @@ def search(
         mode: "hybrid" (default), "semantic", or "fts".
         include_bulk: If False (default), filters out is_bulk=1 messages
                       (mailing lists, no-reply, etc.) from results.
+        include_meta: If False (default), filters out AI session meta-turns
+                      (tool_use, tool_result, sidechain) — only kind='message'
+                      and non-AI rows are returned. Pass True to include all
+                      turn kinds for debugging session content.
 
     Returns:
         {"query": str, "mode": str, "since": str, "until": str | None,
          "fts_mode": str, "n_semantic": int, "n_fts": int,
          "results": [{doc_id, msg_id, date, sender, subject, thread_id,
-                      snippet, ...}]}
+                      snippet, kind, ...}]}
     """
     effective_since = since
     if effective_since is None and mode == "hybrid":
@@ -163,6 +168,7 @@ def search(
         until=until,
         mode=mode,
         include_bulk=include_bulk,
+        include_meta=include_meta,
     )
 
 

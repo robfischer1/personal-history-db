@@ -414,3 +414,91 @@ class TestTopCorrespondents:
     def test_since_filter(self, query_db: sqlite3.Connection) -> None:
         result = top_correspondents(query_db, since="2025", exclude_self=False)
         assert len(result["correspondents"]) == 0
+
+
+# ===================================================================
+# kind field + include_meta filter (AI sessions)
+# ===================================================================
+
+def _seed_ai_session(conn: sqlite3.Connection) -> None:
+    """Add synthetic AI session rows with different kind values."""
+    conn.execute(
+        "INSERT INTO source_files (id, source_path, source_org, file_kind, message_count)"
+        " VALUES (2, '/test/session.jsonl', 'claude-code', 'jsonl', 3)"
+    )
+    ai_msgs = [
+        (10, "Conversation", None, None, None,
+         None, None, None, "self",
+         "2026-04-16T10:00:00Z", "What is the capital of France?", 0, 2, 0,
+         "message", "user"),
+        (11, "Conversation", None, None, None,
+         None, None, None, "self",
+         "2026-04-16T10:00:01Z", "Paris is the capital of France.", 0, 2, 0,
+         "message", "assistant"),
+        (12, "Conversation", None, None, None,
+         None, None, None, "self",
+         "2026-04-16T10:00:02Z", "thinking about capital cities", 1, 2, 0,
+         "sidechain", "assistant"),
+    ]
+    for m in ai_msgs:
+        conn.execute(
+            "INSERT INTO messages (id, schema_type, rfc822_message_id, gmail_thread_id,"
+            " subject, sender_address, sender_name, sender_domain, direction,"
+            " date_sent, body_text, is_bulk, source_file_id, attachment_count,"
+            " kind, role)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", m
+        )
+    ai_docs = [
+        (10, "Conversation", "messages", 10, 0, "message_body_512tok",
+         None, "What is the capital of France?"),
+        (11, "Conversation", "messages", 11, 0, "message_body_512tok",
+         None, "Paris is the capital of France."),
+        (12, "Conversation", "messages", 12, 0, "message_body_512tok",
+         None, "thinking about capital cities"),
+    ]
+    for d in ai_docs:
+        conn.execute(
+            "INSERT INTO documents (id, schema_type, source_table, source_id,"
+            " chunk_index, chunk_strategy, title, content)"
+            " VALUES (?,?,?,?,?,?,?,?)", d
+        )
+
+
+@pytest.fixture
+def ai_session_db(tmp_path: Path) -> sqlite3.Connection:
+    """DB with both email messages and AI session rows with different kinds."""
+    db_path = tmp_path / "ai_session_test.db"
+    with connect(db_path, load_vec=True) as conn:
+        runner = MigrationRunner(conn)
+        runner.apply_pending()
+        ensure_vec_table(conn)
+        _seed(conn)
+        _seed_ai_session(conn)
+        conn.commit()
+        yield conn
+
+
+class TestKindFilter:
+    def test_kind_field_in_results(self, ai_session_db: sqlite3.Connection) -> None:
+        result = search(ai_session_db, "capital France", mode="fts", include_meta=True)
+        kinds = {r.get("kind") for r in result["results"]}
+        assert "message" in kinds
+
+    def test_sidechain_excluded_by_default(self, ai_session_db: sqlite3.Connection) -> None:
+        result = search(ai_session_db, "thinking capital cities", mode="fts")
+        kinds = [r.get("kind") for r in result["results"]]
+        assert "sidechain" not in kinds
+
+    def test_sidechain_included_with_include_meta(self, ai_session_db: sqlite3.Connection) -> None:
+        result = search(
+            ai_session_db, "thinking capital cities", mode="fts",
+            include_bulk=True, include_meta=True,
+        )
+        kinds = [r.get("kind") for r in result["results"]]
+        assert "sidechain" in kinds
+
+    def test_message_kind_passes_default_filter(self, ai_session_db: sqlite3.Connection) -> None:
+        result = search(ai_session_db, "capital France", mode="fts")
+        assert len(result["results"]) >= 1
+        for r in result["results"]:
+            assert r.get("kind") in (None, "message")

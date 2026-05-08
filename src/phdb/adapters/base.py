@@ -65,6 +65,19 @@ class AdapterRow:
     raw_hash: str | None = None
     body_text_hash: str | None = None
 
+    # AI session message fields (all default None — ignored by existing adapters)
+    kind: str | None = None
+    role: str | None = None
+    parent_uuid: str | None = None
+    tool_name: str | None = None
+    tool_use_id: str | None = None
+    model: str | None = None
+    payload: str | None = None  # JSON
+
+    # AI session thread fields
+    thread_metadata: str | None = None  # JSON
+    thread_cwd: str | None = None
+
     recipients: list[dict[str, str]] = field(default_factory=list)
     attachments: list[dict[str, str | int | None]] = field(default_factory=list)
     thread_key: str | None = None
@@ -95,7 +108,8 @@ INSERT OR IGNORE INTO messages (
     is_multipart, has_attachments, attachment_count,
     is_bulk, bulk_signal,
     source_file_id, source_byte_offset, source_byte_length,
-    raw_hash, body_text_hash
+    raw_hash, body_text_hash,
+    kind, role, parent_uuid, tool_name, tool_use_id, model, payload
 ) VALUES (
     ?, ?, ?, ?,
     ?, ?,
@@ -105,7 +119,8 @@ INSERT OR IGNORE INTO messages (
     ?, ?, ?,
     ?, ?,
     ?, ?, ?,
-    ?, ?
+    ?, ?,
+    ?, ?, ?, ?, ?, ?, ?
 )"""
 
 _INSERT_RECIPIENT_SQL = """\
@@ -198,6 +213,8 @@ class Adapter(ABC):
                 row.is_bulk, row.bulk_signal,
                 source_file_id, row.source_byte_offset, row.source_byte_length,
                 row.raw_hash, row.body_text_hash,
+                row.kind, row.role, row.parent_uuid, row.tool_name, row.tool_use_id,
+                row.model, row.payload,
             ),
         )
         if cur.rowcount == 0:
@@ -232,6 +249,8 @@ class Adapter(ABC):
         conn: sqlite3.Connection,
         thread_key: str,
         participants: list[str] | None = None,
+        metadata: str | None = None,
+        cwd: str | None = None,
     ) -> tuple[int, bool]:
         """Find or create a thread by (source_kind, thread_key). Returns (thread_id, created)."""
         existing = conn.execute(
@@ -241,9 +260,15 @@ class Adapter(ABC):
         if existing:
             return existing[0], False
         cur = conn.execute(
-            """INSERT INTO threads (schema_type, source_kind, thread_key, message_count, participants)
-               VALUES ('Conversation', ?, ?, 0, ?)""",
-            (self.source_kind, thread_key, json.dumps(sorted(participants)) if participants else None),
+            """INSERT INTO threads (schema_type, source_kind, thread_key, message_count,
+                                   participants, metadata, cwd)
+               VALUES ('Conversation', ?, ?, 0, ?, ?, ?)""",
+            (
+                self.source_kind, thread_key,
+                json.dumps(sorted(participants)) if participants else None,
+                metadata,
+                cwd,
+            ),
         )
         return cur.lastrowid, True  # type: ignore[return-value]
 
@@ -324,7 +349,11 @@ class Adapter(ABC):
             self._insert_sidecars(conn, message_id, row)
 
             if row.thread_key:
-                thread_id, created = self._upsert_thread(conn, row.thread_key)
+                thread_id, created = self._upsert_thread(
+                    conn, row.thread_key,
+                    metadata=row.thread_metadata,
+                    cwd=row.thread_cwd,
+                )
                 self._link_message_thread(conn, message_id, thread_id)
                 if created:
                     report.threads_created += 1
