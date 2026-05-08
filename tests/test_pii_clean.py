@@ -18,7 +18,13 @@ PII_PATTERNS = [
     re.compile(r"\b<owner-name>\b"),
     re.compile(r"\b<owner-handle>\b", re.IGNORECASE),
     re.compile(r"C:\\Users\\<owner>", re.IGNORECASE),
-    re.compile(r"D:\\04 Archives", re.IGNORECASE),
+    re.compile(r"D:\\04 Archives", re.IGNORECASE),  # legacy path — guard kept post-2026-05-08 migration
+    re.compile(r"D:\\Records", re.IGNORECASE),
+    re.compile(r"D:\\Outputs", re.IGNORECASE),
+    re.compile(r"D:\\Photos", re.IGNORECASE),
+    re.compile(r"D:\\Reference", re.IGNORECASE),
+    re.compile(r"D:\\Software", re.IGNORECASE),
+    re.compile(r"D:\\Games", re.IGNORECASE),
 ]
 
 
