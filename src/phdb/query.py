@@ -79,22 +79,23 @@ def _date_filter_ids(
     since: str | None,
     until: str | None,
 ) -> set[int]:
-    """Filter doc IDs by the date_sent of their parent message."""
+    """Filter chunk IDs by the date of their parent row (messages or documents)."""
     if not (since or until) or not ids:
         return set(ids)
     placeholders = ",".join("?" * len(ids))
     args: list[Any] = list(ids)
     clauses: list[str] = []
     if since:
-        clauses.append("substr(m.date_sent, 1, 10) >= ?")
+        clauses.append("substr(COALESCE(m.date_sent, doc.mtime), 1, 10) >= ?")
         args.append(since)
     if until:
-        clauses.append("substr(m.date_sent, 1, 10) <= ?")
+        clauses.append("substr(COALESCE(m.date_sent, doc.mtime), 1, 10) <= ?")
         args.append(until)
     where = " AND ".join(clauses)
     rows = conn.execute(
-        f"SELECT d.id AS doc_id FROM documents d"
-        f" JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        f"SELECT d.id AS doc_id FROM chunks d"
+        f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        f" LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
         f" WHERE d.id IN ({placeholders}) AND {where}",
         args,
     ).fetchall()
@@ -169,17 +170,26 @@ def _hydrate(
     doc_ids: list[int],
     snippet_chars: int = 240,
 ) -> list[dict[str, Any]]:
-    """Pull document + parent message metadata for a list of doc IDs."""
+    """Pull chunk + parent row metadata for a list of chunk IDs."""
     if not doc_ids:
         return []
     placeholders = ",".join(["?"] * len(doc_ids))
     rows = conn.execute(
         f"SELECT d.id AS doc_id, d.source_table, d.source_id, d.title, d.content,"
         f" d.chunk_index, d.schema_type AS doc_schema_type,"
-        f" m.id AS msg_id, m.subject, m.sender_address, m.sender_name,"
-        f" m.date_sent, m.direction, m.gmail_thread_id, m.is_bulk, m.kind"
-        f" FROM documents d"
+        f" COALESCE(m.id, doc.id) AS source_row_id,"
+        f" COALESCE(m.subject, doc.subject) AS subject,"
+        f" m.sender_address,"
+        f" COALESCE(m.sender_name, doc.bucket) AS sender_name,"
+        f" COALESCE(m.date_sent, doc.mtime) AS date_sent,"
+        f" m.direction,"
+        f" m.gmail_thread_id,"
+        f" COALESCE(m.is_bulk, doc.is_bulk) AS is_bulk,"
+        f" m.kind,"
+        f" doc.file_path, doc.bucket"
+        f" FROM chunks d"
         f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        f" LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
         f" WHERE d.id IN ({placeholders})",
         doc_ids,
     ).fetchall()
@@ -189,7 +199,7 @@ def _hydrate(
         r = by_id.get(did)
         if r is None:
             continue
-        # Support both Row and tuple access
+
         def _g(row: Any, key: str, idx: int) -> Any:
             try:
                 return row[key]
@@ -209,7 +219,7 @@ def _hydrate(
             "title": _g(r, "title", 3),
             "chunk_index": _g(r, "chunk_index", 5),
             "snippet": content.replace("\n", " ").strip()[:snippet_chars],
-            "msg_id": _g(r, "msg_id", 7),
+            "msg_id": _g(r, "source_row_id", 7),
             "subject": _g(r, "subject", 8),
             "sender": sender_name or sender_addr,
             "sender_address": sender_addr,
@@ -218,17 +228,21 @@ def _hydrate(
             "thread_id": _g(r, "gmail_thread_id", 13),
             "is_bulk": bool(is_bulk_raw) if is_bulk_raw is not None else None,
             "kind": _g(r, "kind", 15),
+            "file_path": _g(r, "file_path", 16),
+            "bucket": _g(r, "bucket", 17),
         })
     return out
 
 
 def _corpus_year_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    """Return {year_str: doc_count} for the entire embedded corpus."""
+    """Return {year_str: chunk_count} for the entire embedded corpus."""
     rows = conn.execute(
-        "SELECT substr(m.date_sent, 1, 4) AS year, COUNT(*) AS cnt"
-        " FROM documents d"
-        " JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
-        " WHERE m.date_sent IS NOT NULL AND length(m.date_sent) >= 4"
+        "SELECT substr(COALESCE(m.date_sent, doc.mtime), 1, 4) AS year, COUNT(*) AS cnt"
+        " FROM chunks d"
+        " LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        " LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
+        " WHERE COALESCE(m.date_sent, doc.mtime) IS NOT NULL"
+        " AND length(COALESCE(m.date_sent, doc.mtime)) >= 4"
         " GROUP BY year"
     ).fetchall()
     return {r[0]: r[1] for r in rows}
@@ -254,9 +268,10 @@ def _lookup_doc_years(
         return {}
     placeholders = ",".join(["?"] * len(doc_ids))
     rows = conn.execute(
-        f"SELECT d.id AS doc_id, substr(m.date_sent, 1, 4) AS year"
-        f" FROM documents d"
-        f" JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        f"SELECT d.id AS doc_id, substr(COALESCE(m.date_sent, doc.mtime), 1, 4) AS year"
+        f" FROM chunks d"
+        f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        f" LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
         f" WHERE d.id IN ({placeholders})",
         doc_ids,
     ).fetchall()
@@ -391,16 +406,16 @@ def get_message(
 
 
 def get_chunk(conn: sqlite3.Connection, doc_id: int) -> dict[str, Any]:
-    """Fetch the full content of a document chunk by documents.id."""
+    """Fetch the full content of a chunk by chunks.id."""
     row = conn.execute(
         "SELECT id, schema_type, source_table, source_id, chunk_index,"
         " chunk_strategy, title, content, metadata_json, embedding_model,"
         " embedded_at, created_at"
-        " FROM documents WHERE id = ?",
+        " FROM chunks WHERE id = ?",
         (doc_id,),
     ).fetchone()
     if row is None:
-        return {"error": f"No document with id={doc_id}"}
+        return {"error": f"No chunk with id={doc_id}"}
     out = dict(row)
     if out.get("metadata_json"):
         with contextlib.suppress(Exception):
@@ -446,21 +461,28 @@ def list_sources(conn: sqlite3.Connection) -> dict[str, Any]:
         " FROM source_files GROUP BY source_org, file_kind"
         " ORDER BY messages DESC NULLS LAST"
     ).fetchall()
-    docs = conn.execute(
+    chunk_stats = conn.execute(
         "SELECT source_table, COUNT(*) AS chunks,"
         " SUM(CASE WHEN embedded_at IS NOT NULL THEN 1 ELSE 0 END) AS embedded"
-        " FROM documents GROUP BY source_table ORDER BY chunks DESC"
+        " FROM chunks GROUP BY source_table ORDER BY chunks DESC"
     ).fetchall()
     totals = conn.execute(
         "SELECT (SELECT COUNT(*) FROM messages) AS messages,"
-        " (SELECT COUNT(*) FROM documents) AS documents,"
+        " (SELECT COUNT(*) FROM chunks) AS chunks,"
         " (SELECT COUNT(*) FROM doc_vectors) AS vectors,"
         " (SELECT COUNT(*) FROM threads) AS threads"
     ).fetchone()
+    doc_count = 0
+    with contextlib.suppress(sqlite3.OperationalError):
+        r = conn.execute("SELECT COUNT(*) FROM documents").fetchone()
+        if r:
+            doc_count = r[0]
+    t = dict(totals)
+    t["documents"] = doc_count
     return {
-        "totals": dict(totals),
+        "totals": t,
         "source_files": [dict(r) for r in sf],
-        "documents_by_table": [dict(r) for r in docs],
+        "chunks_by_table": [dict(r) for r in chunk_stats],
     }
 
 
@@ -553,7 +575,7 @@ def server_info(
         info["counts"] = dict(
             conn.execute(
                 "SELECT (SELECT COUNT(*) FROM messages) AS messages,"
-                " (SELECT COUNT(*) FROM documents) AS documents,"
+                " (SELECT COUNT(*) FROM chunks) AS chunks,"
                 " (SELECT COUNT(*) FROM doc_vectors) AS vectors"
             ).fetchone()
         )

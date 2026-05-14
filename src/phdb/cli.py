@@ -161,12 +161,12 @@ def stats(ctx: click.Context) -> None:
 
         click.echo("\nEmbedding status:")
         try:
-            total = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
-            embedded = conn.execute("SELECT count(*) FROM documents WHERE embedded_at IS NOT NULL").fetchone()[0]
+            total = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+            embedded = conn.execute("SELECT count(*) FROM chunks WHERE embedded_at IS NOT NULL").fetchone()[0]
             pct = (embedded / total * 100) if total else 0
-            click.echo(f"  {embedded:,} / {total:,} documents embedded ({pct:.1f}%)")
+            click.echo(f"  {embedded:,} / {total:,} chunks embedded ({pct:.1f}%)")
         except Exception:
-            click.echo("  (documents table not found)")
+            click.echo("  (chunks table not found)")
 
 
 @cli.command()

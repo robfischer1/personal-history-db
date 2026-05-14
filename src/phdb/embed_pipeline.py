@@ -1,7 +1,8 @@
-"""Embed pipeline — chunk messages, embed via Ollama, store in documents + doc_vectors.
+"""Embed pipeline — chunk source rows, embed via Ollama, store in chunks + doc_vectors.
 
 Ported from embed_messages.py (322 LOC standalone script).  Requires:
-- A migrated DB with messages, documents, doc_vectors tables
+- A migrated DB with messages, chunks, doc_vectors tables
+- Optionally a documents typed table (post-migration 0008)
 - A running Ollama instance with the configured model loaded
 - The write lock (acquired by the caller, not by this module)
 """
@@ -107,31 +108,45 @@ def chunk_text(text: str) -> list[str]:
 # ---- Status query ----
 
 
+def _has_table(conn: sqlite3.Connection, table: str) -> bool:
+    """Check if a table exists in the database."""
+    r = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    return r is not None
+
+
 def get_embed_status(conn: sqlite3.Connection) -> EmbedStatus:
     """Query the DB for current embedding status counts.  Read-only."""
-    n_msg = conn.execute(
+    n_eligible = conn.execute(
         "SELECT COUNT(*) FROM messages "
         "WHERE is_bulk=0 AND body_text IS NOT NULL AND length(body_text) >= ?",
         (MIN_CHUNK_CHARS,),
     ).fetchone()[0]
 
+    if _has_table(conn, "documents"):
+        n_eligible += conn.execute(
+            "SELECT COUNT(*) FROM documents "
+            "WHERE is_bulk=0 AND body_text IS NOT NULL AND length(body_text) >= ?",
+            (MIN_CHUNK_CHARS,),
+        ).fetchone()[0]
+
     n_done = conn.execute(
-        "SELECT COUNT(DISTINCT m.id) "
-        "FROM messages m "
-        "JOIN documents d ON d.source_table='messages' AND d.source_id=m.id "
-        "WHERE m.is_bulk=0 AND d.embedded_at IS NOT NULL",
+        "SELECT COUNT(DISTINCT d.source_id) "
+        "FROM chunks d "
+        "WHERE d.embedded_at IS NOT NULL",
     ).fetchone()[0]
 
     n_chunks = conn.execute(
-        "SELECT COUNT(*) FROM documents WHERE embedded_at IS NOT NULL",
+        "SELECT COUNT(*) FROM chunks WHERE embedded_at IS NOT NULL",
     ).fetchone()[0]
 
     n_vec = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
 
     return EmbedStatus(
-        total_eligible=n_msg,
+        total_eligible=n_eligible,
         done=n_done,
-        pending=n_msg - n_done,
+        pending=max(0, n_eligible - n_done),
         chunks_embedded=n_chunks,
         vectors_stored=n_vec,
     )
@@ -139,14 +154,14 @@ def get_embed_status(conn: sqlite3.Connection) -> EmbedStatus:
 
 # ---- Pipeline ----
 
-_PENDING_SQL = """\
+_PENDING_MESSAGES_SQL = """\
 SELECT m.id, m.subject, m.body_text, m.sender_address, m.date_sent
   FROM messages m
  WHERE m.is_bulk = 0
    AND m.body_text IS NOT NULL
    AND length(m.body_text) >= ?
    AND NOT EXISTS (
-       SELECT 1 FROM documents d
+       SELECT 1 FROM chunks d
         WHERE d.source_table = 'messages'
           AND d.source_id = m.id
           AND d.embedded_at IS NOT NULL
@@ -154,13 +169,28 @@ SELECT m.id, m.subject, m.body_text, m.sender_address, m.date_sent
  ORDER BY m.id
 """
 
-_UPSERT_DOC_SQL = """\
-INSERT INTO documents
+_PENDING_DOCUMENTS_SQL = """\
+SELECT doc.id, doc.subject, doc.body_text, doc.bucket, doc.mtime
+  FROM documents doc
+ WHERE doc.is_bulk = 0
+   AND doc.body_text IS NOT NULL
+   AND length(doc.body_text) >= ?
+   AND NOT EXISTS (
+       SELECT 1 FROM chunks d
+        WHERE d.source_table = 'documents'
+          AND d.source_id = doc.id
+          AND d.embedded_at IS NOT NULL
+   )
+ ORDER BY doc.id
+"""
+
+_UPSERT_CHUNK_SQL = """\
+INSERT INTO chunks
   (schema_type, source_table, source_id, chunk_index, chunk_strategy,
    title, content, content_hash, metadata_json,
    embedding_model, embedded_at)
 VALUES
-  ('EmailMessage', 'messages', ?, ?, 'message_body_512tok',
+  (?, ?, ?, ?, 'message_body_512tok',
    ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_table, source_id, chunk_index) DO UPDATE SET
   content = excluded.content,
@@ -180,38 +210,38 @@ def run_embed_pipeline(
     dry_run: bool = False,
     progress_cb: ProgressCallback | None = None,
 ) -> EmbedResult:
-    """Embed pending messages into documents + doc_vectors.
+    """Embed pending rows from messages + documents into chunks + doc_vectors.
 
     The caller must hold the write lock and manage the connection.
     """
-    query = _PENDING_SQL
-    if limit is not None:
-        query += f" LIMIT {limit}"
-    pending = conn.execute(query, (MIN_CHUNK_CHARS,)).fetchall()
-
-    if not pending:
-        return EmbedResult()
-
     t_start = time.time()
-    n_msgs_done = 0
+    n_rows_done = 0
     n_chunks_done = 0
     errors: list[str] = []
 
-    # Buffer: (msg_id, chunk_idx, content, content_hash, title, metadata_json)
-    buf: list[tuple[int, int, str, str, str, str]] = []
+    sources: list[tuple[str, str, str]] = [
+        (_PENDING_MESSAGES_SQL, "messages", "EmailMessage"),
+    ]
+    if _has_table(conn, "documents"):
+        sources.append((_PENDING_DOCUMENTS_SQL, "documents", "DigitalDocument"))
 
-    def _flush(batch: list[tuple[int, int, str, str, str, str]]) -> None:
+    buf: list[tuple[str, str, int, int, str, str, str, str]] = []
+
+    def _flush(
+        batch: list[tuple[str, str, int, int, str, str, str, str]],
+    ) -> None:
         nonlocal n_chunks_done
-        texts = [b[2] for b in batch]
+        texts = [b[4] for b in batch]
         embeddings = client.embed_batch(texts)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with conn:
-            for (msg_id, cidx, content, chash, title, meta), emb in zip(
+            for (schema_type, source_table, row_id, cidx, content, chash, title, meta), emb in zip(
                 batch, embeddings, strict=True
             ):
                 cur = conn.execute(
-                    _UPSERT_DOC_SQL,
-                    (msg_id, cidx, title, content, chash, meta, client.model, now),
+                    _UPSERT_CHUNK_SQL,
+                    (schema_type, source_table, row_id, cidx,
+                     title, content, chash, meta, client.model, now),
                 )
                 doc_id = cur.fetchone()[0]
                 vec_blob = struct.pack(f"{client.dim}f", *emb)
@@ -222,60 +252,81 @@ def run_embed_pipeline(
                 )
         n_chunks_done += len(batch)
 
-    for row in pending:
-        msg_id, subject, body_text, sender, date_sent = (
-            row[0],
-            row[1],
-            row[2],
-            row[3],
-            row[4],
-        )
-        chunks = chunk_text(body_text)
-        if not chunks:
-            n_msgs_done += 1
-            continue
+    total_pending = 0
+    all_pending: list[tuple[str, str, list[sqlite3.Row]]] = []
+    for pending_sql, source_table, schema_type in sources:
+        query = pending_sql
+        if limit is not None:
+            remaining = limit - total_pending
+            if remaining <= 0:
+                break
+            query += f" LIMIT {remaining}"
+        rows = conn.execute(query, (MIN_CHUNK_CHARS,)).fetchall()
+        if rows:
+            all_pending.append((source_table, schema_type, rows))
+            total_pending += len(rows)
 
-        title = (subject or "(no subject)")[:160]
-        meta = json.dumps({"sender": sender, "date_sent": date_sent})
+    if not total_pending:
+        return EmbedResult()
 
-        if dry_run:
-            n_chunks_done += len(chunks)
-        else:
-            for cidx, chunk_content in enumerate(chunks):
-                chash = hashlib.sha256(chunk_content.encode("utf-8")).hexdigest()
-                buf.append((msg_id, cidx, chunk_content, chash, title, meta))
+    for source_table, schema_type, pending in all_pending:
+        for row in pending:
+            row_id = row[0]
+            subject = row[1]
+            body_text = row[2]
+            meta_col3 = row[3]
+            meta_col4 = row[4]
 
-            while len(buf) >= batch_size:
-                _flush(buf[:batch_size])
-                buf = buf[batch_size:]
+            chunks = chunk_text(body_text)
+            if not chunks:
+                n_rows_done += 1
+                continue
 
-        n_msgs_done += 1
+            title = (subject or "(no subject)")[:160]
+            if source_table == "messages":
+                meta = json.dumps({"sender": meta_col3, "date_sent": meta_col4})
+            else:
+                meta = json.dumps({"bucket": meta_col3, "mtime": meta_col4})
 
-        if n_msgs_done % 100 == 0 and progress_cb is not None:
-            el = time.time() - t_start
-            mrate = n_msgs_done / el if el else 0
-            crate = n_chunks_done / el if el else 0
-            pct = 100 * n_msgs_done / len(pending)
-            eta = ((len(pending) - n_msgs_done) / mrate / 60) if mrate else float("inf")
-            progress_cb(
-                EmbedProgress(
-                    messages_done=n_msgs_done,
-                    messages_total=len(pending),
-                    chunks_done=n_chunks_done,
-                    elapsed_s=el,
-                    msg_rate=mrate,
-                    chunk_rate=crate,
-                    pct=pct,
-                    eta_min=eta,
+            if dry_run:
+                n_chunks_done += len(chunks)
+            else:
+                for cidx, chunk_content in enumerate(chunks):
+                    chash = hashlib.sha256(chunk_content.encode("utf-8")).hexdigest()
+                    buf.append((schema_type, source_table, row_id, cidx,
+                                chunk_content, chash, title, meta))
+
+                while len(buf) >= batch_size:
+                    _flush(buf[:batch_size])
+                    buf = buf[batch_size:]
+
+            n_rows_done += 1
+
+            if n_rows_done % 100 == 0 and progress_cb is not None:
+                el = time.time() - t_start
+                mrate = n_rows_done / el if el else 0
+                crate = n_chunks_done / el if el else 0
+                pct = 100 * n_rows_done / total_pending
+                eta = ((total_pending - n_rows_done) / mrate / 60) if mrate else float("inf")
+                progress_cb(
+                    EmbedProgress(
+                        messages_done=n_rows_done,
+                        messages_total=total_pending,
+                        chunks_done=n_chunks_done,
+                        elapsed_s=el,
+                        msg_rate=mrate,
+                        chunk_rate=crate,
+                        pct=pct,
+                        eta_min=eta,
+                    )
                 )
-            )
 
     if buf:
         _flush(buf)
 
     elapsed = time.time() - t_start
     return EmbedResult(
-        messages_processed=n_msgs_done,
+        messages_processed=n_rows_done,
         chunks_embedded=n_chunks_done,
         elapsed_s=elapsed,
         errors=errors,
