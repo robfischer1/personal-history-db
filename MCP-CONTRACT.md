@@ -158,7 +158,7 @@ Complete enumeration of the 11 MCP tools exposed by `server.py`. **This is the b
 
 ## Tool 3 — `get_chunk`
 
-**Purpose:** Fetch the full content of a document chunk by `documents.id`. Use after `search` returns a snippet you want to read in full.
+**Purpose:** Fetch the full content of a document chunk by `chunks.id`. Use after `search` returns a snippet you want to read in full.
 
 ### Parameters
 
@@ -245,7 +245,7 @@ Provide either `thread_id` OR `msg_id`. Both null returns an error.
 
 ## Tool 5 — `list_sources`
 
-**Purpose:** Inventory of what's been ingested. Counts grouped by source organization, file kind, and document source_table.
+**Purpose:** Inventory of what's been ingested. Counts grouped by source organization, file kind, and chunk source_table.
 
 ### Parameters
 
@@ -258,6 +258,7 @@ None.
   "totals": {
     "messages": int,
     "documents": int,
+    "chunks": int,
     "vectors": int,
     "threads": int
   },
@@ -265,7 +266,7 @@ None.
     {"source_org": str | null, "file_kind": str | null, "files": int, "messages": int | null},
     ...
   ],
-  "documents_by_table": [
+  "chunks_by_table": [
     {"source_table": str, "chunks": int, "embedded": int},
     ...
   ]
@@ -553,15 +554,15 @@ These functions are not MCP tools but the new query module must reproduce their 
 
 ### `_hydrate(conn, doc_ids, snippet_chars=240)`
 
-- Joins `documents LEFT JOIN messages` on `m.id = d.source_id AND d.source_table = 'messages'`
-- Non-message documents get null message-fields
+- Joins `chunks LEFT JOIN messages` (for `source_table='messages'`) and `chunks LEFT JOIN documents` (for `source_table='documents'`)
+- Non-message chunks get null message-fields; document chunks get subject, bucket, mtime from the documents table
 - Snippet: first 240 chars of content with `\n` collapsed to spaces and stripped
 - **Order preservation:** rebuilds output in original `doc_ids` order (important for ranking)
 
 ### `_date_filter_ids(conn, ids, since, until)`
 
-- Filters a candidate doc_id set by `messages.date_sent` window
-- Joins through `documents` for non-message docs (which the filter then excludes)
+- Filters a candidate doc_id set by date window
+- Joins through `chunks` to `messages.date_sent` or `documents.mtime` depending on `source_table`
 
 ---
 
@@ -574,7 +575,7 @@ These must port exactly:
 3. **FTS AND→OR fallback threshold** is `max(5, k//4)`
 4. **`search_query: ` prefix on Ollama input** — affects embedding output; cannot be dropped
 5. **vec0 `MATCH` requires `k=?`** in the query (not `LIMIT`)
-6. **`_hydrate` left-joins** — non-message docs survive
+6. **`_hydrate` left-joins** — non-message chunks survive; document chunks get metadata from the documents table
 7. **`participants` JSON parse falls through to raw string** on failure; tests must check both shapes
 8. **All return values are JSON-serializable plain dicts/lists** — no Pydantic model leakage at the MCP boundary
 9. **Error responses are `{"error": ...}` shape** — never raise; always return a payload

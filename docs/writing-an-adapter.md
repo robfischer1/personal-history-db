@@ -50,12 +50,12 @@ def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]
 Yield one `AdapterRow` per row to insert. The framework handles:
 
 - Source file registration
-- INSERT OR IGNORE into the `messages` table
-- Recipient and attachment sidecar inserts
+- INSERT OR IGNORE into the target table (`messages` by default, or `documents` for document adapters)
+- Recipient and attachment sidecar inserts (message adapters only)
 - Batch commits
 - `body_text_hash` computation (if you don't set it)
 - `raw_hash` computation (fallback — prefer setting it yourself from raw source bytes)
-- Direction inference via `IdentitySettings`
+- Direction inference via `IdentitySettings` (message adapters only)
 - Progress logging
 - `IngestReport` construction
 
@@ -82,6 +82,40 @@ The full field list is in [base.py](../src/phdb/adapters/base.py). Key fields:
 | `raw_hash` | SHA-256 of raw source bytes (for dedup integrity) |
 | `recipients` | List of `{"address": str, "name": str, "rtype": "to"|"cc"|"bcc"}` dicts |
 | `attachments` | List of `{"filename": str, "content_type": str, "size_bytes": int}` dicts |
+| `file_path` | Full path to source file on disk (document adapters) |
+| `file_size` | File size in bytes (document adapters) |
+| `ctime` | Creation timestamp, ISO 8601 (document adapters) |
+| `bucket` | Logical grouping — e.g., `"Outputs/Projects"` (document adapters) |
+
+## Document-targeting adapters
+
+Adapters that produce `DigitalDocument` rows (files, notes) should target the `documents` typed table instead of `messages`:
+
+```python
+class MyDocAdapter(Adapter):
+    name = "my_docs"
+    source_kind = "my_docs"
+    file_kind = "directory"
+    schema_type = "DigitalDocument"
+    target_table = "documents"       # routes inserts to documents table
+    dedup_strategy = DedupStrategy.CONTENT_HASH
+
+    def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
+        for f in source_path.rglob("*.txt"):
+            yield AdapterRow(
+                subject=f.name,
+                body_text=f.read_text(),
+                body_text_source="plain",
+                date_sent=datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                file_path=str(f),
+                file_size=f.stat().st_size,
+                bucket="My Files",
+            )
+```
+
+When `target_table = "documents"`, the framework skips direction inference, recipient/attachment sidecars, and thread machinery. The `file_path`, `file_size`, `ctime`, and `bucket` fields from `AdapterRow` are written to the documents table's corresponding columns.
+
+See the [google_drive](../src/phdb/adapters/google_drive.py), [onedrive](../src/phdb/adapters/onedrive.py), [apple_notes_full](../src/phdb/adapters/apple_notes_full.py), and [staged_md](../src/phdb/adapters/staged_md.py) adapters for reference implementations.
 
 ## DedupStrategy
 
@@ -92,7 +126,7 @@ The full field list is in [base.py](../src/phdb/adapters/base.py). Key fields:
 | `SOURCE_POSITION` | Positional sources (CSV rows) | `source_file_id` + `source_byte_offset` |
 | `CONTENT_HASH` | Fallback | `raw_hash` column |
 
-The `messages` table has a partial UNIQUE index on `rfc822_message_id WHERE rfc822_message_id IS NOT NULL`. For non-email sources, dedup relies on `raw_hash` uniqueness (which you should set).
+Both `messages` and `documents` tables have partial UNIQUE indexes on `(source_file_id, raw_hash)` for idempotent ingestion. The `messages` table also has a UNIQUE index on `rfc822_message_id WHERE rfc822_message_id IS NOT NULL` for email dedup.
 
 ## Optional overrides
 

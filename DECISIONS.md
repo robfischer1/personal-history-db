@@ -1,7 +1,7 @@
 ---
 created: 2026-05-06
-updated: 2026-05-06
-status: Phase 0 decisions resolved
+updated: 2026-05-14
+status: Active — typed-tables reshape decided
 type: project-decisions
 related:
   - "[[REWRITE_PLAN]]"
@@ -178,11 +178,40 @@ All three are siblings of the vault, sharing the `~\Obsidian\` parent.
 - `chunk_strategy` values seen in the existing DB are preserved verbatim
 - Future chunking strategy changes get new `chunk_strategy` values; old chunks coexist until re-chunked
 
+### 2026-05-14 — Typed-tables reshape (DigitalDocument phase)
+
+**Status:** decided
+**Decided by:** Opus + Rob
+
+**Context:** The `messages` table had become polymorphic — DigitalDocument rows (OneDrive files, Google Drive files, Apple Notes, staged markdown) were shoehorned into a table designed for email messages. These rows carried meaningless sender/direction/recipient columns, and document-specific attributes (file_path, file_size, ctime, bucket) had no home. The OneDrive ingester was gated on this reshape.
+
+**Options considered:**
+- **A: Phased per-@type migration** — start with DigitalDocument; rename chunk registry (`documents` → `chunks`) to free the name; create `documents` typed table with domain columns; migrate existing rows. Future phases for other @types.
+- **B: Big-bang multi-@type migration** — reshape all @types at once. Higher risk, longer cycle, blocks everything.
+
+**Decision:** Option A — phased, starting with DigitalDocument.
+
+**Sub-decisions:**
+- **Naming:** Rename existing `documents` (chunk registry) to `chunks`; new typed table claims `documents`. Rob chose this over alternatives (`doc_chunks`, `document_chunks`, `text_chunks`).
+- **Chunk registry rename strategy:** DROP + recreate FTS5 (external-content mode requires it) + rename triggers (`documents_ai/ad/au` → `chunks_ai/ad/au`). Migration 0007.
+- **Bucket recovery:** Migration 0009 COALESCE recovers bucket from `sender_name` (google_drive smuggled bucket there) with `NULLIF(m.sender_name, 'Me')` to skip apple_notes_full's junk value; thread_key subquery as fallback.
+- **Adapter retargeting:** google_drive, staged_md, onedrive, apple_notes_full set `target_table = "documents"` and skip direction inference, sidecars, and thread machinery. Message-targeting adapters unchanged.
+
+**Rationale:** Phased approach limits blast radius. DigitalDocument is the cleanest extraction — no recipients, no threads, no direction inference. Unblocks OneDrive immediately.
+
+**Consequences:**
+- Three new migrations: 0007 (chunks rename), 0008 (documents typed table DDL), 0009 (data migration + chunk repointing + orphan thread cleanup)
+- Adapters with `target_table = "documents"` bypass message-specific logic in `base.py`
+- `query.py` hydration joins against both `messages` and `documents` by `source_table`
+- `embed_pipeline.py` queries `chunks` instead of `documents`
+- `chunks.source_table` now contains `'documents'` for migrated/new DigitalDocument chunks
+- Publish impact: phdb v0.1.0 → v0.2.0
+
 ---
 
 ## Open decisions
 
-(None — Phase 0 questions all resolved 2026-05-06.)
+(None — Phase 0 questions all resolved 2026-05-06; typed-tables reshape decided 2026-05-14.)
 
 ---
 

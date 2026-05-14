@@ -58,7 +58,7 @@ src/phdb/
 │
 └── migrations/
     ├── runner.py           MigrationRunner — applies project + instance SQL
-    └── project/            0001_init.sql through 0005_connections.sql
+    └── project/            0001_init.sql through 0009_documents_migrate.sql
 ```
 
 ## Data flow
@@ -76,15 +76,15 @@ Adapter.run()                Register source file, batch inserts, dedup,
     │                        direction inference via IdentitySettings
     ▼
 messages table               Raw messages with sender, date, body, direction
-    │
-    ├──► recipients table    To/CC/BCC per message
+    │                        (or documents table for DigitalDocument adapters)
+    ├──► recipients table    To/CC/BCC per message (message adapters only)
     └──► attachments table   Filename, content type, size per attachment
 ```
 
 ### Embed pipeline
 
 ```
-messages table
+messages / documents tables
     │
     ▼
 embed_pipeline.chunk()       Split body_text into 2048-char chunks
@@ -93,7 +93,7 @@ embed_pipeline.chunk()       Split body_text into 2048-char chunks
 EmbedClient.embed_batch()    Ollama nomic-embed-text (768-dim vectors)
     │
     ▼
-documents table              One row per chunk (text, hash, position)
+chunks table                 One row per chunk (text, hash, position)
     │
     ▼
 doc_vectors table            vec0 virtual table (768-dim float vectors)
@@ -127,7 +127,8 @@ Ranked results with context   Message metadata + surrounding chunks
 | `messages` | Core table — one row per message/event/record |
 | `recipients` | To/CC/BCC sidecar for email-type messages |
 | `attachments` | File metadata sidecar |
-| `documents` | Chunked text for embedding (foreign key to messages) |
+| `documents` | Typed table for DigitalDocument rows (OneDrive, Google Drive, Apple Notes, staged md) |
+| `chunks` | Chunked text for embedding (foreign key to messages or documents) |
 | `doc_vectors` | vec0 virtual table — 768-dim float vectors |
 | `threads` | Conversation threading for email |
 | `bookmarks` | URL bookmarks (Raindrop, browser exports) |
