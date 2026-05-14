@@ -243,6 +243,7 @@ class GoogleDriveAdapter(Adapter):
     source_kind = "google-drive"
     file_kind = "zip"
     schema_type = "DigitalDocument"
+    target_table = "documents"
     dedup_strategy = DedupStrategy.CONTENT_HASH
     batch_size = 500
 
@@ -298,9 +299,6 @@ class GoogleDriveAdapter(Adapter):
                     schema_type="DigitalDocument",
                     rfc822_message_id=f"google-drive:{raw_hash}",
                     subject=filename[:200],
-                    sender_address=self.owner_sender("google-drive")[0],
-                    sender_name=bucket,
-                    direction="self",
                     date_sent=mtime,
                     body_text=body,
                     body_text_source=str(body_source),
@@ -309,7 +307,8 @@ class GoogleDriveAdapter(Adapter):
                     source_byte_length=len(body),
                     raw_hash=raw_hash,
                     body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-                    thread_key=f"google-drive:{bucket}",
+                    file_path=name,
+                    bucket=bucket,
                     extra={"relpath": name},
                 )
 
@@ -337,7 +336,8 @@ class GoogleDriveAdapter(Adapter):
                 data = full_path.read_bytes()
             except Exception:
                 continue
-            mtime = datetime.fromtimestamp(full_path.stat().st_mtime).isoformat()
+            stat = full_path.stat()
+            mtime = datetime.fromtimestamp(stat.st_mtime).isoformat()
             body = extractor(data)  # type: ignore[operator]
             if not body or not body.strip():
                 continue
@@ -352,9 +352,6 @@ class GoogleDriveAdapter(Adapter):
                 schema_type="DigitalDocument",
                 rfc822_message_id=f"google-drive:{raw_hash}",
                 subject=filename[:200],
-                sender_address=self.owner_sender("google-drive")[0],
-                sender_name=bucket,
-                direction="self",
                 date_sent=mtime,
                 body_text=body,
                 body_text_source=str(body_source),
@@ -363,6 +360,8 @@ class GoogleDriveAdapter(Adapter):
                 source_byte_length=len(body),
                 raw_hash=raw_hash,
                 body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-                thread_key=f"google-drive:{bucket}",
+                file_path=relstr,
+                file_size=stat.st_size,
+                bucket=bucket,
                 extra={"relpath": relstr},
             )

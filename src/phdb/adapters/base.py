@@ -78,6 +78,12 @@ class AdapterRow:
     thread_metadata: str | None = None  # JSON
     thread_cwd: str | None = None
 
+    # Document-specific fields (used when target_table='documents')
+    file_path: str | None = None
+    file_size: int | None = None
+    ctime: str | None = None
+    bucket: str | None = None
+
     recipients: list[dict[str, str]] = field(default_factory=list)
     attachments: list[dict[str, str | int | None]] = field(default_factory=list)
     thread_key: str | None = None
@@ -132,6 +138,14 @@ INSERT INTO attachments (schema_type, message_id, filename, content_type,
     content_disposition, size_bytes, on_disk_path, content_hash)
 VALUES ('DigitalDocument', ?, ?, ?, ?, ?, ?, ?)"""
 
+_INSERT_DOCUMENT_SQL = """\
+INSERT OR IGNORE INTO documents (
+    schema_type, rfc822_message_id, subject,
+    file_path, file_size, mtime, ctime,
+    body_text, body_text_source, body_text_hash,
+    raw_hash, is_bulk, source_file_id, bucket
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
 
 class Adapter(ABC):
     """Base class for personal-history-db ingesters."""
@@ -140,6 +154,7 @@ class Adapter(ABC):
     source_kind: str
     file_kind: str
     schema_type: str = "Message"
+    target_table: str = "messages"
     dedup_strategy: DedupStrategy = DedupStrategy.CONTENT_HASH
     batch_size: int = 500
     _settings: Settings | None = None
@@ -200,7 +215,9 @@ class Adapter(ABC):
     def _insert_row(
         self, conn: sqlite3.Connection, row: AdapterRow, source_file_id: int
     ) -> int | None:
-        """Insert a single row into the messages table. Returns message ID or None if skipped."""
+        """Insert a single row. Routes to messages or documents based on target_table."""
+        if self.target_table == "documents":
+            return self._insert_document(conn, row, source_file_id)
         cur = conn.execute(
             _INSERT_MESSAGE_SQL,
             (
@@ -215,6 +232,23 @@ class Adapter(ABC):
                 row.raw_hash, row.body_text_hash,
                 row.kind, row.role, row.parent_uuid, row.tool_name, row.tool_use_id,
                 row.model, row.payload,
+            ),
+        )
+        if cur.rowcount == 0:
+            return None
+        return cur.lastrowid
+
+    def _insert_document(
+        self, conn: sqlite3.Connection, row: AdapterRow, source_file_id: int
+    ) -> int | None:
+        """Insert a single row into the documents typed table. Returns doc ID or None if skipped."""
+        cur = conn.execute(
+            _INSERT_DOCUMENT_SQL,
+            (
+                row.schema_type, row.rfc822_message_id, row.subject,
+                row.file_path, row.file_size, row.date_sent, row.ctime,
+                row.body_text, row.body_text_source, row.body_text_hash,
+                row.raw_hash, row.is_bulk, source_file_id, row.bucket,
             ),
         )
         if cur.rowcount == 0:
@@ -317,6 +351,7 @@ class Adapter(ABC):
         log.info("[%s] Source registered: id=%d path=%s", self.name, source_file_id, source_path)
 
         _touched_threads: set[int] = set()
+        _is_document = self.target_table == "documents"
         batch_count = 0
         for row in self.iter_rows(source_path):
             report.rows_yielded += 1
@@ -331,35 +366,38 @@ class Adapter(ABC):
                 row.is_bulk = 1
                 row.bulk_signal = signal
 
-            has_identity = (
-                settings.identity.owner_names
-                or settings.identity.owner_emails
-                or settings.identity.owner_phones
-                or settings.identity.owner_handles
-            )
-            if row.direction == "unknown" and has_identity:
-                row.direction = self.infer_direction(row, settings.identity)
+            if not _is_document:
+                has_identity = (
+                    settings.identity.owner_names
+                    or settings.identity.owner_emails
+                    or settings.identity.owner_phones
+                    or settings.identity.owner_handles
+                )
+                if row.direction == "unknown" and has_identity:
+                    row.direction = self.infer_direction(row, settings.identity)
 
-            message_id = self._insert_row(conn, row, source_file_id)
-            if message_id is None:
+            row_id = self._insert_row(conn, row, source_file_id)
+            if row_id is None:
                 report.rows_skipped += 1
                 continue
 
             report.rows_inserted += 1
-            self._insert_sidecars(conn, message_id, row)
 
-            if row.thread_key:
-                thread_id, created = self._upsert_thread(
-                    conn, row.thread_key,
-                    metadata=row.thread_metadata,
-                    cwd=row.thread_cwd,
-                )
-                self._link_message_thread(conn, message_id, thread_id)
-                if created:
-                    report.threads_created += 1
-                    _touched_threads.add(thread_id)
-                else:
-                    _touched_threads.add(thread_id)
+            if not _is_document:
+                self._insert_sidecars(conn, row_id, row)
+
+                if row.thread_key:
+                    thread_id, created = self._upsert_thread(
+                        conn, row.thread_key,
+                        metadata=row.thread_metadata,
+                        cwd=row.thread_cwd,
+                    )
+                    self._link_message_thread(conn, row_id, thread_id)
+                    if created:
+                        report.threads_created += 1
+                        _touched_threads.add(thread_id)
+                    else:
+                        _touched_threads.add(thread_id)
 
             batch_count += 1
             if batch_count >= self.batch_size:
@@ -368,9 +406,10 @@ class Adapter(ABC):
 
         conn.commit()
 
-        for tid in _touched_threads:
-            self._update_thread_aggregates(conn, tid)
-        conn.commit()
+        if _touched_threads:
+            for tid in _touched_threads:
+                self._update_thread_aggregates(conn, tid)
+            conn.commit()
 
         conn.execute(
             "UPDATE source_files SET message_count = ? WHERE id = ?",

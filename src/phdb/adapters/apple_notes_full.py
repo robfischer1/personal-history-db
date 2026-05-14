@@ -109,6 +109,7 @@ class AppleNotesFullAdapter(Adapter):
     source_kind = "apple-notes"
     file_kind = "sqlite"
     schema_type = "DigitalDocument"
+    target_table = "documents"
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
     batch_size = 100
 
@@ -167,8 +168,9 @@ class AppleNotesFullAdapter(Adapter):
 
             msg_id_key = f"notes:{note['pk']}"
 
+            tbl = self.target_table
             existing = conn.execute(
-                "SELECT id, body_text FROM messages WHERE rfc822_message_id = ?",
+                f"SELECT id, body_text FROM {tbl} WHERE rfc822_message_id = ?",
                 (msg_id_key,),
             ).fetchone()
 
@@ -177,7 +179,7 @@ class AppleNotesFullAdapter(Adapter):
                 new_len = len(body_text)
                 if new_len > old_len:
                     conn.execute(
-                        "UPDATE messages SET body_text = ?, body_text_source = ? WHERE id = ?",
+                        f"UPDATE {tbl} SET body_text = ?, body_text_source = ? WHERE id = ?",
                         (body_text, body_source, existing[0]),
                     )
                     report.rows_inserted += 1
@@ -191,8 +193,6 @@ class AppleNotesFullAdapter(Adapter):
                         schema_type="DigitalDocument",
                         rfc822_message_id=msg_id_key,
                         subject=title,
-                        sender_name="Me",
-                        direction="self",
                         date_sent=created_iso,
                         body_text=body_text,
                         body_text_source=body_source,

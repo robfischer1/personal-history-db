@@ -1,12 +1,15 @@
 """OneDrive adapter — ingests documents from a local OneDrive directory.
 
-Source: local OneDrive root directory. Only walks specific top-level dirs:
-{00 Inbox, 01 Projects, 02 Areas, 04 Archives, Documents}. Skips binary
+Source: local OneDrive root directory (F:\\OneDrive\\ post-2026-05-13 reorg).
+Walks Outputs/, Reference/, Records/ top-level pillars. Skips binary
 extensions and files >20MB.
 
-Each file becomes a schema_type='DigitalDocument' row. Text extraction
-covers the same formats as the google_drive adapter. Calibre metadata
-support is out of scope for the adapter port.
+Reference/ has a body-extract allowlist: active-pursuit subdirs get full
+body extraction; everything else gets metadata-only rows (subject +
+file_path, is_bulk=1).
+
+Each file becomes a schema_type='DigitalDocument' row in the documents
+typed table.
 """
 
 from __future__ import annotations
@@ -26,7 +29,16 @@ log = get_logger("phdb.adapters.onedrive")
 MAX_BODY_LEN = 200_000
 MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 
-INCLUDE_TOP_DIRS = {"00 Inbox", "01 Projects", "02 Areas", "04 Archives", "Documents"}
+INCLUDE_TOP_DIRS = {"Outputs", "Reference", "Records"}
+
+REFERENCE_BODY_ALLOWLIST = {
+    "Mind Tools", "Weight Training Programs", "Weight Training Theory",
+    "Nutrition", "Cooking", "Personal Development", "Spirituality",
+    "Philosophy", "Mental Health", "Entrepreneurship", "ADHD",
+    "Fat Loss", "Marek Health Physical", "Medicaid", "MMA", "Rugby",
+    "Career Choice", "Sexuality", "Kink", "Supplements",
+    "People",
+}
 
 TEXT_EXTENSIONS = {
     ".docx", ".pdf", ".txt", ".md", ".html", ".htm",
@@ -151,6 +163,13 @@ def _derive_bucket(rel_parts: tuple[str, ...]) -> str:
     return f"{rel_parts[0]}/{rel_parts[1]}"
 
 
+def _is_reference_body_allowed(rel_parts: tuple[str, ...]) -> bool:
+    """Check if a file under Reference/ is in the body-extract allowlist."""
+    if len(rel_parts) < 2 or rel_parts[0] != "Reference":
+        return True
+    return rel_parts[1] in REFERENCE_BODY_ALLOWLIST
+
+
 class OneDriveAdapter(Adapter):
     """Ingest OneDrive documents from a local directory."""
 
@@ -158,6 +177,7 @@ class OneDriveAdapter(Adapter):
     source_kind = "onedrive"
     file_kind = "local-files"
     schema_type = "DigitalDocument"
+    target_table = "documents"
     dedup_strategy = DedupStrategy.RFC822_MESSAGE_ID
     batch_size = 500
 
@@ -185,55 +205,67 @@ class OneDriveAdapter(Adapter):
                     continue
 
                 try:
-                    if fpath.stat().st_size > MAX_FILE_SIZE_BYTES:
+                    stat = fpath.stat()
+                    if stat.st_size > MAX_FILE_SIZE_BYTES:
                         continue
                 except OSError:
                     continue
 
-                entry = _EXTRACTORS.get(suffix)
-                if not entry:
-                    continue
-                body_source, extractor = entry
-
-                try:
-                    data = fpath.read_bytes()
-                except Exception:
-                    continue
-
-                body = extractor(data)  # type: ignore[operator]
-                if not body or not body.strip():
-                    continue
-                body = body[:MAX_BODY_LEN]
-
                 rel_parts = fpath.relative_to(source_path).parts
                 bucket = _derive_bucket(rel_parts)
+                relpath = str(fpath.relative_to(source_path))
                 path_hash = hashlib.sha1(str(fpath).encode()).hexdigest()[:16]
                 msg_id = f"onedrive:{path_hash}"
 
                 try:
                     mtime = datetime.fromtimestamp(
-                        fpath.stat().st_mtime, tz=UTC
+                        stat.st_mtime, tz=UTC
                     ).isoformat()
                 except OSError:
                     mtime = None
+
+                try:
+                    ctime = datetime.fromtimestamp(
+                        stat.st_ctime, tz=UTC
+                    ).isoformat()
+                except OSError:
+                    ctime = None
 
                 raw_hash = hashlib.sha256(
                     f"onedrive|{msg_id}".encode()
                 ).hexdigest()
 
+                is_bulk = 1 if rel_parts[0] == "Reference" else 0
+
+                if _is_reference_body_allowed(rel_parts):
+                    entry = _EXTRACTORS.get(suffix)
+                    if not entry:
+                        continue
+                    body_source, extractor = entry
+                    try:
+                        data = fpath.read_bytes()
+                    except Exception:
+                        continue
+                    body = extractor(data)  # type: ignore[operator]
+                    if not body or not body.strip():
+                        continue
+                    body = body[:MAX_BODY_LEN]
+                else:
+                    body = None
+                    body_source = None
+
                 yield AdapterRow(
                     schema_type="DigitalDocument",
                     rfc822_message_id=msg_id,
                     subject=fpath.name,
-                    sender_address=self.owner_sender("onedrive")[0],
-                    sender_name=self.owner_sender("onedrive")[1],
-                    sender_domain="onedrive",
-                    direction="self",
                     date_sent=mtime,
                     body_text=body,
-                    body_text_source=str(body_source),
-                    is_bulk=0,
+                    body_text_source=str(body_source) if body_source else None,
+                    is_bulk=is_bulk,
                     raw_hash=raw_hash,
-                    body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-                    thread_key=f"onedrive:{bucket}",
+                    body_text_hash=hashlib.sha256(body.encode()).hexdigest() if body else None,
+                    file_path=relpath,
+                    file_size=stat.st_size,
+                    ctime=ctime,
+                    bucket=bucket,
                 )

@@ -75,6 +75,7 @@ class StagedMdAdapter(Adapter):
     source_kind = "staged-md"
     file_kind = "md"
     schema_type = "CreativeWork"
+    target_table = "documents"
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
     batch_size = 200
 
@@ -108,17 +109,17 @@ class StagedMdAdapter(Adapter):
             raw_hash = hashlib.sha256(raw_seed.encode()).hexdigest()
             synthetic_msgid = f"staged-md:{hashlib.sha256(sub_path.encode()).hexdigest()}"
 
+            stat = md_path.stat()
             yield AdapterRow(
                 schema_type=schema_type,
                 rfc822_message_id=synthetic_msgid,
                 subject=name,
-                sender_address=self.owner_sender("self")[0],
-                sender_name=self.owner_sender("self")[1],
-                direction="self",
                 date_sent=date_sent,
                 body_text=body,
                 body_text_source="staged-md",
                 raw_hash=raw_hash,
                 body_text_hash=hashlib.sha256(body.encode("utf-8")).hexdigest(),
-                thread_key=f"staged-md:{cluster_name}",
+                file_path=str(md_path.relative_to(source_path)),
+                file_size=stat.st_size,
+                bucket=cluster_name,
             )
