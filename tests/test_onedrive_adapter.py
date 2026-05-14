@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.onedrive import OneDriveAdapter, _derive_bucket
+from phdb.adapters.onedrive import (
+    OneDriveAdapter,
+    _derive_bucket,
+    _is_reference_body_allowed,
+)
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
@@ -25,16 +29,30 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 
 class TestDeriveBucket:
     def test_single_part(self) -> None:
-        assert _derive_bucket(("Documents",)) == "Documents"
+        assert _derive_bucket(("Outputs",)) == "Outputs"
 
     def test_two_parts(self) -> None:
-        assert _derive_bucket(("01 Projects", "test")) == "01 Projects/test"
+        assert _derive_bucket(("Outputs", "Projects")) == "Outputs/Projects"
 
     def test_deep_path(self) -> None:
-        assert _derive_bucket(("Documents", "sub", "deep")) == "Documents/sub"
+        assert _derive_bucket(("Reference", "Mind Tools", "deep")) == "Reference/Mind Tools"
 
     def test_empty(self) -> None:
         assert _derive_bucket(()) == "(root)"
+
+
+class TestReferenceBodyAllowlist:
+    def test_outputs_always_allowed(self) -> None:
+        assert _is_reference_body_allowed(("Outputs", "Projects", "file.txt"))
+
+    def test_records_always_allowed(self) -> None:
+        assert _is_reference_body_allowed(("Records", "file.txt"))
+
+    def test_reference_allowlisted_subdir(self) -> None:
+        assert _is_reference_body_allowed(("Reference", "Mind Tools", "file.txt"))
+
+    def test_reference_non_allowlisted_subdir(self) -> None:
+        assert not _is_reference_body_allowed(("Reference", "Downloaded Library", "file.txt"))
 
 
 class TestOneDriveIntegration:
@@ -43,42 +61,47 @@ class TestOneDriveIntegration:
         adapter = OneDriveAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
-        assert report.rows_inserted == 3
-        assert report.rows_skipped == 0
+        # Outputs/Projects/hello.txt, Reference/Mind Tools/data.json, Records/notes.md
+        # Reference/Downloaded Library/ebook.txt → metadata-only (body=None, is_bulk=1)
+        assert report.rows_inserted == 4
 
     def test_schema_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = OneDriveAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()
         assert all(t[0] == "DigitalDocument" for t in types)
 
-    def test_direction_self(self, tmp_path: Path) -> None:
+    def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = OneDriveAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            dirs = conn.execute("SELECT DISTINCT direction FROM messages").fetchall()
-        assert all(d[0] == "self" for d in dirs)
+            doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            msg_count = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE schema_type='DigitalDocument'"
+            ).fetchone()[0]
+        assert doc_count == 4
+        assert msg_count == 0
 
-    def test_threads_created(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
-        with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_DIR, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
-        assert threads >= 1
-        assert report.threads_created >= 1
-
-    def test_thread_keys(self, tmp_path: Path) -> None:
+    def test_reference_is_bulk(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = OneDriveAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            keys = conn.execute("SELECT thread_key FROM threads ORDER BY thread_key").fetchall()
-        key_set = {k[0] for k in keys}
-        assert any("onedrive:" in k for k in key_set)
+            bulk_rows = conn.execute(
+                "SELECT subject FROM documents WHERE is_bulk = 1"
+            ).fetchall()
+            non_bulk = conn.execute(
+                "SELECT subject FROM documents WHERE is_bulk = 0"
+            ).fetchall()
+        bulk_names = {r[0] for r in bulk_rows}
+        non_bulk_names = {r[0] for r in non_bulk}
+        assert "data.json" in bulk_names
+        assert "ebook.txt" in bulk_names
+        assert "hello.txt" in non_bulk_names
+        assert "notes.md" in non_bulk_names
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
@@ -89,35 +112,11 @@ class TestOneDriveIntegration:
             r2 = OneDriveAdapter().run(FIXTURE_DIR, conn, settings)
         assert r2.rows_inserted == 0
 
-    def test_not_bulk(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
-        with connect(db_path) as conn:
-            adapter.run(FIXTURE_DIR, conn, settings)
-            bulk = conn.execute("SELECT COUNT(*) FROM messages WHERE is_bulk = 1").fetchone()[0]
-        assert bulk == 0
-
-    def test_sender_address(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
-        with connect(db_path) as conn:
-            adapter.run(FIXTURE_DIR, conn, settings)
-            addrs = conn.execute("SELECT DISTINCT sender_address FROM messages").fetchall()
-        assert all(a[0] == "onedrive:test user" for a in addrs)
-
-    def test_message_thread_bridge(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
-        with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_DIR, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
-        assert bridge == report.rows_inserted
-
     def test_skips_excluded_top_dirs(self, tmp_path: Path) -> None:
         """Files outside INCLUDE_TOP_DIRS should not be ingested."""
-        excluded = FIXTURE_DIR / "03 Resources"
+        excluded = FIXTURE_DIR / "SomeOtherDir"
         excluded.mkdir(exist_ok=True)
-        secret = excluded / "ebook.txt"
+        secret = excluded / "excluded_secret.txt"
         secret.write_text("should not appear")
         try:
             db_path, settings = _setup(tmp_path)
@@ -126,9 +125,9 @@ class TestOneDriveIntegration:
                 adapter.run(FIXTURE_DIR, conn, settings)
                 subjects = [
                     r[0]
-                    for r in conn.execute("SELECT subject FROM messages").fetchall()
+                    for r in conn.execute("SELECT subject FROM documents").fetchall()
                 ]
-            assert "ebook.txt" not in subjects
+            assert "excluded_secret.txt" not in subjects
         finally:
             secret.unlink(missing_ok=True)
             excluded.rmdir()
@@ -139,7 +138,46 @@ class TestOneDriveIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             row = conn.execute(
-                "SELECT body_text FROM messages WHERE subject = 'hello.txt'"
+                "SELECT body_text FROM documents WHERE subject = 'hello.txt'"
             ).fetchone()
         assert row is not None
         assert "Hello from OneDrive" in row[0]
+
+    def test_bucket_populated(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = OneDriveAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_DIR, conn, settings)
+            buckets = {b[0] for b in conn.execute(
+                "SELECT DISTINCT bucket FROM documents WHERE bucket IS NOT NULL"
+            ).fetchall()}
+        assert "Outputs/Projects" in buckets
+
+    def test_file_path_populated(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = OneDriveAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_DIR, conn, settings)
+            paths = conn.execute(
+                "SELECT file_path FROM documents WHERE file_path IS NOT NULL"
+            ).fetchall()
+        assert len(paths) == 4
+
+    def test_non_allowlisted_reference_metadata_only(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = OneDriveAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_DIR, conn, settings)
+            row = conn.execute(
+                "SELECT body_text, is_bulk FROM documents WHERE subject = 'ebook.txt'"
+            ).fetchone()
+        assert row is not None
+        assert row[0] is None
+        assert row[1] == 1
+
+    def test_no_threads_created(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = OneDriveAdapter()
+        with connect(db_path) as conn:
+            report = adapter.run(FIXTURE_DIR, conn, settings)
+        assert report.threads_created == 0

@@ -177,7 +177,7 @@ class TestEmbedPipeline:
     ) -> None:
         with connect(embed_db, load_vec=True) as conn:
             result = run_embed_pipeline(conn, fake_client, dry_run=True)
-            doc_count = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
+            doc_count = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
         assert result.messages_processed == 3
         assert result.chunks_embedded > 0
         assert doc_count == 0
@@ -190,7 +190,7 @@ class TestEmbedPipeline:
             run_embed_pipeline(conn, fake_client)
             docs = conn.execute(
                 "SELECT schema_type, source_table, chunk_strategy, embedding_model"
-                " FROM documents"
+                " FROM chunks"
             ).fetchall()
         assert len(docs) > 0
         for d in docs:
@@ -204,7 +204,7 @@ class TestEmbedPipeline:
     ) -> None:
         with connect(embed_db, load_vec=True) as conn:
             run_embed_pipeline(conn, fake_client)
-            n_docs = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
+            n_docs = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
             n_vecs = conn.execute("SELECT count(*) FROM doc_vectors").fetchone()[0]
         assert n_vecs == n_docs
         assert n_vecs > 0
@@ -214,7 +214,7 @@ class TestEmbedPipeline:
     ) -> None:
         with connect(embed_db, load_vec=True) as conn:
             run_embed_pipeline(conn, fake_client)
-            rows = conn.execute("SELECT content, content_hash FROM documents").fetchall()
+            rows = conn.execute("SELECT content, content_hash FROM chunks").fetchall()
         for content, chash in rows:
             expected = hashlib.sha256(content.encode("utf-8")).hexdigest()
             assert chash == expected
@@ -224,7 +224,7 @@ class TestEmbedPipeline:
     ) -> None:
         with connect(embed_db, load_vec=True) as conn:
             run_embed_pipeline(conn, fake_client)
-            rows = conn.execute("SELECT metadata_json FROM documents").fetchall()
+            rows = conn.execute("SELECT metadata_json FROM chunks").fetchall()
         for (raw,) in rows:
             meta = json.loads(raw)
             assert "sender" in meta
@@ -236,12 +236,12 @@ class TestEmbedPipeline:
         """Re-running on same messages updates rather than duplicates."""
         with connect(embed_db, load_vec=True) as conn:
             run_embed_pipeline(conn, fake_client)
-            conn.execute("UPDATE documents SET embedded_at = NULL")
+            conn.execute("UPDATE chunks SET embedded_at = NULL")
             conn.commit()
             run_embed_pipeline(conn, fake_client)
-            n = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
+            n = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
             n_unique = conn.execute(
-                "SELECT count(DISTINCT source_id || '-' || chunk_index) FROM documents"
+                "SELECT count(DISTINCT source_id || '-' || chunk_index) FROM chunks"
             ).fetchone()[0]
         assert n == n_unique
 

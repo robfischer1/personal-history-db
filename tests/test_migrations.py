@@ -21,9 +21,9 @@ def test_discover_finds_project_migrations() -> None:
     migrations = runner.discover()
     conn.close()
 
-    assert len(migrations) == 6
+    assert len(migrations) == 9
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0006_ai_sessions"
+    assert migrations[-1].migration_id == "0009_documents_migrate"
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
@@ -32,7 +32,7 @@ def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
         runner = MigrationRunner(conn)
         applied = runner.apply_pending()
 
-    assert len(applied) == 6
+    assert len(applied) == 9
     assert applied[0] == "0001_init"
 
     with connect(db_path) as conn:
@@ -41,6 +41,7 @@ def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
         ).fetchall()}
         assert "messages" in tables
         assert "source_files" in tables
+        assert "chunks" in tables
         assert "documents" in tables
         assert "bookmarks" in tables
         assert "connections" in tables
@@ -54,7 +55,7 @@ def test_skip_already_applied(tmp_path: Path) -> None:
         first_run = runner.apply_pending()
         second_run = runner.apply_pending()
 
-    assert len(first_run) == 6
+    assert len(first_run) == 9
     assert len(second_run) == 0
 
 
@@ -82,7 +83,7 @@ def test_status_shows_all_migrations(tmp_path: Path) -> None:
         runner.apply_pending()
         status = runner.status()
 
-    assert len(status) == 6
+    assert len(status) == 9
     assert all(is_applied for _, is_applied in status)
 
 

@@ -36,8 +36,20 @@ class TestAppleNotesFullIntegration:
         adapter = AppleNotesFullAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()
         assert all(t[0] == "DigitalDocument" for t in types)
+
+    def test_target_table_is_documents(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = AppleNotesFullAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_DB, conn, settings)
+            doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            msg_count = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE schema_type='DigitalDocument'"
+            ).fetchone()[0]
+        assert doc_count == 2
+        assert msg_count == 0
 
     def test_full_body_preferred(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
@@ -45,7 +57,7 @@ class TestAppleNotesFullIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             row = conn.execute(
-                "SELECT body_text, body_text_source FROM messages WHERE subject = 'Test Note'"
+                "SELECT body_text, body_text_source FROM documents WHERE subject = 'Test Note'"
             ).fetchone()
         assert row is not None
         assert "full body text" in row[0].lower()
@@ -57,7 +69,7 @@ class TestAppleNotesFullIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             row = conn.execute(
-                "SELECT body_text, body_text_source FROM messages WHERE subject = 'Another Note'"
+                "SELECT body_text, body_text_source FROM documents WHERE subject = 'Another Note'"
             ).fetchone()
         assert row is not None
         assert row[0] == "Another snippet"
@@ -70,7 +82,7 @@ class TestAppleNotesFullIntegration:
                 "INSERT INTO source_files (source_path, file_hash) VALUES ('fake.db', 'fakehash')"
             )
             conn.execute(
-                """INSERT INTO messages (rfc822_message_id, schema_type, body_text,
+                """INSERT INTO documents (rfc822_message_id, schema_type, body_text,
                     body_text_source, raw_hash, body_text_hash, source_file_id)
                 VALUES ('notes:1', 'DigitalDocument', 'Short', 'old', 'h1', 'h2', 1)"""
             )
@@ -79,7 +91,7 @@ class TestAppleNotesFullIntegration:
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DB, conn, settings)
             row = conn.execute(
-                "SELECT body_text FROM messages WHERE rfc822_message_id = 'notes:1'"
+                "SELECT body_text FROM documents WHERE rfc822_message_id = 'notes:1'"
             ).fetchone()
         assert len(row[0]) > len("Short")
         assert report.rows_inserted >= 1

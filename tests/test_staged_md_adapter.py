@@ -37,25 +37,21 @@ class TestStagedMdIntegration:
         adapter = StagedMdAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            types = {t[0] for t in conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()}
+            types = {t[0] for t in conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()}
         assert "CreativeWork" in types
         assert "Article" in types
 
-    def test_direction_self(self, tmp_path: Path) -> None:
+    def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = StagedMdAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            dirs = conn.execute("SELECT DISTINCT direction FROM messages").fetchall()
-        assert all(d[0] == "self" for d in dirs)
-
-    def test_thread_per_cluster(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
-        with connect(db_path) as conn:
-            adapter.run(FIXTURE_DIR, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
-        assert threads == 1
+            doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            msg_count = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE schema_type IN ('CreativeWork', 'Article')"
+            ).fetchone()[0]
+        assert doc_count == 2
+        assert msg_count == 0
 
     def test_body_extraction(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
@@ -63,7 +59,7 @@ class TestStagedMdIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             body = conn.execute(
-                "SELECT body_text FROM messages WHERE subject = 'My First Note'"
+                "SELECT body_text FROM documents WHERE subject = 'My First Note'"
             ).fetchone()
         assert body is not None
         assert "body text" in body[0].lower()
@@ -78,10 +74,27 @@ class TestStagedMdIntegration:
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
 
-    def test_message_thread_bridge(self, tmp_path: Path) -> None:
+    def test_bucket_is_cluster_name(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = StagedMdAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_DIR, conn, settings)
+            buckets = {b[0] for b in conn.execute("SELECT DISTINCT bucket FROM documents").fetchall()}
+        assert "test_cluster" in buckets
+
+    def test_file_path_populated(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = StagedMdAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_DIR, conn, settings)
+            paths = conn.execute(
+                "SELECT file_path FROM documents WHERE file_path IS NOT NULL"
+            ).fetchall()
+        assert len(paths) == 2
+
+    def test_no_threads_created(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = StagedMdAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
-        assert bridge == report.rows_inserted
+        assert report.threads_created == 0

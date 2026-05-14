@@ -120,7 +120,7 @@ def _seed(conn: sqlite3.Connection) -> None:
     ]
     for d in docs:
         conn.execute(
-            "INSERT INTO documents (id, schema_type, source_table, source_id,"
+            "INSERT INTO chunks (id, schema_type, source_table, source_id,"
             " chunk_index, chunk_strategy, title, content)"
             " VALUES (?,?,?,?,?,?,?,?)", d
         )
@@ -308,7 +308,8 @@ class TestListSources:
     def test_returns_totals(self, query_db: sqlite3.Connection) -> None:
         result = list_sources(query_db)
         assert result["totals"]["messages"] == 5
-        assert result["totals"]["documents"] == 5
+        assert result["totals"]["chunks"] == 5
+        assert result["totals"]["documents"] == 0
 
     def test_returns_source_files(self, query_db: sqlite3.Connection) -> None:
         result = list_sources(query_db)
@@ -458,7 +459,7 @@ def _seed_ai_session(conn: sqlite3.Connection) -> None:
     ]
     for d in ai_docs:
         conn.execute(
-            "INSERT INTO documents (id, schema_type, source_table, source_id,"
+            "INSERT INTO chunks (id, schema_type, source_table, source_id,"
             " chunk_index, chunk_strategy, title, content)"
             " VALUES (?,?,?,?,?,?,?,?)", d
         )

@@ -35,7 +35,7 @@ def test_cli_migrate(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["--db", str(db_path), "migrate"])
     assert result.exit_code == 0
-    assert "Applied 6 migration(s)" in result.output
+    assert "Applied 9 migration(s)" in result.output
 
 
 def test_cli_migrate_idempotent(tmp_path: Path) -> None:
@@ -78,7 +78,7 @@ def test_cli_query_fts(tmp_path: Path) -> None:
             " '2024-01-01T00:00:00Z', 'Test body content for query', 0, 1)"
         )
         conn.execute(
-            "INSERT INTO documents (id, schema_type, source_table, source_id,"
+            "INSERT INTO chunks (id, schema_type, source_table, source_id,"
             " chunk_index, title, content)"
             " VALUES (1, 'EmailMessage', 'messages', 1, 0, 'Test subject',"
             " 'Test body content for query')"

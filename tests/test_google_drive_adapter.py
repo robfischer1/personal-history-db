@@ -75,34 +75,20 @@ class TestGoogleDriveIntegration:
         adapter = GoogleDriveAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()
         assert all(t[0] == "DigitalDocument" for t in types)
 
-    def test_direction_self(self, tmp_path: Path) -> None:
+    def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = GoogleDriveAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            dirs = conn.execute("SELECT DISTINCT direction FROM messages").fetchall()
-        assert all(d[0] == "self" for d in dirs)
-
-    def test_threads_created(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
-        with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
-        assert threads >= 1
-        assert report.threads_created >= 1
-
-    def test_thread_keys(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
-        with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
-            keys = conn.execute("SELECT thread_key FROM threads ORDER BY thread_key").fetchall()
-        key_set = {k[0] for k in keys}
-        assert "google-drive:My Files" in key_set
+            doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            msg_count = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE schema_type='DigitalDocument'"
+            ).fetchone()[0]
+        assert doc_count == 5
+        assert msg_count == 0
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
@@ -118,7 +104,7 @@ class TestGoogleDriveIntegration:
         adapter = GoogleDriveAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            bulk = conn.execute("SELECT COUNT(*) FROM messages WHERE is_bulk = 1").fetchone()[0]
+            bulk = conn.execute("SELECT COUNT(*) FROM documents WHERE is_bulk = 1").fetchone()[0]
         assert bulk == 0
 
     def test_skips_binary_and_trash(self, tmp_path: Path) -> None:
@@ -128,19 +114,11 @@ class TestGoogleDriveIntegration:
             adapter.run(FIXTURE_ZIP, conn, settings)
             subjects = [
                 r[0]
-                for r in conn.execute("SELECT subject FROM messages").fetchall()
+                for r in conn.execute("SELECT subject FROM documents").fetchall()
             ]
         assert "photo.jpg" not in subjects
         assert "deleted.txt" not in subjects
         assert "Copy of template.txt" not in subjects
-
-    def test_message_thread_bridge(self, tmp_path: Path) -> None:
-        db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
-        with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
-        assert bridge == report.rows_inserted
 
     def test_body_content(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
@@ -148,7 +126,24 @@ class TestGoogleDriveIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
-                "SELECT body_text FROM messages WHERE subject = 'test.txt'"
+                "SELECT body_text FROM documents WHERE subject = 'test.txt'"
             ).fetchone()
         assert row is not None
         assert "Hello world" in row[0]
+
+    def test_bucket_populated(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = GoogleDriveAdapter()
+        with connect(db_path) as conn:
+            adapter.run(FIXTURE_ZIP, conn, settings)
+            buckets = conn.execute(
+                "SELECT DISTINCT bucket FROM documents WHERE bucket IS NOT NULL"
+            ).fetchall()
+        assert len(buckets) >= 1
+
+    def test_no_threads_created(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        adapter = GoogleDriveAdapter()
+        with connect(db_path) as conn:
+            report = adapter.run(FIXTURE_ZIP, conn, settings)
+        assert report.threads_created == 0
