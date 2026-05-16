@@ -412,3 +412,59 @@ def test_adapter_assistant_message_is_not_bulk(tmp_path: Path, adapter: ClaudeCo
     p = _make_jsonl(tmp_path, lines)
     rows = list(adapter.iter_rows(p))
     assert rows[0].is_bulk == 0
+
+
+# ── Session UUID extraction (migration 0010 hook) ────────────────────────────
+
+def test_compute_session_uuid_extracts_from_canonical_filename(adapter: ClaudeCodeAdapter) -> None:
+    # D:\<records>\AI Sessions\Claude\claude-code__<encoded-cwd>__<uuid>.jsonl
+    p = Path(r"D:\<records>\AI Sessions\Claude\claude-code__c--Users-<owner>-Obsidian__de8c7522-a9a2-4585-b6ef-b3e686e20290.jsonl")
+    assert adapter.compute_session_uuid(p) == "de8c7522-a9a2-4585-b6ef-b3e686e20290"
+
+
+def test_compute_session_uuid_extracts_from_legacy_filename(adapter: ClaudeCodeAdapter) -> None:
+    # Legacy live path: <uuid>.jsonl with no prefix
+    p = Path(r"C:\Users\<owner>\.claude\projects\c--Users-<owner>-Obsidian\4efecc8b-d706-4667-b922-7476858b2991.jsonl")
+    assert adapter.compute_session_uuid(p) == "4efecc8b-d706-4667-b922-7476858b2991"
+
+
+def test_compute_session_uuid_returns_none_for_agent_subsession(adapter: ClaudeCodeAdapter) -> None:
+    # Agent sub-sessions are `agent-<hex>.jsonl` and have no session UUID.
+    p = Path(r"D:\<records>\AI Sessions\Claude\claude-code__c--Users-<owner>-Obsidian__agent-a1709f28e260fa9fa.jsonl")
+    assert adapter.compute_session_uuid(p) is None
+
+
+def test_compute_session_uuid_returns_none_for_unrelated_filename(adapter: ClaudeCodeAdapter) -> None:
+    p = Path("/tmp/sess-001.jsonl")
+    assert adapter.compute_session_uuid(p) is None
+
+
+def test_compute_session_uuid_lowercases(adapter: ClaudeCodeAdapter) -> None:
+    p = Path(r"D:\<records>\DE8C7522-A9A2-4585-B6EF-B3E686E20290.jsonl")
+    assert adapter.compute_session_uuid(p) == "de8c7522-a9a2-4585-b6ef-b3e686e20290"
+
+
+# ── Legacy-path rejection (migration 0010 guard) ─────────────────────────────
+
+def test_validate_source_path_rejects_legacy_claude_projects(adapter: ClaudeCodeAdapter) -> None:
+    p = Path(r"C:\Users\<owner>\.claude\projects\c--Users-<owner>-Obsidian\4efecc8b-d706-4667-b922-7476858b2991.jsonl")
+    with pytest.raises(ValueError, match="legacy path"):
+        adapter.validate_source_path(p)
+
+
+def test_validate_source_path_rejects_lowercase_legacy_prefix(adapter: ClaudeCodeAdapter) -> None:
+    p = Path(r"c:\users\<owner>\.claude\projects\sess-001.jsonl")
+    with pytest.raises(ValueError, match="legacy path"):
+        adapter.validate_source_path(p)
+
+
+def test_validate_source_path_accepts_canonical_records_path(adapter: ClaudeCodeAdapter) -> None:
+    p = Path(r"D:\<records>\AI Sessions\Claude\claude-code__c--Users-<owner>-Obsidian__de8c7522-a9a2-4585-b6ef-b3e686e20290.jsonl")
+    # No exception expected.
+    adapter.validate_source_path(p)
+
+
+def test_validate_source_path_accepts_test_path(adapter: ClaudeCodeAdapter) -> None:
+    # Tests under tmp_path must continue to pass validation.
+    p = Path("/tmp/sess-001.jsonl")
+    adapter.validate_source_path(p)

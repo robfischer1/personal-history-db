@@ -197,16 +197,48 @@ class Adapter(ABC):
             return "outbound"
         return "inbound"
 
+    def compute_session_uuid(self, source_path: Path) -> str | None:
+        """Compute a stable session UUID for this source, if available.
+
+        Override in adapters that ingest one-file-per-session formats (e.g.
+        Claude Code's `<session-uuid>.jsonl`). Returning a non-None value
+        opts the source into UUID-based dedup at the source_files level —
+        the same session ingested under a renamed/moved path will update
+        the existing row rather than register a new one.
+
+        Default: None (path-based dedup, current behavior).
+        """
+        return None
+
+    def validate_source_path(self, source_path: Path) -> None:
+        """Raise to refuse ingest of a path that violates an adapter rule.
+
+        Default: no-op. Adapters that have a canonical source location can
+        override to reject other locations (see ClaudeCodeAdapter).
+        """
+        return None
+
     def _register_source(
         self, conn: sqlite3.Connection, source_path: Path
     ) -> int:
-        """Register the source file and return its ID."""
+        """Register the source file and return its ID.
+
+        Uses a dual-conflict-target UPSERT so that adapters which provide a
+        session_uuid via compute_session_uuid() get UUID-based dedup, while
+        adapters that don't keep the original path-based behavior.
+        """
+        session_uuid = self.compute_session_uuid(source_path)
         cur = conn.execute(
-            """INSERT INTO source_files (source_path, source_org, file_kind, source_kind, ingested_at)
-               VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-               ON CONFLICT(source_path) DO UPDATE SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            """INSERT INTO source_files (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
+               VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+               ON CONFLICT(source_path) DO UPDATE
+                 SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                     session_uuid = COALESCE(source_files.session_uuid, excluded.session_uuid)
+               ON CONFLICT(source_kind, session_uuid) WHERE session_uuid IS NOT NULL
+                 DO UPDATE SET source_path = excluded.source_path,
+                               ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                RETURNING id""",
-            (str(source_path), None, self.file_kind, self.source_kind),
+            (str(source_path), None, self.file_kind, self.source_kind, session_uuid),
         )
         row = cur.fetchone()
         assert row is not None
@@ -346,6 +378,7 @@ class Adapter(ABC):
         )
 
         self._settings = settings
+        self.validate_source_path(source_path)
         source_file_id = self._register_source(conn, source_path)
         report.source_file_id = source_file_id
         log.info("[%s] Source registered: id=%d path=%s", self.name, source_file_id, source_path)

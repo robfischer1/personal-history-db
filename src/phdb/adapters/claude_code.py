@@ -18,6 +18,7 @@ Skipped line types: queue-operation, file-history-snapshot, last-prompt,
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -29,6 +30,23 @@ _TURN_TYPES: frozenset[str] = frozenset({"user", "assistant"})
 
 # Line types that carry useful thread-level metadata
 _META_TYPES: frozenset[str] = frozenset({"user", "assistant", "attachment"})
+
+# Matches `<8>-<4>-<4>-<4>-<12>.jsonl` at the tail of a filename.
+# Agent sub-sessions are `agent-<hex>.jsonl` and do NOT match — those keep
+# session_uuid=None and continue to dedup on source_path.
+_UUID_TAIL_RE = re.compile(
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$",
+    re.IGNORECASE,
+)
+
+# Legacy path that has been superseded by D:\<records>\AI Sessions\Claude\.
+# Files under here are no longer the canonical AI-sessions location; the
+# adapter refuses them so that re-running ingest on a stale .claude\projects
+# tree doesn't re-create the dedup problem migration 0010 just cleaned up.
+_LEGACY_PATH_PREFIXES: tuple[str, ...] = (
+    r"C:\Users\<owner>\.claude",
+    r"c:\users\<owner>\.claude",
+)
 
 
 def _extract_meta(obj: dict) -> dict[str, str | None]:
@@ -107,6 +125,37 @@ class ClaudeCodeAdapter(Adapter):
     file_kind = "jsonl"
     schema_type = "Conversation"
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
+
+    def compute_session_uuid(self, source_path: Path) -> str | None:
+        """Extract the Claude Code session UUID from the filename.
+
+        The canonical filename shape is `<encoded-cwd>__<uuid>.jsonl` (under
+        D:\\Records\\AI Sessions\\Claude\\) or just `<uuid>.jsonl` (legacy
+        live path). Both end with `<uuid>.jsonl`, so we anchor on the tail.
+
+        Returns None for agent sub-sessions (`agent-<hex>.jsonl`) which
+        don't have a session UUID — those continue to dedup on source_path.
+        """
+        m = _UUID_TAIL_RE.search(source_path.name)
+        return m.group(1).lower() if m else None
+
+    def validate_source_path(self, source_path: Path) -> None:
+        """Refuse the legacy ``C:\\Users\\<owner>\\.claude\\projects\\`` path.
+
+        Migration 0010 designates ``D:\\Records\\AI Sessions\\Claude\\`` as
+        the canonical location for ingest. If a caller hands us a path
+        under the live ``.claude\\projects\\`` tree, fail loudly rather
+        than silently re-creating the dedup problem we just cleaned up.
+        """
+        p = str(source_path)
+        for prefix in _LEGACY_PATH_PREFIXES:
+            if p.startswith(prefix):
+                raise ValueError(
+                    f"claude_code adapter refuses legacy path {p!r}; "
+                    f"canonical AI-sessions location is "
+                    f"D:\\Records\\AI Sessions\\Claude\\ "
+                    f"(see migration 0010 / project_personal_history_db memory)"
+                )
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
         session_uuid = source_path.stem  # filename without .jsonl
