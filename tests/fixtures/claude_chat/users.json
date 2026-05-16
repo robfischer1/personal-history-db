@@ -1,0 +1,8 @@
+[
+  {
+    "uuid": "00000000-0000-4000-8000-fixtureaccnt",
+    "full_name": "Test User",
+    "email_address": "test@example.com",
+    "verified_phone_number": null
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "uuid": "00000000-0000-4000-8000-fixtureproj0",
+  "name": "Fixture Project",
+  "description": "Test project description",
+  "is_private": true,
+  "is_starter_project": false,
+  "prompt_template": "You are a test assistant.",
+  "created_at": "2026-05-01T00:00:00+00:00",
+  "updated_at": "2026-05-01T00:00:00+00:00",
+  "creator": {
+    "uuid": "00000000-0000-4000-8000-fixtureaccnt",
+    "full_name": "Test User"
+  },
+  "docs": [
+    {
+      "uuid": "00000000-0000-4000-8000-fixturedoc01",
+      "filename": "Doc.md",
+      "content": "# Doc body\nstuff",
+      "created_at": "2026-05-01T00:00:00+00:00"
+    }
+  ]
+}
