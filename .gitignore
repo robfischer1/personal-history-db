@@ -1,12 +1,29 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
 *.egg-info/
 dist/
 build/
+
+# Linting / type checking
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# AI tool configs (per-developer)
+.claude/
+.gemini/
+.specify/
+
+# Environment / secrets
+.env
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Data / runtime
 *.db
 *.db-wal
 *.db-shm
