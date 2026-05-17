@@ -1,4 +1,9 @@
-"""Embedding client for Ollama-compatible endpoints."""
+"""Embedding client for Ollama-compatible endpoints.
+
+Implements the EmbedProvider protocol. This is the default (and currently
+only) provider shipped with phdb. See embed_provider.py for the protocol
+definition and guidance on adding new providers.
+"""
 
 from __future__ import annotations
 
@@ -15,14 +20,16 @@ HTTP_TIMEOUT_S: int = 60
 
 
 @dataclass
-class EmbedClient:
-    """Wraps an Ollama-compatible /api/embed endpoint."""
+class OllamaEmbedProvider:
+    """Ollama-compatible embedding provider.
+
+    Implements the EmbedProvider protocol for any Ollama-compatible
+    /api/embed endpoint (Ollama, llama.cpp server, etc.).
+    """
 
     endpoint: str = "http://localhost:11434"
     model: str = "nomic-embed-text"
     dim: int = 768
-
-    # -- query-time embedding (existing contract, unchanged) --
 
     def embed(self, text: str) -> bytes:
         """Embed a query string, return packed float32 vector."""
@@ -38,8 +45,6 @@ class EmbedClient:
             payload = json.loads(r.read().decode())
             emb = payload.get("embeddings", [payload.get("embedding")])[0]
         return struct.pack(f"{self.dim}f", *emb)
-
-    # -- index-time batch embedding --
 
     def embed_batch(
         self,
@@ -109,8 +114,6 @@ class EmbedClient:
         msg = f"Ollama single embed failed after {MAX_RETRIES} retries: {last_err}"
         raise RuntimeError(msg)
 
-    # -- diagnostics --
-
     def health_check(self) -> tuple[bool, list[str]]:
         """Ping Ollama /api/tags. Returns (reachable, model_names)."""
         try:
@@ -128,10 +131,8 @@ class EmbedClient:
         vecs = self.embed_batch(["dimension probe"], prefix="search_document")
         return len(vecs[0])
 
-    # -- factory --
-
     @classmethod
-    def from_settings(cls, settings: object) -> EmbedClient:
+    def from_settings(cls, settings: object) -> OllamaEmbedProvider:
         """Build from a Settings object's embedding sub-config."""
         embedding = getattr(settings, "embedding", None)
         if embedding is None:
@@ -141,3 +142,7 @@ class EmbedClient:
             model=getattr(embedding, "model", "nomic-embed-text"),
             dim=getattr(embedding, "dim", 768),
         )
+
+
+# Backwards-compatible alias — existing code imports EmbedClient
+EmbedClient = OllamaEmbedProvider

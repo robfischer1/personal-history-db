@@ -17,7 +17,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from phdb.embed_service import EmbedClient
+from phdb.embed_provider import EmbedProvider
+from phdb.embed_service import EmbedClient  # noqa: F401 — re-export for backwards compat
 
 # ---- Chunking constants (match legacy embed_messages.py exactly) ----
 TARGET_CHUNK_CHARS: int = 2048
@@ -203,7 +204,7 @@ RETURNING id
 
 def run_embed_pipeline(
     conn: sqlite3.Connection,
-    client: EmbedClient,
+    client: EmbedProvider,
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
     limit: int | None = None,

@@ -19,7 +19,8 @@ import sqlite3
 import urllib.request
 from typing import Any
 
-from phdb.embed_service import EmbedClient
+from phdb.embed_provider import EmbedProvider
+from phdb.embed_service import EmbedClient  # noqa: F401 — re-export for backwards compat
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -309,7 +310,7 @@ def search(
     conn: sqlite3.Connection,
     query: str,
     *,
-    embed_client: EmbedClient | None = None,
+    embed_client: EmbedProvider | None = None,
     k: int = 10,
     per_source_k: int = 50,
     since: str | None = None,
@@ -590,7 +591,7 @@ def server_info(
     db_path: str | Any,
     conn: sqlite3.Connection,
     *,
-    embed_client: EmbedClient | None = None,
+    embed_client: EmbedProvider | None = None,
 ) -> dict[str, Any]:
     """Diagnostic: DB location, size, Ollama reachability, corpus counts."""
     from pathlib import Path
