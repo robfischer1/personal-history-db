@@ -211,7 +211,6 @@ def populate_initial_scores(
     source_kind_cache: dict[tuple[str, int], str | None] = {}
     content_date_cache: dict[tuple[str, int], str] = {}
 
-    offset = 0
     while True:
         rows = conn.execute(
             "SELECT c.id, c.source_table, c.source_id, c.schema_type"
@@ -219,8 +218,8 @@ def populate_initial_scores(
             " LEFT JOIN chunk_scores cs ON cs.chunk_id = c.id"
             " WHERE cs.chunk_id IS NULL"
             " ORDER BY c.id"
-            " LIMIT ? OFFSET ?",
-            (batch_size, offset),
+            " LIMIT ?",
+            (batch_size,),
         ).fetchall()
 
         if not rows:
@@ -265,8 +264,7 @@ def populate_initial_scores(
         )
         conn.commit()
         total += len(insert_batch)
-        offset += batch_size
-        log.info("Populated %d chunk scores (batch offset %d)", total, offset)
+        log.info("Populated %d chunk scores so far", total)
 
     log.info("Initial population complete: %d chunks scored", total)
     return total

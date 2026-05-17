@@ -228,13 +228,14 @@ def query(
 
     for i, r in enumerate(rows, 1):
         score = r.get("score", 0)
+        decay = r.get("decay_score", 1.0)
         date = r.get("date", "") or ""
         direction = r.get("direction", "") or ""
         sender = r.get("sender_address", "") or ""
         subject = r.get("subject", "(no subject)") or "(no subject)"
         snippet = r.get("snippet", "")
 
-        click.echo(f"{i:2d}. [score={score:.4f}] {date}  {direction:8s}  {sender}")
+        click.echo(f"{i:2d}. [score={score:.4f} decay={decay:.3f}] {date}  {direction:8s}  {sender}")
         click.echo(f"    Subject: {subject[:90]}")
         click.echo(f"    Chunk #{r.get('chunk_index', 0)} of msg #{r.get('msg_id', '?')} "
                     f"(thread {r.get('thread_id', 'n/a')})")
@@ -397,3 +398,17 @@ def decay_stats(ctx: click.Context) -> None:
 
         eng_count = conn.execute("SELECT count(*) FROM engagements").fetchone()[0]
         click.echo(f"\n  Engagement events: {eng_count:,}")
+
+        unscored = conn.execute(
+            "SELECT count(*) FROM chunks c"
+            " LEFT JOIN chunk_scores cs ON cs.chunk_id = c.id"
+            " WHERE cs.chunk_id IS NULL"
+        ).fetchone()[0]
+        if unscored:
+            click.echo(f"  Unscored chunks: {unscored:,} (run: phdb decay populate)")
+
+        last_recompute = conn.execute(
+            "SELECT max(last_recomputed) FROM chunk_scores"
+        ).fetchone()[0]
+        if last_recompute:
+            click.echo(f"  Last recompute: {last_recompute[:19]}")

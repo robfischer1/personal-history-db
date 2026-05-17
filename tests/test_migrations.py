@@ -21,9 +21,9 @@ def test_discover_finds_project_migrations() -> None:
     migrations = runner.discover()
     conn.close()
 
-    assert len(migrations) == 10
+    assert len(migrations) == 11
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0010_source_files_session_uuid"
+    assert migrations[-1].migration_id == "0011_decay_scoring"
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
@@ -32,7 +32,7 @@ def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
         runner = MigrationRunner(conn)
         applied = runner.apply_pending()
 
-    assert len(applied) == 10
+    assert len(applied) == 11
     assert applied[0] == "0001_init"
 
     with connect(db_path) as conn:
@@ -55,7 +55,7 @@ def test_skip_already_applied(tmp_path: Path) -> None:
         first_run = runner.apply_pending()
         second_run = runner.apply_pending()
 
-    assert len(first_run) == 10
+    assert len(first_run) == 11
     assert len(second_run) == 0
 
 
@@ -83,7 +83,7 @@ def test_status_shows_all_migrations(tmp_path: Path) -> None:
         runner.apply_pending()
         status = runner.status()
 
-    assert len(status) == 10
+    assert len(status) == 11
     assert all(is_applied for _, is_applied in status)
 
 

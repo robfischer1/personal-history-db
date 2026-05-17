@@ -18,6 +18,7 @@ with OLLAMA_URL / OLLAMA_MODEL env vars as overrides.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -46,6 +47,7 @@ from phdb.query import (  # noqa: E402
     server_info as _server_info,
     top_correspondents as _top_correspondents,
 )
+from phdb.scoring import record_engagement  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +198,14 @@ def get_chunk(doc_id: int) -> dict[str, Any]:
     """Fetch the full content of a document chunk by its documents.id.
 
     Use after `search` returns a snippet you want to read in full.
+    Records an engagement event (boosts future retrieval weight).
     """
-    return _get_chunk(_get_conn(), doc_id)
+    conn = _get_conn()
+    result = _get_chunk(conn, doc_id)
+    if "error" not in result:
+        with contextlib.suppress(Exception):
+            record_engagement(conn, doc_id, "read", source="mcp")
+    return result
 
 
 @mcp.tool()
@@ -364,6 +372,33 @@ def top_correspondents(
         since=since, until=until, role=role, limit=limit,
         exclude_bulk=exclude_bulk, exclude_self=exclude_self,
     )
+
+
+@mcp.tool()
+def log_engagement(
+    chunk_id: int,
+    event_type: str = "cite",
+    source: str | None = None,
+) -> dict[str, Any]:
+    """Record an explicit engagement event for a chunk.
+
+    This boosts the chunk's future retrieval weight via the decay scoring
+    system. Call when a chunk is explicitly referenced, cited, backlinkd to,
+    or otherwise acted upon outside of a direct search result expansion.
+
+    Args:
+        chunk_id: The chunks.id to engage with.
+        event_type: Category of engagement ("read", "cite", "backlink",
+            "promote"). Default: "cite".
+        source: Optional source identifier (e.g., "vault-mcp", "manual").
+
+    Returns:
+        {"status": "ok", "chunk_id": int, "event_type": str}
+    """
+    conn = _get_conn()
+    with contextlib.suppress(Exception):
+        record_engagement(conn, chunk_id, event_type, source=source)
+    return {"status": "ok", "chunk_id": chunk_id, "event_type": event_type}
 
 
 def main() -> None:

@@ -278,6 +278,28 @@ def _lookup_doc_years(
     return {r[0]: r[1] for r in rows}
 
 
+def _lookup_decay_scores(
+    conn: sqlite3.Connection, doc_ids: list[int]
+) -> dict[int, float]:
+    """Fetch decay scores for a set of chunk IDs. Returns {chunk_id: score}.
+
+    Chunks without a score row get 1.0 (no penalty) — graceful degradation
+    when chunk_scores is unpopulated or the table doesn't exist yet.
+    """
+    if not doc_ids:
+        return {}
+    try:
+        placeholders = ",".join(["?"] * len(doc_ids))
+        rows = conn.execute(
+            f"SELECT chunk_id, score FROM chunk_scores"
+            f" WHERE chunk_id IN ({placeholders})",
+            doc_ids,
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+    except sqlite3.OperationalError:
+        return {}
+
+
 # ===================================================================
 # Public API — 11 operations matching MCP tool contracts
 # ===================================================================
@@ -343,6 +365,15 @@ def search(
         ]
         final.sort(key=lambda x: -x[1])
 
+    # Decay score weighting — multiply relevance by retrieval weight
+    decay_scores = _lookup_decay_scores(conn, [d for d, _ in final])
+    if decay_scores:
+        final = [
+            (d, score * decay_scores.get(d, 1.0))
+            for d, score in final
+        ]
+        final.sort(key=lambda x: -x[1])
+
     rows = _hydrate(conn, [d for d, _ in final], snippet_chars=snippet_chars)
     score_by_id = dict(final)
 
@@ -355,6 +386,7 @@ def search(
     rows = rows[:k]
     for r in rows:
         r["score"] = round(score_by_id.get(r["doc_id"], 0.0), 5)
+        r["decay_score"] = round(decay_scores.get(r["doc_id"], 1.0), 4)
 
     return {
         "query": query,
