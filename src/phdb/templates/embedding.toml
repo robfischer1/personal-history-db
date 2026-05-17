@@ -1,0 +1,14 @@
+# embedding.toml — Embedding model configuration
+#
+# Default: Ollama with nomic-embed-text (768-dim).
+# Requires a running Ollama instance: https://ollama.ai
+#
+# To set up:
+#   1. Install Ollama
+#   2. Run: ollama pull nomic-embed-text
+#   3. Start: ollama serve
+
+[embedding]
+model = "nomic-embed-text"
+dim = 768
+endpoint = "http://localhost:11434"

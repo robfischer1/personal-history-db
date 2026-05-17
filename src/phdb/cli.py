@@ -44,6 +44,63 @@ def cli(ctx: click.Context, db: str | None, instance_dir: str | None, log_level:
 
 
 @cli.command()
+@click.argument("directory", type=click.Path())
+@click.option("--db-path", default=None, help="Override db_path in generated paths.toml.")
+@click.pass_context
+def init(ctx: click.Context, directory: str, db_path: str | None) -> None:
+    """Scaffold a new instance directory with template config files.
+
+    Creates DIRECTORY (if it doesn't exist) and populates it with starter
+    TOML files. Edit them to match your setup, then run `phdb migrate`.
+    """
+    import shutil
+
+    target = Path(directory).resolve()
+    templates_dir = Path(__file__).parent / "templates"
+
+    if target.exists() and any(target.iterdir()):
+        existing = [f.name for f in target.iterdir() if f.suffix == ".toml"]
+        if existing:
+            raise click.ClickException(
+                f"Directory already has config files: {', '.join(existing)}. "
+                f"Use an empty directory or remove existing files."
+            )
+
+    target.mkdir(parents=True, exist_ok=True)
+
+    for template in sorted(templates_dir.glob("*.toml")):
+        dest = target / template.name
+        if not dest.exists():
+            shutil.copy2(template, dest)
+            click.echo(f"  Created {dest}")
+
+    (target / "adapters").mkdir(exist_ok=True)
+
+    def _toml_path(p: Path | str) -> str:
+        return str(p).replace("\\", "/")
+
+    if db_path:
+        resolved_db = _toml_path(db_path)
+        resolved_data = _toml_path(Path(db_path).parent)
+    else:
+        default_db = target.parent / "data" / "personal-history.db"
+        resolved_db = _toml_path(default_db)
+        resolved_data = _toml_path(default_db.parent)
+
+    paths_file = target / "paths.toml"
+    content = paths_file.read_text(encoding="utf-8")
+    content = content.replace('db_path = ""', f'db_path = "{resolved_db}"')
+    content = content.replace('data_dir = ""', f'data_dir = "{resolved_data}"')
+    paths_file.write_text(content, encoding="utf-8")
+
+    click.echo(f"\nInstance directory ready at: {target}")
+    click.echo("Next steps:")
+    click.echo(f"  1. Edit {target / 'identity.toml'} with your details")
+    click.echo(f"  2. Edit {target / 'paths.toml'} if you want a different DB location")
+    click.echo(f"  3. Run: phdb --instance-dir {target} migrate")
+
+
+@cli.command()
 @click.option("--instance-migrations", type=click.Path(exists=True), default=None, help="Instance migrations directory.")
 @click.pass_context
 def migrate(ctx: click.Context, instance_migrations: str | None) -> None:

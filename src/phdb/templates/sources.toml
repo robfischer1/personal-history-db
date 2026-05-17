@@ -1,0 +1,17 @@
+# sources.toml — Source registration
+#
+# Document your data sources here. Each entry maps a name to a file path
+# and adapter. This is currently for documentation and future CLI
+# integration (phdb ingest --source gmail).
+#
+# Example:
+#
+# [sources.gmail]
+# path = "/path/to/All mail Including Spam and Trash.mbox"
+# adapter = "mbox"
+#
+# [sources.imessage]
+# path = "/path/to/iPhone-backup-dir"
+# adapter = "imessage"
+#
+# Run `phdb ingest --help` for adapter names, or see ADAPTERS.md.

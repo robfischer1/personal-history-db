@@ -162,3 +162,51 @@ def test_cli_ingest_with_instance_dir(tmp_path: Path) -> None:
     with connect(db_path) as conn:
         direction = conn.execute("SELECT direction FROM messages LIMIT 1").fetchone()[0]
     assert direction == "outbound"
+
+
+def test_cli_init_fresh(tmp_path: Path) -> None:
+    """Init creates a new instance directory with all template files."""
+    target = tmp_path / "my-instance"
+    runner = CliRunner()
+    result = runner.invoke(cli, ["init", str(target)])
+    assert result.exit_code == 0, result.output
+    assert target.is_dir()
+    assert (target / "paths.toml").is_file()
+    assert (target / "identity.toml").is_file()
+    assert (target / "embedding.toml").is_file()
+    assert (target / "sources.toml").is_file()
+    assert (target / "adapters").is_dir()
+    assert "Instance directory ready" in result.output
+
+
+def test_cli_init_sets_db_path(tmp_path: Path) -> None:
+    """Init with --db-path fills in paths.toml."""
+    target = tmp_path / "instance"
+    db = tmp_path / "data" / "my.db"
+    runner = CliRunner()
+    result = runner.invoke(cli, ["init", str(target), "--db-path", str(db)])
+    assert result.exit_code == 0, result.output
+    content = (target / "paths.toml").read_text(encoding="utf-8")
+    assert str(db).replace("\\", "/") in content
+
+
+def test_cli_init_refuses_existing_config(tmp_path: Path) -> None:
+    """Init refuses to overwrite an existing instance directory."""
+    target = tmp_path / "instance"
+    target.mkdir()
+    (target / "paths.toml").write_text("existing = true\n", encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["init", str(target)])
+    assert result.exit_code != 0
+    assert "already has config files" in result.output
+
+
+def test_cli_init_then_migrate(tmp_path: Path) -> None:
+    """Full flow: init -> set db_path -> migrate."""
+    inst = tmp_path / "instance"
+    db = tmp_path / "test.db"
+    runner = CliRunner()
+    runner.invoke(cli, ["init", str(inst), "--db-path", str(db)])
+    result = runner.invoke(cli, ["--db", str(db), "--instance-dir", str(inst), "migrate"])
+    assert result.exit_code == 0, result.output
+    assert "Applied" in result.output

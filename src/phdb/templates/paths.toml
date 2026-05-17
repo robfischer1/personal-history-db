@@ -1,0 +1,12 @@
+# paths.toml — Filesystem paths for this phdb instance
+#
+# db_path: where the SQLite database lives (created by `phdb migrate`)
+# data_dir: parent directory for the DB and any sidecar files
+# adapter_paths: additional directories to search for custom adapters
+
+db_path = ""
+data_dir = ""
+log_level = "INFO"
+
+# Uncomment and set to a directory containing custom adapter .py files:
+# adapter_paths = ["/path/to/my/adapters"]
