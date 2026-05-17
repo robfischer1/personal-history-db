@@ -322,3 +322,78 @@ def embed(
         f"  elapsed={result.elapsed_s / 60:.1f} min"
         f"  rate={rate:.1f} chunks/s"
     )
+
+
+@cli.group()
+def decay() -> None:
+    """Decay scoring commands."""
+
+
+@decay.command()
+@click.option("--config", type=click.Path(exists=True), default=None, help="Path to decay_policy.toml.")
+@click.pass_context
+def populate(ctx: click.Context, config: str | None) -> None:
+    """Compute initial scores for all unscored chunks."""
+    from pathlib import Path as P
+
+    from phdb.db import connect
+    from phdb.scoring import DecayConfig, populate_initial_scores
+
+    settings = ctx.obj["settings"]
+    cfg = DecayConfig.load(P(config)) if config else DecayConfig.load()
+
+    with connect(settings.db_path) as conn:
+        count = populate_initial_scores(conn, cfg)
+        click.echo(f"Populated {count:,} chunk scores.")
+
+
+@decay.command()
+@click.option("--config", type=click.Path(exists=True), default=None, help="Path to decay_policy.toml.")
+@click.option("--tier", default=None, help="Recompute only this tier.")
+@click.pass_context
+def recompute(ctx: click.Context, config: str | None, tier: str | None) -> None:
+    """Recompute scores for all chunks (reads engagement history)."""
+    from pathlib import Path as P
+
+    from phdb.db import connect
+    from phdb.scoring import DecayConfig, batch_recompute
+
+    settings = ctx.obj["settings"]
+    cfg = DecayConfig.load(P(config)) if config else DecayConfig.load()
+
+    with connect(settings.db_path) as conn:
+        count = batch_recompute(conn, cfg, tier_filter=tier)
+        click.echo(f"Recomputed {count:,} chunk scores.")
+
+
+@decay.command(name="stats")
+@click.pass_context
+def decay_stats(ctx: click.Context) -> None:
+    """Show decay score distribution by tier."""
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+
+    with connect(settings.db_path, readonly=True) as conn:
+        try:
+            rows = conn.execute(
+                "SELECT tier, count(*), avg(score), min(score), max(score)"
+                " FROM chunk_scores GROUP BY tier ORDER BY avg(score) DESC"
+            ).fetchall()
+        except Exception:
+            click.echo("chunk_scores table not found. Run: phdb migrate && phdb decay populate")
+            return
+
+        if not rows:
+            click.echo("No scores computed yet. Run: phdb decay populate")
+            return
+
+        total = sum(r[1] for r in rows)
+        click.echo(f"Decay scores: {total:,} chunks\n")
+        click.echo(f"  {'Tier':<18s} {'Count':>8s} {'Avg':>8s} {'Min':>8s} {'Max':>8s}")
+        click.echo(f"  {'-' * 18} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8}")
+        for tier, count, avg, mn, mx in rows:
+            click.echo(f"  {tier:<18s} {count:>8,} {avg:>8.4f} {mn:>8.4f} {mx:>8.4f}")
+
+        eng_count = conn.execute("SELECT count(*) FROM engagements").fetchone()[0]
+        click.echo(f"\n  Engagement events: {eng_count:,}")

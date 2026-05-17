@@ -1,0 +1,91 @@
+# Decay Policy Configuration
+# All tunable parameters for the retrieval-weight scoring system.
+# Change values here without touching code. Daily batch recompute picks up changes.
+
+[tiers]
+# Tier definitions: half_life_days, base_value, floor_fraction
+# floor = base_value * floor_fraction (minimum score, never zero)
+
+[tiers.evergreen]
+half_life_days = -1  # -1 = infinity (no decay)
+base_value = 1.0
+floor_fraction = 1.0  # score never drops
+
+[tiers.near_evergreen]
+half_life_days = 3652  # ~10 years
+base_value = 1.0
+floor_fraction = 0.05
+
+[tiers.warm]
+half_life_days = 1826  # ~5 years
+base_value = 1.0
+floor_fraction = 0.05
+
+[tiers.standard]
+half_life_days = 730  # ~2 years
+base_value = 1.0
+floor_fraction = 0.05
+
+[tiers.fast]
+half_life_days = 182  # ~6 months
+base_value = 1.0
+floor_fraction = 0.05
+
+[engagement]
+boost_fraction = 0.1  # each engagement injects base_value * this
+# boost decays using the same half_life as the chunk's tier
+
+[health_floor]
+recency_window_days = 30  # most recent N days of health/workout data
+# never decays below standard-tier score regardless of fast-decay classification
+
+[source_kind_tiers]
+# Maps source_kind (from source_files table) to tier name.
+# Chunks inherit tier from their source chain.
+# Per-chunk tier_override in chunk_scores takes precedence when set.
+
+gmail = "standard"
+imessage = "standard"
+phone-sms = "standard"
+sms-xml = "standard"
+discord = "standard"
+google-voice = "standard"
+facebook = "standard"
+facebook-posts = "standard"
+facebook-residuals = "standard"
+
+chat-logs = "fast"          # 2003 forum corpus + legacy chat logs
+
+claude-code = "standard"
+gemini-scribe = "standard"
+gemini-web = "standard"
+
+apple-health = "fast"
+google-fit = "fast"
+strong = "fast"
+
+raindrop = "fast"
+titaniumbackup-android-browser = "fast"
+goodreads = "fast"
+
+onedrive = "standard"
+google-drive = "standard"
+apple-notes = "standard"
+staged-md = "standard"
+
+calendar = "standard"
+google-activity = "standard"
+google-timeline = "standard"
+google-contacts = "standard"
+facebook-connections = "standard"
+spotify = "standard"
+amazon = "standard"
+phone-camera = "standard"
+calls-xml = "standard"
+titaniumbackup-twitter = "standard"
+
+[schema_type_overrides]
+# Override tier by chunks.schema_type when source_kind mapping is too coarse.
+# These take priority over source_kind_tiers but not per-chunk tier_override.
+# Observation = "fast"  # health observations already covered by source_kind
+# ExerciseAction = "fast"  # workouts already covered by source_kind
