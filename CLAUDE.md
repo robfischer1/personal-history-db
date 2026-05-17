@@ -87,7 +87,7 @@ Tracked in `REWRITE_PLAN.md`. Phases are sequential and exit-gated. Current stat
 
 ## Conventions
 
-- **Dry-run by default**: All ingest commands default to `--dry-run`; `--apply` required for real writes
+- **Safe preview**: All ingest/embed commands support `--dry-run` to preview without writing
 - **Idempotent**: Adapters use dedup strategies; re-running is safe
 - **No PII in project tier**: All identity config (emails, phone numbers, names) lives in instance TOML, loaded via `IdentitySettings`
 - **Golden-diff validation**: When porting a legacy ingester, diff output against the legacy script on real data before retiring it

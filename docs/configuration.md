@@ -54,7 +54,7 @@ adapter_paths = ["C:/config/custom-adapters/"]
 
 ### embedding.toml
 
-Embedding model configuration. Requires a running [Ollama](https://ollama.ai/) instance.
+Embedding model configuration. Ships with `OllamaEmbedProvider`; the `EmbedProvider` Protocol allows adding custom backends.
 
 ```toml
 [embedding]
@@ -62,6 +62,10 @@ model = "nomic-embed-text"
 dim = 768
 endpoint = "http://localhost:11434"
 ```
+
+Requires a running [Ollama](https://ollama.ai/) instance with the configured model pulled (`ollama pull nomic-embed-text`).
+
+Custom providers can be added by implementing the `EmbedProvider` Protocol in `src/phdb/embed_provider.py`. Each chunk stores its embedding metadata for future multi-provider coexistence.
 
 ### atoms.toml
 
@@ -75,7 +79,7 @@ bio = { type = "Observation", description = "Biological measurement" }
 
 ## MCP server setup
 
-The MCP server (`server.py`) wraps the query layer for AI assistant integration.
+The MCP server is a separate package — [personal-history-db-mcp](https://github.com/robfischer1/personal-history-db-mcp). It wraps the phdb query layer for AI assistant integration.
 
 ### Claude Code
 
@@ -85,8 +89,8 @@ Add to your project's `.claude/settings.json`:
 {
   "mcpServers": {
     "personal-history-db": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/personal-history-db", "run", "python", "server.py"],
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/robfischer1/personal-history-db-mcp.git", "personal-history-db-mcp"],
       "env": {
         "PHDB_DB_PATH": "/path/to/personal-history-data/personal-history.db",
         "PHDB_INSTANCE_DIR": "/path/to/personal-history-instance"
@@ -104,8 +108,8 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 {
   "mcpServers": {
     "personal-history-db": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/personal-history-db", "run", "python", "server.py"],
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/robfischer1/personal-history-db-mcp.git", "personal-history-db-mcp"],
       "env": {
         "PHDB_DB_PATH": "/path/to/personal-history-data/personal-history.db",
         "PHDB_INSTANCE_DIR": "/path/to/personal-history-instance"
@@ -115,7 +119,26 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 }
 ```
 
-### Config resolution in server.py
+### Local development setup
+
+If you have both repos checked out locally:
+
+```json
+{
+  "mcpServers": {
+    "personal-history-db": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/personal-history-db-mcp", "run", "personal-history-db-mcp"],
+      "env": {
+        "PHDB_DB_PATH": "/path/to/personal-history-data/personal-history.db",
+        "PHDB_INSTANCE_DIR": "/path/to/personal-history-instance"
+      }
+    }
+  }
+}
+```
+
+### Config resolution
 
 The server resolves its database connection in this order:
 

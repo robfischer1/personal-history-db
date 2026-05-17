@@ -13,7 +13,8 @@ Built around SQLite + [sqlite-vec](https://github.com/asg017/sqlite-vec) for hyb
 - **Direction inference** — automatic inbound/outbound/self classification using owner identity config
 - **Embedding pipeline** — chunking, batched Ollama embedding (nomic-embed-text, 768-dim), cross-process write lock
 - **MCP server** — 11 tools for AI-assistant integration (search, lookups, stats, people queries)
-- **Dry-run by default** — all ingest commands require `--apply` for real writes
+- **Pluggable embedding** — `EmbedProvider` Protocol with Ollama implementation; extensible to other backends
+- **Safe preview** — `--dry-run` flag on ingest/embed parses and reports without writing
 
 ## Quickstart
 
@@ -23,18 +24,24 @@ git clone https://github.com/robfischer1/personal-history-db.git
 cd personal-history-db
 uv venv && uv pip install -e ".[dev]"
 
-# Create a database with schema migrations
-phdb migrate --db my-history.db
+# Scaffold an instance directory (identity, paths, embedding config)
+phdb init ~/personal-history-instance
 
-# Ingest a Gmail mbox export (dry-run first)
-phdb ingest ~/takeout/All\ mail.mbox --adapter mbox --db my-history.db --dry-run
-phdb ingest ~/takeout/All\ mail.mbox --adapter mbox --db my-history.db --apply
+# Edit the generated TOML files with your info, then:
+phdb --instance-dir ~/personal-history-instance migrate
+
+# Ingest a Gmail mbox export (preview first, then for real)
+phdb --instance-dir ~/personal-history-instance \
+    ingest ~/takeout/All\ mail.mbox --adapter mbox --dry-run
+phdb --instance-dir ~/personal-history-instance \
+    ingest ~/takeout/All\ mail.mbox --adapter mbox
 
 # Check what's in the database
-phdb stats --db my-history.db
+phdb --instance-dir ~/personal-history-instance stats
 
 # Semantic search (requires Ollama running with nomic-embed-text)
-phdb query "that conversation about moving to New York" --db my-history.db
+phdb --instance-dir ~/personal-history-instance \
+    query "that conversation about moving to New York"
 ```
 
 See [docs/fresh-start.md](docs/fresh-start.md) for a complete zero-to-query walkthrough.
@@ -97,11 +104,17 @@ See [docs/writing-an-adapter.md](docs/writing-an-adapter.md) for the full guide.
 
 ## MCP server
 
-The MCP server exposes 11 tools for AI assistants (Claude Code, Claude Desktop, etc.):
+The MCP server lives in a separate package — [personal-history-db-mcp](https://github.com/robfischer1/personal-history-db-mcp). It exposes 12 tools for AI assistants (Claude Code, Claude Desktop, etc.):
 
-`search`, `get_message`, `get_chunk`, `get_thread`, `list_sources`, `corpus_stats`, `nearest_neighbors`, `server_info`, `find_messages_by_participant`, `find_threads_by_subject`, `top_correspondents`
+`search`, `get_message`, `get_chunk`, `get_thread`, `list_sources`, `corpus_stats`, `nearest_neighbors`, `server_info`, `find_messages_by_participant`, `find_threads`, `top_correspondents`, `log_engagement`
 
-See [docs/configuration.md](docs/configuration.md) for setup instructions.
+Install via uvx:
+
+```bash
+uvx --from git+https://github.com/robfischer1/personal-history-db-mcp.git personal-history-db-mcp
+```
+
+See [docs/configuration.md](docs/configuration.md) for Claude Code/Desktop setup.
 
 ## Development
 
@@ -115,13 +128,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — three-tier design, module map, data flow
-- [Configuration](docs/configuration.md) — TOML settings, env vars, MCP server setup
-- [Writing an Adapter](docs/writing-an-adapter.md) — adapter contract, dedup strategies, testing
 - [Fresh Start](docs/fresh-start.md) — zero-to-query walkthrough for new adopters
+- [Configuration](docs/configuration.md) — TOML settings, env vars, MCP server setup
+- [Adapters](ADAPTERS.md) — per-adapter reference: input formats, export instructions, gotchas
+- [Architecture](docs/architecture.md) — three-tier design, module map, data flow
+- [Writing an Adapter](docs/writing-an-adapter.md) — adapter contract, dedup strategies, testing
 - [Database Schema](CURRENT-SCHEMA.md) — table definitions and relationships
 - [MCP Contract](MCP-CONTRACT.md) — MCP tool signatures and behavior
+- [Changelog](CHANGELOG.md) — release history
 
 ## License
 
-[MIT](LICENSE)
+[Apache 2.0](LICENSE)

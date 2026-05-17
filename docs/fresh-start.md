@@ -29,8 +29,10 @@ phdb --help
 The instance directory holds your personal config — identity, paths, embedding settings. It stays separate from the project so the project repo never contains PII.
 
 ```bash
-mkdir -p ~/personal-history-instance
+phdb init ~/personal-history-instance
 ```
+
+This scaffolds template TOML files. Edit them:
 
 ### identity.toml
 
@@ -68,6 +70,8 @@ dim = 768
 endpoint = "http://localhost:11434"
 ```
 
+Requires [Ollama](https://ollama.ai/) with the model pulled. See [configuration.md](configuration.md) for details.
+
 ## 3. Create the database
 
 ```bash
@@ -80,9 +84,9 @@ This creates the SQLite database at the path specified in `paths.toml` and appli
 
 ## 4. Ingest some data
 
-### Dry-run first
+### Preview with dry-run
 
-Every ingest command defaults to dry-run mode. This parses the source file and reports what *would* be inserted without touching the database.
+Use `--dry-run` to parse the source file and report what *would* be inserted without touching the database:
 
 ```bash
 phdb --instance-dir ~/personal-history-instance \
@@ -93,13 +97,14 @@ phdb --instance-dir ~/personal-history-instance \
 
 The output shows row counts, date ranges, and any parse warnings.
 
-### Apply for real
+### Ingest for real
+
+Without `--dry-run`, the adapter writes to the database (dedup ensures re-running is safe):
 
 ```bash
 phdb --instance-dir ~/personal-history-instance \
     ingest ~/takeout/All\ mail.mbox \
-    --adapter mbox \
-    --apply
+    --adapter mbox
 ```
 
 ### Check the result
@@ -120,7 +125,7 @@ ollama pull nomic-embed-text
 ollama serve
 
 # Run the embed pipeline
-phdb --instance-dir ~/personal-history-instance embed --apply
+phdb --instance-dir ~/personal-history-instance embed
 ```
 
 The embed pipeline chunks message bodies, sends them to Ollama in batches, and stores the vectors in the `doc_vectors` table.
@@ -143,15 +148,28 @@ phdb --instance-dir ~/personal-history-instance \
 
 ### MCP server
 
-For AI assistant integration, start the MCP server:
+For AI assistant integration, install the MCP plugin:
 
 ```bash
-PHDB_DB_PATH=~/personal-history-data/personal-history.db \
-PHDB_INSTANCE_DIR=~/personal-history-instance \
-    uv run python server.py
+uvx --from git+https://github.com/robfischer1/personal-history-db-mcp.git personal-history-db-mcp
 ```
 
-See [configuration.md](configuration.md) for Claude Code and Claude Desktop setup.
+Or add it to your Claude Code/Desktop config (see [configuration.md](configuration.md)):
+
+```json
+{
+  "mcpServers": {
+    "personal-history-db": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/robfischer1/personal-history-db-mcp.git", "personal-history-db-mcp"],
+      "env": {
+        "PHDB_DB_PATH": "~/personal-history-data/personal-history.db",
+        "PHDB_INSTANCE_DIR": "~/personal-history-instance"
+      }
+    }
+  }
+}
+```
 
 ## Available adapters
 
