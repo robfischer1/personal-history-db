@@ -371,13 +371,7 @@ class DiscordAdapter(Adapter):
                 if row.body_text and not row.body_text_hash:
                     row.body_text_hash = hashlib.sha256(row.body_text.encode("utf-8")).hexdigest()
 
-                has_identity = bool(
-                    settings.identity.owner_names
-                    or settings.identity.owner_emails
-                    or settings.identity.owner_phones
-                    or settings.identity.owner_handles
-                )
-                if row.direction == "unknown" and has_identity:
+                if row.direction == "unknown" and settings.identity.is_configured:
                     row.direction = self.infer_direction(row, settings.identity)
 
                 message_id = self._insert_row(conn, row, source_file_id)

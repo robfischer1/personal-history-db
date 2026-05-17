@@ -34,13 +34,7 @@ def validate_instance(settings: Settings) -> list[str]:
             "No identity.toml in instance dir; direction inference will not work"
         )
 
-    identity = settings.identity
-    if not (
-        identity.owner_names
-        or identity.owner_emails
-        or identity.owner_phones
-        or identity.owner_handles
-    ):
+    if not settings.identity.is_configured:
         warnings.append(
             "Identity config is empty; direction inference will not work"
         )

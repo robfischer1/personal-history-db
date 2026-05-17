@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.settings import IdentitySettings, Settings
+from phdb.identity import IdentitySettings
+from phdb.settings import Settings
 
 
 def test_default_settings() -> None:
@@ -140,3 +141,46 @@ def test_identity_handles_toml_loading(tmp_path: Path) -> None:
     assert s.identity.is_me("aim:oldhandle")
     assert s.identity.is_me("user@example.com")
     assert not s.identity.is_me("discord:other")
+
+
+def test_identity_is_configured_empty() -> None:
+    identity = IdentitySettings()
+    assert not identity.is_configured
+
+
+def test_identity_is_configured_populated() -> None:
+    identity = IdentitySettings(owner_emails={"x@y.com"})
+    assert identity.is_configured
+
+
+def test_identity_pii_literals_empty() -> None:
+    identity = IdentitySettings()
+    assert identity.pii_literals() == []
+
+
+def test_identity_pii_literals_populated() -> None:
+    identity = IdentitySettings(
+        owner_names={"alice"},
+        owner_emails={"a@b.com"},
+        owner_phones={"+15551234567"},
+        owner_handles={"discord": {"alicehandle"}},
+    )
+    literals = identity.pii_literals()
+    assert "alice" in literals
+    assert "a@b.com" in literals
+    assert "+15551234567" in literals
+    assert "alicehandle" in literals
+
+
+def test_settings_no_identity_no_traceback() -> None:
+    """Framework loads cleanly with no identity config at all."""
+    s = Settings.load(db_path=":memory:")
+    assert not s.identity.is_configured
+    assert s.identity.pii_literals() == []
+    assert s.identity.is_me("anything@test.com") is False
+
+
+def test_identity_importable_from_settings() -> None:
+    """Backwards-compat: IdentitySettings still importable from phdb.settings."""
+    from phdb.settings import IdentitySettings as IS
+    assert IS is IdentitySettings

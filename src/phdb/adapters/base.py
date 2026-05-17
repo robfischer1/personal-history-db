@@ -399,15 +399,8 @@ class Adapter(ABC):
                 row.is_bulk = 1
                 row.bulk_signal = signal
 
-            if not _is_document:
-                has_identity = (
-                    settings.identity.owner_names
-                    or settings.identity.owner_emails
-                    or settings.identity.owner_phones
-                    or settings.identity.owner_handles
-                )
-                if row.direction == "unknown" and has_identity:
-                    row.direction = self.infer_direction(row, settings.identity)
+            if not _is_document and row.direction == "unknown" and settings.identity.is_configured:
+                row.direction = self.infer_direction(row, settings.identity)
 
             row_id = self._insert_row(conn, row, source_file_id)
             if row_id is None:

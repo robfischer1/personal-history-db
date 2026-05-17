@@ -19,6 +19,8 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from phdb.identity import IdentitySettings
+
 
 class EmbeddingSettings(BaseModel):
     """Embedding model configuration."""
@@ -26,30 +28,6 @@ class EmbeddingSettings(BaseModel):
     model: str = "nomic-embed-text"
     dim: int = 768
     endpoint: str = "http://localhost:11434"
-
-
-class IdentitySettings(BaseModel):
-    """Owner identity for direction inference.
-
-    In the project tier this is empty. The instance tier populates it
-    with the actual owner's addresses, phones, name variants, and
-    platform handles.
-    """
-
-    owner_names: set[str] = set()
-    owner_emails: set[str] = set()
-    owner_phones: set[str] = set()
-    owner_handles: dict[str, set[str]] = {}
-
-    def is_me(self, address: str) -> bool:
-        """Check if an address belongs to the database owner."""
-        addr = address.strip().lower()
-        if ":" in addr:
-            platform, handle = addr.split(":", 1)
-            platform_handles = self.owner_handles.get(platform, set())
-            if handle in platform_handles:
-                return True
-        return addr in self.owner_emails or addr in self.owner_phones or addr in self.owner_names
 
 
 def _load_instance_toml(instance_dir: Path | None) -> dict[str, Any]:

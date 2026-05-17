@@ -1,0 +1,28 @@
+# identity.toml — Owner identity configuration
+#
+# This file tells phdb who "you" are so it can:
+#   1. Infer message direction (inbound/outbound/self)
+#   2. Redact your PII from log output
+#   3. Label "owner" messages in adapters
+#
+# All fields are optional. Leave them empty or remove them entirely
+# if you don't need that feature. The framework works fine without
+# identity config — direction inference just returns "unknown".
+
+[identity]
+# Your name variants (lowercase). Used for direction inference and PII redaction.
+# Include nicknames, maiden names, common misspellings people use for you.
+owner_names = []
+
+# Your email addresses (lowercase).
+owner_emails = []
+
+# Your phone numbers (digits only or E.164 format).
+owner_phones = []
+
+# Platform-specific handles. Key = platform name, value = list of handles.
+# [identity.owner_handles]
+# discord = ["yourname#1234"]
+# twitter = ["yourhandle"]
+# telegram = ["yourusername"]
+# facebook = ["your.name"]

@@ -28,15 +28,7 @@ def cli(ctx: click.Context, db: str | None, instance_dir: str | None, log_level:
     )
     ctx.obj["settings"] = settings
 
-    pii_literals: list[str] = list(
-        settings.identity.owner_names
-        | settings.identity.owner_emails
-        | settings.identity.owner_phones
-    )
-    for handles in settings.identity.owner_handles.values():
-        pii_literals.extend(handles)
-
-    logger = setup_logging(level=log_level, pii_literals=pii_literals)
+    logger = setup_logging(level=log_level, pii_literals=settings.identity.pii_literals())
 
     for warning in validate_instance(settings):
         logger.warning(warning)

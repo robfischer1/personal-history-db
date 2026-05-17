@@ -374,7 +374,7 @@ class IMessageAdapter(Adapter):
         if self._name_to_phone:
             log.info("[%s] Resumed contact lookup with %d entries", self.name, len(self._name_to_phone))
 
-        has_identity = bool(owner_names or settings.identity.owner_emails or owner_phones or settings.identity.owner_handles)
+        has_identity = settings.identity.is_configured
         t_start = time.time()
         files_done = 0
         touched_threads: set[int] = set()
