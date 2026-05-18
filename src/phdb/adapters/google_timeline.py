@@ -2,9 +2,8 @@
 
 Source: a single locationhistory.json file.
 Three record shapes: visit->Place, activity->TravelAction, timelinePath->GeoShape.
-Geo trace points go to the geo_traces sidecar table.
+Geo trace points go to the geo_traces sidecar table via declared sidecar API.
 Single thread: google-timeline:lifestream. All is_bulk=1.
-Custom run() for geo_traces writes.
 """
 
 from __future__ import annotations
@@ -13,22 +12,42 @@ import contextlib
 import hashlib
 import json
 import re
-import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.adapters.base import (
+    Adapter,
+    AdapterRow,
+    DedupStrategy,
+    SidecarColumn,
+    SidecarTableDef,
+)
 from phdb.log import get_logger
-
-if TYPE_CHECKING:
-    from phdb.settings import Settings
 
 log = get_logger("phdb.adapters.google_timeline")
 
 _MAX_BODY_LEN = 2000
 _GEO_RE = re.compile(r"^geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$")
+
+GEO_TRACES_TABLE = SidecarTableDef(
+    table_name="geo_traces",
+    columns=(
+        SidecarColumn("source_kind", "TEXT", nullable=False),
+        SidecarColumn("point_idx", "INTEGER", nullable=False),
+        SidecarColumn("ts", "TEXT"),
+        SidecarColumn("lat", "REAL", nullable=False),
+        SidecarColumn("lon", "REAL", nullable=False),
+        SidecarColumn("elevation_m", "REAL"),
+        SidecarColumn("speed_mps", "REAL"),
+        SidecarColumn("course", "REAL"),
+        SidecarColumn("horizontal_accuracy_m", "REAL"),
+        SidecarColumn("vertical_accuracy_m", "REAL"),
+        SidecarColumn("extra_json", "TEXT"),
+    ),
+    parent_fk_column="parent_message_id",
+    parent_table="messages",
+)
 
 
 def _parse_geo(s: str) -> tuple[float | None, float | None]:
@@ -128,39 +147,17 @@ class GoogleTimelineAdapter(Adapter):
     schema_type = "Place"
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
     batch_size = 1000
+    sidecar_tables = [GEO_TRACES_TABLE]
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
-        raise NotImplementedError("Use run() directly — geo_traces needs conn access")
-
-    def run(
-        self,
-        source_path: Path,
-        conn: sqlite3.Connection,
-        settings: Settings,
-    ) -> IngestReport:
-        report = IngestReport(
-            adapter_name=self.name,
-            source_path=str(source_path),
-            source_file_id=0,
-        )
-
-        source_file_id = self._register_source(conn, source_path)
-        report.source_file_id = source_file_id
-
         data = json.loads(source_path.read_text(encoding="utf-8"))
         log.info("[%s] Loaded %d top-level records", self.name, len(data))
 
-        touched_threads: set[int] = set()
-        batch_count = 0
-
         for rec in data:
-            row: AdapterRow | None = None
-            geo_points: list[dict[str, object]] | None = None
-
             if "visit" in rec:
-                row = _visit_row(rec)
+                yield _visit_row(rec)
             elif "activity" in rec:
-                row = _activity_row(rec)
+                yield _activity_row(rec)
             elif "timelinePath" in rec:
                 points = rec.get("timelinePath") or []
                 start_ts = _ts_iso_utc(str(rec.get("startTime", "")))
@@ -172,68 +169,49 @@ class GoogleTimelineAdapter(Adapter):
                     f"Trace: {len(points)} points", body, start_ts, end_ts,
                     "google-timeline-path",
                 )
+
                 if isinstance(points, list):
-                    geo_points = points
-            else:
+                    geo_rows = self._build_geo_rows(points, start_ts)
+                    if geo_rows:
+                        row.sidecar_rows["geo_traces"] = geo_rows
+
+                yield row
+
+    def _build_geo_rows(
+        self, points: list[object], start_ts: str | None
+    ) -> list[dict[str, object]]:
+        base_epoch: float | None = None
+        if start_ts:
+            with contextlib.suppress(ValueError):
+                base_epoch = datetime.fromisoformat(
+                    start_ts.replace("Z", "+00:00")
+                ).timestamp()
+
+        geo_rows: list[dict[str, object]] = []
+        for idx, p in enumerate(points):
+            if not isinstance(p, dict):
                 continue
-
-            report.rows_yielded += 1
-            message_id = self._insert_row(conn, row, source_file_id)
-            if message_id is None:
-                report.rows_skipped += 1
+            lat, lon = _parse_geo(str(p.get("point", "")))
+            if lat is None or lon is None:
                 continue
-
-            report.rows_inserted += 1
-
-            if row.thread_key:
-                thread_id, created = self._upsert_thread(conn, row.thread_key)
-                self._link_message_thread(conn, message_id, thread_id)
-                if created:
-                    report.threads_created += 1
-                touched_threads.add(thread_id)
-
-            if geo_points and message_id:
-                base_epoch = None
-                if row.date_sent:
-                    with contextlib.suppress(ValueError):
-                        base_epoch = datetime.fromisoformat(
-                            row.date_sent.replace("Z", "+00:00")
-                        ).timestamp()
-
-                for idx, p in enumerate(geo_points):
-                    if not isinstance(p, dict):
-                        continue
-                    lat, lon = _parse_geo(str(p.get("point", "")))
-                    if lat is None or lon is None:
-                        continue
-                    offset_min = p.get("durationMinutesOffsetFromStartTime")
-                    ts_v = None
-                    if base_epoch is not None and offset_min is not None:
-                        with contextlib.suppress(TypeError, ValueError):
-                            ts_v = datetime.fromtimestamp(
-                                base_epoch + float(str(offset_min)) * 60.0, tz=UTC
-                            ).isoformat()
-                    conn.execute(
-                        """INSERT INTO geo_traces
-                              (parent_message_id, source_kind, point_idx, ts, lat, lon,
-                               extra_json)
-                           VALUES (?, 'google-timeline-path', ?, ?, ?, ?, ?)""",
-                        (message_id, idx, ts_v, lat, lon, json.dumps({"offset_min": offset_min})),
-                    )
-
-            batch_count += 1
-            if batch_count >= self.batch_size:
-                conn.commit()
-                batch_count = 0
-
-        conn.commit()
-
-        for tid in touched_threads:
-            self._update_thread_aggregates(conn, tid)
-        conn.commit()
-
-        log.info(
-            "[%s] Done: %d yielded, %d inserted, %d skipped",
-            self.name, report.rows_yielded, report.rows_inserted, report.rows_skipped,
-        )
-        return report
+            offset_min = p.get("durationMinutesOffsetFromStartTime")
+            ts_v: str | None = None
+            if base_epoch is not None and offset_min is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    ts_v = datetime.fromtimestamp(
+                        base_epoch + float(str(offset_min)) * 60.0, tz=UTC
+                    ).isoformat()
+            geo_rows.append({
+                "source_kind": "google-timeline-path",
+                "point_idx": idx,
+                "ts": ts_v,
+                "lat": lat,
+                "lon": lon,
+                "elevation_m": None,
+                "speed_mps": None,
+                "course": None,
+                "horizontal_accuracy_m": None,
+                "vertical_accuracy_m": None,
+                "extra_json": json.dumps({"offset_min": offset_min}),
+            })
+        return geo_rows

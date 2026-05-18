@@ -21,7 +21,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
-from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.adapters.base import (
+    Adapter,
+    AdapterRow,
+    DedupStrategy,
+    IngestReport,
+    SidecarColumn,
+    SidecarTableDef,
+)
 from phdb.log import get_logger
 
 if TYPE_CHECKING:
@@ -72,6 +79,73 @@ def _safe_float(v: str | None) -> float | None:
         return None
 
 
+RECORD_METADATA_TABLE = SidecarTableDef(
+    table_name="record_metadata",
+    columns=(
+        SidecarColumn("key", "TEXT", nullable=False),
+        SidecarColumn("value", "TEXT"),
+    ),
+    parent_fk_column="message_id",
+    parent_table="messages",
+)
+
+HR_SAMPLES_TABLE = SidecarTableDef(
+    table_name="hr_samples",
+    columns=(
+        SidecarColumn("ts", "TEXT", nullable=False),
+        SidecarColumn("bpm", "INTEGER", nullable=False),
+    ),
+    parent_fk_column="parent_message_id",
+    parent_table="messages",
+)
+
+WORKOUT_EVENTS_TABLE = SidecarTableDef(
+    table_name="workout_events",
+    columns=(
+        SidecarColumn("event_type", "TEXT"),
+        SidecarColumn("date", "TEXT"),
+        SidecarColumn("duration_seconds", "REAL"),
+    ),
+    parent_fk_column="workout_message_id",
+    parent_table="messages",
+)
+
+WORKOUT_STATISTICS_TABLE = SidecarTableDef(
+    table_name="workout_statistics",
+    columns=(
+        SidecarColumn("stat_type", "TEXT", nullable=False),
+        SidecarColumn("value_min", "REAL"),
+        SidecarColumn("value_avg", "REAL"),
+        SidecarColumn("value_max", "REAL"),
+        SidecarColumn("value_sum", "REAL"),
+        SidecarColumn("unit", "TEXT"),
+        SidecarColumn("date_start", "TEXT"),
+        SidecarColumn("date_end", "TEXT"),
+    ),
+    parent_fk_column="workout_message_id",
+    parent_table="messages",
+)
+
+GEO_TRACES_TABLE = SidecarTableDef(
+    table_name="geo_traces",
+    columns=(
+        SidecarColumn("source_kind", "TEXT", nullable=False),
+        SidecarColumn("point_idx", "INTEGER", nullable=False),
+        SidecarColumn("ts", "TEXT"),
+        SidecarColumn("lat", "REAL", nullable=False),
+        SidecarColumn("lon", "REAL", nullable=False),
+        SidecarColumn("elevation_m", "REAL"),
+        SidecarColumn("speed_mps", "REAL"),
+        SidecarColumn("course", "REAL"),
+        SidecarColumn("horizontal_accuracy_m", "REAL"),
+        SidecarColumn("vertical_accuracy_m", "REAL"),
+        SidecarColumn("extra_json", "TEXT"),
+    ),
+    parent_fk_column="parent_message_id",
+    parent_table="messages",
+)
+
+
 class AppleHealthAdapter(Adapter):
     """Ingest Apple Health Export zip (streaming XML + GPX)."""
 
@@ -81,6 +155,13 @@ class AppleHealthAdapter(Adapter):
     schema_type = "Observation"
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
     batch_size = 25000
+    sidecar_tables = [
+        RECORD_METADATA_TABLE,
+        HR_SAMPLES_TABLE,
+        WORKOUT_EVENTS_TABLE,
+        WORKOUT_STATISTICS_TABLE,
+        GEO_TRACES_TABLE,
+    ]
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
         raise NotImplementedError("Use run() directly — sidecar tables need conn access")
@@ -97,6 +178,7 @@ class AppleHealthAdapter(Adapter):
             source_file_id=0,
         )
 
+        self.ensure_sidecar_tables(conn)
         source_file_id = self._register_source(conn, source_path)
         report.source_file_id = source_file_id
 
