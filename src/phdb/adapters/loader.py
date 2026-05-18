@@ -1,11 +1,16 @@
-"""Adapter discovery from configured paths.
+"""Adapter discovery from configured paths and entry points.
 
-Walks settings.adapter_paths looking for Python modules containing Adapter
-subclasses. Returns a registry mapping adapter name -> adapter class.
+Two discovery mechanisms:
+1. Path-based: walks settings.adapter_paths for Python modules (power-user config)
+2. Entry-point: loads adapters from the 'phdb.adapters' entry-point group
+   (e.g., personal-history-extras installs its adapters this way)
+
+Path-based adapters override entry-point adapters when names collide.
 """
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import inspect
 import sys
@@ -15,6 +20,8 @@ from phdb.adapters.base import Adapter
 from phdb.log import get_logger
 
 log = get_logger("phdb.adapters.loader")
+
+_ENTRY_POINT_GROUP = "phdb.adapters"
 
 
 def _load_module_from_path(path: Path) -> object | None:
@@ -39,13 +46,35 @@ def _load_module_from_path(path: Path) -> object | None:
     return module
 
 
-def discover_adapters(adapter_paths: list[Path]) -> dict[str, type[Adapter]]:
-    """Scan directories for Adapter subclasses.
-
-    Returns a dict mapping adapter.name -> adapter class. If two adapters
-    share a name, the later one wins (instance overrides project).
-    """
+def _discover_entry_points() -> dict[str, type[Adapter]]:
+    """Load adapters declared via the 'phdb.adapters' entry-point group."""
     registry: dict[str, type[Adapter]] = {}
+    try:
+        eps = importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP)
+    except Exception:
+        return registry
+
+    for ep in eps:
+        try:
+            obj = ep.load()
+        except Exception:
+            log.warning("Failed to load entry-point adapter: %s", ep.name)
+            continue
+        if inspect.isclass(obj) and issubclass(obj, Adapter) and obj is not Adapter:
+            name = getattr(obj, "name", ep.name)
+            registry[name] = obj
+            log.debug("Discovered entry-point adapter: %s from %s", name, ep.value)
+
+    return registry
+
+
+def discover_adapters(adapter_paths: list[Path]) -> dict[str, type[Adapter]]:
+    """Scan directories and entry points for Adapter subclasses.
+
+    Returns a dict mapping adapter.name -> adapter class.
+    Priority: path-based > entry-point (later wins on collision).
+    """
+    registry = _discover_entry_points()
 
     for search_path in adapter_paths:
         if search_path.is_file() and search_path.suffix == ".py":

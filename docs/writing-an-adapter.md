@@ -128,6 +128,60 @@ See the [google_drive](../src/phdb/adapters/google_drive.py), [onedrive](../src/
 
 Both `messages` and `documents` tables have partial UNIQUE indexes on `(source_file_id, raw_hash)` for idempotent ingestion. The `messages` table also has a UNIQUE index on `rfc822_message_id WHERE rfc822_message_id IS NOT NULL` for email dedup.
 
+## Sidecar tables
+
+Adapters that write to child tables (beyond `recipients` and `attachments`) can declare them via the `sidecar_tables` class attribute. The framework auto-creates the tables and auto-inserts child rows.
+
+```python
+from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, SidecarColumn, SidecarTableDef
+
+TAGS_TABLE = SidecarTableDef(
+    table_name="my_tags",
+    columns=(
+        SidecarColumn("tag", "TEXT", nullable=False),
+        SidecarColumn("confidence", "REAL"),
+    ),
+    parent_fk_column="message_id",
+    parent_table="messages",
+)
+
+
+class MyAdapter(Adapter):
+    name = "my_tagged_source"
+    source_kind = "my_tagged"
+    file_kind = "json"
+    schema_type = "Message"
+    dedup_strategy = DedupStrategy.CONTENT_HASH
+    sidecar_tables = [TAGS_TABLE]
+
+    def iter_rows(self, source_path, **kwargs):
+        yield AdapterRow(
+            body_text="tagged message",
+            date_sent="2024-01-15T00:00:00Z",
+            sidecar_rows={
+                "my_tags": [
+                    {"tag": "health", "confidence": 0.95},
+                    {"tag": "exercise", "confidence": 0.80},
+                ],
+            },
+        )
+```
+
+Each `SidecarTableDef` declares:
+- `table_name` — the SQLite table name
+- `columns` — tuple of `SidecarColumn(name, sql_type, nullable=True, default=None)`
+- `parent_fk_column` — column name for the FK to the parent table (default: `"parent_message_id"`)
+- `parent_table` — which table the FK points to (default: `"messages"`)
+
+The framework:
+1. Runs `CREATE TABLE IF NOT EXISTS` on first `run()` invocation
+2. After inserting each parent row, auto-inserts sidecar rows from `AdapterRow.sidecar_rows`
+3. Fills the parent FK column automatically with the inserted parent's ID
+
+For complex sidecar patterns (upserts, read-then-write), use `pre_insert()` / `post_insert()` hooks or override `run()` directly. The hooks remain as an escape hatch.
+
+See [apple_health](../src/phdb/adapters/apple_health.py) (5 declared sidecar tables, custom `run()`) and [google_timeline](../src/phdb/adapters/google_timeline.py) (geo_traces via `iter_rows()` + `sidecar_rows`) for reference.
+
 ## Optional overrides
 
 ### `parse_date(raw: str) -> str | None`
@@ -156,11 +210,19 @@ Override for features like resume support or time budgets. Call `super().run()` 
 
 ## Adapter discovery
 
-The framework discovers adapters by scanning directories listed in `settings.adapter_paths`. For each `.py` file (excluding `_`-prefixed files), it imports the module and finds all concrete `Adapter` subclasses.
+The framework discovers adapters through two mechanisms:
+
+1. **Entry-point group** (`phdb.adapters`): pip-installable packages declare adapters in their `pyproject.toml`:
+   ```toml
+   [project.entry-points."phdb.adapters"]
+   my_adapter = "my_package.adapters.my_adapter:MyAdapter"
+   ```
+2. **Path-based**: directories listed in `settings.adapter_paths` are scanned for `.py` files (excluding `_`-prefixed). Each module is imported and all concrete `Adapter` subclasses are registered.
 
 - **Project adapters** live in `src/phdb/adapters/` (shipped with the framework)
 - **Instance adapters** live in your instance config's adapter directory
-- When two adapters share a `name`, the later path wins (instance overrides project)
+- **Plugin adapters** install via entry points (e.g., `personal-history-extras`)
+- When two adapters share a `name`, path-based wins over entry-point, and later paths win over earlier paths
 
 ## Testing your adapter
 
