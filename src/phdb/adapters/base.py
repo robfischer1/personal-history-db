@@ -4,6 +4,10 @@ Every ingester subclasses Adapter and implements iter_rows(). The base class
 provides the run() method that handles source_files registration, batched
 INSERT OR IGNORE, commit cadence, and progress logging — the ~50 lines of
 boilerplate that every legacy ingester repeats.
+
+Sidecar-table API (Phase 8): adapters declare sidecar tables via the
+sidecar_tables class attribute. The base class auto-creates them and
+auto-inserts child rows from AdapterRow.sidecar_rows after parent insert.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from phdb.log import get_logger
 
@@ -33,6 +37,55 @@ class DedupStrategy(Enum):
     PLATFORM_SYNTHETIC = "synthetic"
     SOURCE_POSITION = "position"
     CONTENT_HASH = "hash"
+
+
+@dataclass(frozen=True)
+class SidecarColumn:
+    """A single column in a sidecar table."""
+
+    name: str
+    sql_type: str
+    nullable: bool = True
+    default: str | None = None
+
+
+@dataclass(frozen=True)
+class SidecarTableDef:
+    """Declares a sidecar table owned by an adapter.
+
+    The base class uses this to auto-create the table (CREATE TABLE IF NOT
+    EXISTS) and auto-insert child rows from AdapterRow.sidecar_rows keyed
+    by table_name.
+    """
+
+    table_name: str
+    columns: tuple[SidecarColumn, ...]
+    parent_fk_column: str = "parent_message_id"
+    parent_table: str = "messages"
+    on_delete: str = "CASCADE"
+
+    def create_table_sql(self) -> str:
+        """Generate idempotent CREATE TABLE DDL."""
+        lines = [f"CREATE TABLE IF NOT EXISTS {self.table_name} ("]
+        lines.append("    id INTEGER PRIMARY KEY,")
+        lines.append(
+            f"    {self.parent_fk_column} INTEGER NOT NULL"
+            f" REFERENCES {self.parent_table}(id) ON DELETE {self.on_delete},"
+        )
+        for i, col in enumerate(self.columns):
+            null = "" if col.nullable else " NOT NULL"
+            default = f" DEFAULT {col.default}" if col.default else ""
+            comma = "," if i < len(self.columns) - 1 else ""
+            lines.append(f"    {col.name} {col.sql_type}{null}{default}{comma}")
+        lines.append(")")
+        return "\n".join(lines)
+
+    def insert_sql(self) -> str:
+        """Generate parameterized INSERT statement."""
+        cols = [self.parent_fk_column] + [c.name for c in self.columns]
+        placeholders = ", ".join("?" for _ in cols)
+        col_list = ", ".join(cols)
+        return f"INSERT INTO {self.table_name} ({col_list}) VALUES ({placeholders})"
 
 
 @dataclass
@@ -88,6 +141,10 @@ class AdapterRow:
     attachments: list[dict[str, str | int | None]] = field(default_factory=list)
     thread_key: str | None = None
     extra: dict[str, object] = field(default_factory=dict)
+
+    # Sidecar-table rows: key = table_name, value = list of row dicts
+    # Each dict maps column_name -> value (parent FK auto-filled by base)
+    sidecar_rows: dict[str, list[dict[str, object]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,7 +214,9 @@ class Adapter(ABC):
     target_table: str = "messages"
     dedup_strategy: DedupStrategy = DedupStrategy.CONTENT_HASH
     batch_size: int = 500
+    sidecar_tables: ClassVar[list[SidecarTableDef]] = []
     _settings: Settings | None = None
+    _sidecar_tables_ensured: bool = False
 
     def owner_sender(self, platform: str) -> tuple[str, str]:
         """Return (sender_address, sender_name) for the database owner.
@@ -217,6 +276,62 @@ class Adapter(ABC):
         override to reject other locations (see ClaudeCodeAdapter).
         """
         return None
+
+    def ensure_sidecar_tables(self, conn: sqlite3.Connection) -> None:
+        """Create declared sidecar tables if they don't exist.
+
+        Called automatically by run() on first invocation. Adapters with
+        custom run() that use sidecar_tables should call this explicitly.
+        """
+        if self._sidecar_tables_ensured:
+            return
+        for tdef in self.sidecar_tables:
+            conn.execute(tdef.create_table_sql())
+        self._sidecar_tables_ensured = True
+
+    def insert_sidecar_rows(
+        self, conn: sqlite3.Connection, parent_id: int, row: AdapterRow
+    ) -> None:
+        """Insert sidecar rows declared on an AdapterRow.
+
+        Each key in row.sidecar_rows must match a table_name in sidecar_tables.
+        The parent FK column is auto-filled with parent_id.
+        """
+        if not row.sidecar_rows:
+            return
+        table_map = {t.table_name: t for t in self.sidecar_tables}
+        for table_name, rows in row.sidecar_rows.items():
+            tdef = table_map.get(table_name)
+            if tdef is None:
+                log.warning(
+                    "Sidecar rows for undeclared table %r (adapter=%s)",
+                    table_name, self.name,
+                )
+                continue
+            sql = tdef.insert_sql()
+            for srow in rows:
+                values = [parent_id] + [srow.get(c.name) for c in tdef.columns]
+                conn.execute(sql, values)
+
+    def pre_insert(
+        self, conn: sqlite3.Connection, row: AdapterRow, source_file_id: int
+    ) -> AdapterRow | None:
+        """Hook called before inserting a row into the database.
+
+        Override to write to sidecar tables, transform the row, or skip it.
+        Return the (possibly modified) row to proceed with insert, or None to
+        skip this row entirely. Default: pass-through.
+        """
+        return row
+
+    def post_insert(
+        self, conn: sqlite3.Connection, row: AdapterRow, inserted_id: int
+    ) -> None:
+        """Hook called after a row is successfully inserted.
+
+        Override to write to sidecar tables that need the parent row's ID.
+        Default: no-op.
+        """
 
     def _register_source(
         self, conn: sqlite3.Connection, source_path: Path
@@ -379,6 +494,8 @@ class Adapter(ABC):
 
         self._settings = settings
         self.validate_source_path(source_path)
+        if self.sidecar_tables:
+            self.ensure_sidecar_tables(conn)
         source_file_id = self._register_source(conn, source_path)
         report.source_file_id = source_file_id
         log.info("[%s] Source registered: id=%d path=%s", self.name, source_file_id, source_path)
@@ -402,12 +519,21 @@ class Adapter(ABC):
             if not _is_document and row.direction == "unknown" and settings.identity.is_configured:
                 row.direction = self.infer_direction(row, settings.identity)
 
+            row = self.pre_insert(conn, row, source_file_id)
+            if row is None:
+                report.rows_skipped += 1
+                continue
+
             row_id = self._insert_row(conn, row, source_file_id)
             if row_id is None:
                 report.rows_skipped += 1
                 continue
 
             report.rows_inserted += 1
+            self.post_insert(conn, row, row_id)
+
+            if row.sidecar_rows:
+                self.insert_sidecar_rows(conn, row_id, row)
 
             if not _is_document:
                 self._insert_sidecars(conn, row_id, row)
