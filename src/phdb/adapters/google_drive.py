@@ -61,6 +61,24 @@ __all__ = [
 ]
 
 
+_BULK_FILENAME_PATTERNS = {
+    "subscriptions",
+    "youtube_subscriptions",
+    "watch-history",
+    "watch_history",
+    "search-history",
+    "search_history",
+    "liked_videos",
+    "playlists",
+}
+
+
+def _is_bulk_file(filename: str) -> bool:
+    """Catalog/export dumps are bulk — they crowd out personal content."""
+    stem = Path(filename).stem.lower()
+    return stem in _BULK_FILENAME_PATTERNS
+
+
 class GoogleDriveAdapter(Adapter):
     """Ingest Google Drive documents from Takeout zips or directories."""
 
@@ -92,7 +110,7 @@ class GoogleDriveAdapter(Adapter):
                 date_sent=doc.modified_date,
                 body_text=body,
                 body_text_source=doc.body_text_source,
-                is_bulk=0,
+                is_bulk=1 if _is_bulk_file(filename) else 0,
                 source_byte_offset=doc.provenance.source_byte_offset or 0,
                 source_byte_length=doc.provenance.source_byte_length or len(body),
                 raw_hash=raw_hash,

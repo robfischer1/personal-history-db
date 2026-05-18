@@ -21,10 +21,7 @@ _UUID_TAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
-_LEGACY_PATH_PREFIXES: tuple[str, ...] = (
-    r"C:\Users\<owner>\.claude",
-    r"c:\users\<owner>\.claude",
-)
+_HOME_CLAUDE_DIR = Path.home() / ".claude"
 
 
 class ClaudeCodeAdapter(Adapter):
@@ -41,15 +38,17 @@ class ClaudeCodeAdapter(Adapter):
         return m.group(1).lower() if m else None
 
     def validate_source_path(self, source_path: Path) -> None:
-        p = str(source_path)
-        for prefix in _LEGACY_PATH_PREFIXES:
-            if p.startswith(prefix):
-                raise ValueError(
-                    f"claude_code adapter refuses legacy path {p!r}; "
-                    f"canonical AI-sessions location is "
-                    f"D:\\Records\\AI Sessions\\Claude\\ "
-                    f"(see migration 0010 / project_personal_history_db memory)"
-                )
+        try:
+            source_path.resolve().relative_to(_HOME_CLAUDE_DIR.resolve())
+            raise ValueError(
+                f"claude_code adapter refuses live .claude path {source_path!r}; "
+                f"ingest from the canonical AI-sessions archive location instead "
+                f"(see migration 0010 / project_personal_history_db memory)"
+            )
+        except ValueError as exc:
+            if "refuses live" in str(exc):
+                raise
+            # Not under ~/.claude — this is fine
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
         import json

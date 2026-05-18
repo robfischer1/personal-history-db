@@ -446,21 +446,14 @@ def test_compute_session_uuid_lowercases(adapter: ClaudeCodeAdapter) -> None:
 
 # ── Legacy-path rejection (migration 0010 guard) ─────────────────────────────
 
-def test_validate_source_path_rejects_legacy_claude_projects(adapter: ClaudeCodeAdapter) -> None:
-    p = Path(r"C:\Users\<owner>\.claude\projects\c--Users-<owner>-Obsidian\4efecc8b-d706-4667-b922-7476858b2991.jsonl")
-    with pytest.raises(ValueError, match="legacy path"):
+def test_validate_source_path_rejects_live_claude_dir(adapter: ClaudeCodeAdapter) -> None:
+    p = Path.home() / ".claude" / "projects" / "some-project" / "4efecc8b-d706-4667-b922-7476858b2991.jsonl"
+    with pytest.raises(ValueError, match="refuses live .claude path"):
         adapter.validate_source_path(p)
 
 
-def test_validate_source_path_rejects_lowercase_legacy_prefix(adapter: ClaudeCodeAdapter) -> None:
-    p = Path(r"c:\users\<owner>\.claude\projects\sess-001.jsonl")
-    with pytest.raises(ValueError, match="legacy path"):
-        adapter.validate_source_path(p)
-
-
-def test_validate_source_path_accepts_canonical_records_path(adapter: ClaudeCodeAdapter) -> None:
-    p = Path(r"D:\<records>\AI Sessions\Claude\claude-code__c--Users-<owner>-Obsidian__de8c7522-a9a2-4585-b6ef-b3e686e20290.jsonl")
-    # No exception expected.
+def test_validate_source_path_accepts_non_claude_path(adapter: ClaudeCodeAdapter) -> None:
+    p = Path.home() / "archives" / "ai-sessions" / "sess-001.jsonl"
     adapter.validate_source_path(p)
 
 
