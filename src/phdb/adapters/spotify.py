@@ -1,7 +1,6 @@
 """Spotify adapter — ingests Spotify Extended Streaming History.
 
-Source: a zip or directory containing ``Streaming_History_Audio_*.json``
-and ``Streaming_History_Video_*.json`` files.
+Consumes MediaPlay records from phdb.formats.spotify_json.
 
 Each play event becomes a schema_type='ListenAction' row with is_bulk=1
 (skip embedding — track names aren't narrative text). All events bucket
@@ -11,15 +10,14 @@ into a single thread.
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 import time
-import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.formats.spotify_json import parse
 from phdb.log import get_logger
 
 if TYPE_CHECKING:
@@ -28,87 +26,6 @@ if TYPE_CHECKING:
 log = get_logger("phdb.adapters.spotify")
 
 _MAX_BODY_LEN = 2000
-
-
-def _yield_streaming_files(source_path: Path) -> Iterator[tuple[str, bytes]]:
-    if source_path.is_file() and source_path.suffix == ".zip":
-        with zipfile.ZipFile(source_path) as zf:
-            for name in sorted(zf.namelist()):
-                if "Streaming_History_" in name and name.endswith(".json"):
-                    yield name, zf.read(name)
-    elif source_path.is_dir():
-        for p in sorted(source_path.rglob("Streaming_History_*.json")):
-            yield str(p.relative_to(source_path)), p.read_bytes()
-        for zp in sorted(source_path.glob("*.zip")):
-            with zipfile.ZipFile(zp) as zf:
-                for name in sorted(zf.namelist()):
-                    if "Streaming_History_" in name and name.endswith(".json"):
-                        yield f"{zp.name}!{name}", zf.read(name)
-
-
-def _parse_event(evt: dict[str, object], file_idx: int, evt_idx: int) -> AdapterRow | None:
-    ts = evt.get("ts")
-    if not ts:
-        return None
-
-    track = str(evt.get("master_metadata_track_name") or "")
-    artist = str(evt.get("master_metadata_album_artist_name") or "")
-    album = str(evt.get("master_metadata_album_album_name") or "")
-    episode = evt.get("episode_name")
-    show = evt.get("episode_show_name")
-    audiobook = evt.get("audiobook_title")
-    chapter = evt.get("audiobook_chapter_title")
-
-    if track:
-        subject = f"{track} — {artist}" if artist else track
-        body_parts = [track]
-        if artist:
-            body_parts.append(f"by {artist}")
-        if album:
-            body_parts.append(f"({album})")
-        body_text = " ".join(body_parts)
-        sender_name = artist or track
-    elif episode:
-        subject = f"{episode} — {show}" if show else str(episode)
-        body_text = f"Podcast: {episode}" + (f" ({show})" if show else "")
-        sender_name = str(show or episode)
-    elif audiobook:
-        subject = f"{audiobook} — {chapter}" if chapter else str(audiobook)
-        body_text = f"Audiobook: {audiobook}" + (f" — {chapter}" if chapter else "")
-        sender_name = str(audiobook)
-    else:
-        return None
-
-    if len(body_text) > _MAX_BODY_LEN:
-        body_text = body_text[:_MAX_BODY_LEN]
-
-    uri = str(
-        evt.get("spotify_track_uri")
-        or evt.get("spotify_episode_uri")
-        or evt.get("audiobook_uri")
-        or track or episode or audiobook
-    )
-    dedup_seed = f"spotify|{ts}|{uri}|{evt.get('ms_played')}"
-    raw_hash = hashlib.sha256(dedup_seed.encode()).hexdigest()
-
-    return AdapterRow(
-        schema_type="ListenAction",
-        rfc822_message_id=f"spotify:{raw_hash}",
-        subject=subject,
-        sender_address="spotify:self",
-        sender_name=sender_name,
-        direction="self",
-        date_sent=str(ts),
-        body_text=body_text,
-        body_text_source="spotify-json",
-        is_bulk=1,
-        bulk_signal="spotify-listen-event",
-        source_byte_offset=file_idx,
-        source_byte_length=evt_idx,
-        raw_hash=raw_hash,
-        body_text_hash=hashlib.sha256(body_text.encode()).hexdigest(),
-        thread_key="spotify:listening",
-    )
 
 
 class SpotifyAdapter(Adapter):
@@ -125,16 +42,41 @@ class SpotifyAdapter(Adapter):
         self.max_seconds = max_seconds
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
-        for fi, (_relpath, json_bytes) in enumerate(_yield_streaming_files(source_path)):
-            try:
-                data = json.loads(json_bytes)
-            except json.JSONDecodeError:
-                continue
-            events = data if isinstance(data, list) else [data]
-            for ei, evt in enumerate(events):
-                row = _parse_event(evt, fi, ei)
-                if row:
-                    yield row
+        for rec in parse(source_path):
+            body_parts = [rec.title]
+            if rec.artist and rec.media_type == "music":
+                body_parts = [rec.title.split(" — ")[0]]
+                if rec.artist:
+                    body_parts.append(f"by {rec.artist}")
+                if rec.album:
+                    body_parts.append(f"({rec.album})")
+            elif rec.media_type == "podcast":
+                body_parts = [f"Podcast: {rec.title}"]
+            elif rec.media_type == "audiobook":
+                body_parts = [f"Audiobook: {rec.title}"]
+
+            body_text = " ".join(body_parts)
+            if len(body_text) > _MAX_BODY_LEN:
+                body_text = body_text[:_MAX_BODY_LEN]
+
+            sender_name = rec.artist or rec.title
+
+            yield AdapterRow(
+                schema_type="ListenAction",
+                rfc822_message_id=f"spotify:{rec.provenance.raw_hash}",
+                subject=rec.title,
+                sender_address="spotify:self",
+                sender_name=sender_name,
+                direction="self",
+                date_sent=rec.date_played,
+                body_text=body_text,
+                body_text_source="spotify-json",
+                is_bulk=1,
+                bulk_signal="spotify-listen-event",
+                raw_hash=rec.provenance.raw_hash,
+                body_text_hash=hashlib.sha256(body_text.encode()).hexdigest(),
+                thread_key="spotify:listening",
+            )
 
     def detect_bulk(self, row: AdapterRow) -> tuple[bool, str | None]:
         return True, "spotify-listen-event"

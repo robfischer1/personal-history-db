@@ -1,10 +1,10 @@
-"""Tests for the facebook_posts adapter."""
+"""Tests for facebook posts via the unified adapter."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.facebook_posts import FacebookPostsAdapter
+from phdb.adapters.facebook_unified import FacebookUnifiedAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
@@ -26,14 +26,14 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 class TestFacebookPostsIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookPostsAdapter()
+        adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
         assert report.rows_inserted == 2
 
     def test_schema_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookPostsAdapter()
+        adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
@@ -41,7 +41,7 @@ class TestFacebookPostsIntegration:
 
     def test_direction_outbound(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookPostsAdapter()
+        adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             dirs = conn.execute("SELECT DISTINCT direction FROM messages").fetchall()
@@ -49,7 +49,7 @@ class TestFacebookPostsIntegration:
 
     def test_thread_per_bucket(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookPostsAdapter()
+        adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             keys = conn.execute("SELECT thread_key FROM threads").fetchall()
@@ -57,17 +57,17 @@ class TestFacebookPostsIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookPostsAdapter()
+        adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            r2 = FacebookPostsAdapter().run(FIXTURE_ZIP, conn, settings)
+            r2 = FacebookUnifiedAdapter().run(FIXTURE_ZIP, conn, settings)
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
 
     def test_message_thread_bridge(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookPostsAdapter()
+        adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
             bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]

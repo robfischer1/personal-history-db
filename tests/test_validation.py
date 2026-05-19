@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from phdb.settings import Settings
 from phdb.validation import validate_instance
 
 
-def test_no_instance_dir() -> None:
+def test_no_instance_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.delenv("PHDB_DB_PATH", raising=False)
     s = Settings.load(db_path=":memory:")
     warnings = validate_instance(s)
     assert warnings == []

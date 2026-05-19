@@ -5,12 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from phdb.adapters.raindrop import (
-    RaindropAdapter,
-    is_junk,
-    normalize_url,
-    should_skip,
-)
+from phdb.adapters.raindrop import RaindropAdapter
+from phdb.formats.raindrop import is_junk, normalize_url, should_skip
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings

@@ -1,5 +1,7 @@
 """Apple Health adapter — ingests Health_Export.zip via streaming XML.
 
+Consumes parsed records from phdb.formats.apple_health_xml.
+
 Source: Health_Export.zip containing apple_health_export/export.xml + GPX routes.
 Three record types mapped to messages + 5 sidecar tables:
   Record      -> Observation   + record_metadata + hr_samples
@@ -7,19 +9,15 @@ Three record types mapped to messages + 5 sidecar tables:
   ClinicalRecord -> MedicalRecord (no sidecars)
 
 Custom run() required for sidecar table writes.
-Memory-flat: iterparse with periodic root.clear() and commit cadence.
 """
 
 from __future__ import annotations
 
 import hashlib
 import sqlite3
-import xml.etree.ElementTree as ET
-import zipfile
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from phdb.adapters.base import (
     Adapter,
@@ -28,6 +26,12 @@ from phdb.adapters.base import (
     IngestReport,
     SidecarColumn,
     SidecarTableDef,
+)
+from phdb.formats.apple_health_xml import (
+    ParsedClinical,
+    ParsedRecord,
+    ParsedWorkout,
+    parse,
 )
 from phdb.log import get_logger
 
@@ -38,46 +42,6 @@ log = get_logger("phdb.adapters.apple_health")
 
 MAX_BODY_LEN = 2000
 COMMIT_EVERY = 25000
-ROOT_CLEAR_EVERY = 10000
-
-HK_PREFIXES = (
-    "HKQuantityTypeIdentifier",
-    "HKCategoryTypeIdentifier",
-    "HKWorkoutActivityType",
-    "HKDataType",
-)
-
-
-def _strip_hk_prefix(s: str) -> str:
-    if not s:
-        return s
-    for p in HK_PREFIXES:
-        if s.startswith(p):
-            return s[len(p) :]
-    return s
-
-
-def _parse_apple_date(s: str | None) -> str | None:
-    if not s:
-        return None
-    s = s.strip()
-    for fmt in ("%Y-%m-%d %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ"):
-        try:
-            dt = datetime.strptime(s.replace("Z", "+0000") if fmt.endswith("Z") else s, fmt)
-            return dt.astimezone(UTC).isoformat()
-        except ValueError:
-            continue
-    return s
-
-
-def _safe_float(v: str | None) -> float | None:
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except ValueError:
-        return None
-
 
 RECORD_METADATA_TABLE = SidecarTableDef(
     table_name="record_metadata",
@@ -192,38 +156,24 @@ class AppleHealthAdapter(Adapter):
         touched_threads: set[int] = {metrics_thread_id, clinical_thread_id}
         processed = 0
 
-        with zipfile.ZipFile(source_path) as zf, zf.open("apple_health_export/export.xml") as f:
-            context = ET.iterparse(f, events=("start", "end"))
-            _event, root = next(context)
+        for parsed in parse(source_path):
+            if isinstance(parsed, ParsedRecord):
+                self._handle_record(
+                    conn, parsed, source_file_id, metrics_thread_id, report,
+                )
+            elif isinstance(parsed, ParsedWorkout):
+                wt_threads = self._handle_workout(
+                    conn, parsed, source_file_id, report,
+                )
+                touched_threads.update(wt_threads)
+            elif isinstance(parsed, ParsedClinical):
+                self._handle_clinical(
+                    conn, parsed, source_file_id, clinical_thread_id, report,
+                )
 
-            for event, elem in context:
-                if event != "end":
-                    continue
-
-                tag = elem.tag
-                if tag == "Record":
-                    self._handle_record(
-                        conn, elem, source_file_id, metrics_thread_id, report,
-                    )
-                elif tag == "Workout":
-                    wt_threads = self._handle_workout(
-                        conn, elem, source_file_id, zf, report,
-                    )
-                    touched_threads.update(wt_threads)
-                elif tag == "ClinicalRecord":
-                    self._handle_clinical(
-                        conn, elem, source_file_id, clinical_thread_id, report,
-                    )
-                else:
-                    continue
-
-                elem.clear()
-                processed += 1
-
-                if processed % ROOT_CLEAR_EVERY == 0:
-                    root.clear()
-                if processed % COMMIT_EVERY == 0:
-                    conn.commit()
+            processed += 1
+            if processed % COMMIT_EVERY == 0:
+                conn.commit()
 
         conn.commit()
 
@@ -249,40 +199,26 @@ class AppleHealthAdapter(Adapter):
     def _handle_record(
         self,
         conn: sqlite3.Connection,
-        elem: ET.Element,
+        rec: ParsedRecord,
         source_file_id: int,
         metrics_thread_id: int,
         report: IngestReport,
     ) -> None:
-        rtype = elem.get("type", "")
-        rtype_label = _strip_hk_prefix(rtype)
-        unit = elem.get("unit", "")
-        value = elem.get("value", "")
-        source_name = elem.get("sourceName", "")
-        start_date = _parse_apple_date(elem.get("startDate"))
-        end_date = _parse_apple_date(elem.get("endDate"))
-
-        subject = f"{rtype_label}: {value}{(' ' + unit) if unit else ''}" if value else rtype_label
-        body_text = subject[:MAX_BODY_LEN]
-
-        dedup_seed = f"apple-health|record|{rtype}|{start_date}|{end_date}|{value}|{unit}|{source_name}"
-        raw_hash = hashlib.sha256(dedup_seed.encode()).hexdigest()
-
         row = AdapterRow(
             schema_type="Observation",
-            rfc822_message_id=f"apple-health:rec:{raw_hash[:16]}",
-            subject=subject,
-            sender_address=f"apple-health:{source_name}",
-            sender_name=source_name,
+            rfc822_message_id=f"apple-health:rec:{rec.raw_hash[:16]}",
+            subject=rec.subject,
+            sender_address=f"apple-health:{rec.source_name}",
+            sender_name=rec.source_name,
             direction="self",
-            date_sent=start_date,
-            date_received=end_date,
-            body_text=body_text,
+            date_sent=rec.start_date,
+            date_received=rec.end_date,
+            body_text=rec.body_text,
             body_text_source="apple-health-xml",
             is_bulk=1,
             bulk_signal="apple-health-record",
-            raw_hash=raw_hash,
-            body_text_hash=hashlib.sha256(body_text.encode()).hexdigest(),
+            raw_hash=rec.raw_hash,
+            body_text_hash=hashlib.sha256(rec.body_text.encode()).hexdigest(),
         )
 
         report.rows_yielded += 1
@@ -294,80 +230,42 @@ class AppleHealthAdapter(Adapter):
 
         self._link_message_thread(conn, message_id, metrics_thread_id)
 
-        for me in elem.findall("MetadataEntry"):
-            k = me.get("key")
-            v = me.get("value")
-            if k:
-                conn.execute(
-                    "INSERT INTO record_metadata (message_id, key, value) VALUES (?, ?, ?)",
-                    (message_id, k, v),
-                )
+        for me in rec.metadata:
+            conn.execute(
+                "INSERT INTO record_metadata (message_id, key, value) VALUES (?, ?, ?)",
+                (message_id, me.key, me.value),
+            )
 
-        hr_list = elem.find("HeartRateVariabilityMetadataList")
-        if hr_list is not None:
-            for ib in hr_list.findall("InstantaneousBeatsPerMinute"):
-                ib_bpm = ib.get("bpm")
-                ib_time = _parse_apple_date(ib.get("time"))
-                if ib_bpm and ib_time:
-                    try:
-                        bpm_int = int(float(ib_bpm))
-                    except ValueError:
-                        continue
-                    conn.execute(
-                        "INSERT INTO hr_samples (parent_message_id, ts, bpm) VALUES (?, ?, ?)",
-                        (message_id, ib_time, bpm_int),
-                    )
+        for hr in rec.hr_samples:
+            conn.execute(
+                "INSERT INTO hr_samples (parent_message_id, ts, bpm) VALUES (?, ?, ?)",
+                (message_id, hr.ts, hr.bpm),
+            )
 
     def _handle_workout(
         self,
         conn: sqlite3.Connection,
-        elem: ET.Element,
+        wkt: ParsedWorkout,
         source_file_id: int,
-        zf: zipfile.ZipFile,
         report: IngestReport,
     ) -> set[int]:
         touched: set[int] = set()
 
-        activity = elem.get("workoutActivityType", "")
-        activity_label = _strip_hk_prefix(activity)
-        duration = elem.get("duration")
-        duration_unit = elem.get("durationUnit", "")
-        total_distance = elem.get("totalDistance")
-        distance_unit = elem.get("totalDistanceUnit", "")
-        energy = elem.get("totalEnergyBurned")
-        energy_unit = elem.get("totalEnergyBurnedUnit", "")
-        source_name = elem.get("sourceName", "")
-        start_date = _parse_apple_date(elem.get("startDate"))
-        end_date = _parse_apple_date(elem.get("endDate"))
-
-        parts = [f"Workout: {activity_label}"]
-        if duration:
-            parts.append(f"duration {duration} {duration_unit}".strip())
-        if total_distance:
-            parts.append(f"distance {total_distance} {distance_unit}".strip())
-        if energy:
-            parts.append(f"energy {energy} {energy_unit}".strip())
-        body_text = " | ".join(parts)[:MAX_BODY_LEN]
-        subject = parts[0]
-
-        dedup_seed = f"apple-health|workout|{activity}|{start_date}|{end_date}|{source_name}"
-        raw_hash = hashlib.sha256(dedup_seed.encode()).hexdigest()
-
         row = AdapterRow(
             schema_type="ExerciseAction",
-            rfc822_message_id=f"apple-health:wkt:{raw_hash[:16]}",
-            subject=subject,
-            sender_address=f"apple-health:{source_name}",
-            sender_name=source_name,
+            rfc822_message_id=f"apple-health:wkt:{wkt.raw_hash[:16]}",
+            subject=wkt.subject,
+            sender_address=f"apple-health:{wkt.source_name}",
+            sender_name=wkt.source_name,
             direction="self",
-            date_sent=start_date,
-            date_received=end_date,
-            body_text=body_text,
+            date_sent=wkt.start_date,
+            date_received=wkt.end_date,
+            body_text=wkt.body_text,
             body_text_source="apple-health-xml",
             is_bulk=1,
             bulk_signal="apple-health-workout",
-            raw_hash=raw_hash,
-            body_text_hash=hashlib.sha256(body_text.encode()).hexdigest(),
+            raw_hash=wkt.raw_hash,
+            body_text_hash=hashlib.sha256(wkt.body_text.encode()).hexdigest(),
         )
 
         report.rows_yielded += 1
@@ -377,7 +275,7 @@ class AppleHealthAdapter(Adapter):
             return touched
         report.rows_inserted += 1
 
-        thread_key = f"apple-health:workout:{raw_hash[:16]}"
+        thread_key = f"apple-health:workout:{wkt.raw_hash[:16]}"
         thread_id, created = self._upsert_thread(conn, thread_key)
         self._link_message_thread(conn, message_id, thread_id)
         if created:
@@ -386,35 +284,16 @@ class AppleHealthAdapter(Adapter):
 
         conn.execute(
             "UPDATE threads SET date_first=?, date_last=? WHERE id=?",
-            (start_date, end_date, thread_id),
+            (wkt.start_date, wkt.end_date, thread_id),
         )
 
-        for we in elem.findall("WorkoutEvent"):
-            ev_type = we.get("type")
-            ev_date = _parse_apple_date(we.get("date"))
-            ev_dur = we.get("duration")
-            ev_dur_unit = we.get("durationUnit", "")
-            ev_dur_seconds: float | None = None
-            if ev_dur:
-                try:
-                    d = float(ev_dur)
-                    if ev_dur_unit == "min":
-                        ev_dur_seconds = d * 60.0
-                    elif ev_dur_unit == "hr":
-                        ev_dur_seconds = d * 3600.0
-                    else:
-                        ev_dur_seconds = d
-                except ValueError:
-                    pass
+        for we in wkt.events:
             conn.execute(
                 "INSERT INTO workout_events (workout_message_id, event_type, date, duration_seconds) VALUES (?, ?, ?, ?)",
-                (message_id, ev_type, ev_date, ev_dur_seconds),
+                (message_id, we.event_type, we.date, we.duration_seconds),
             )
 
-        for ws in elem.findall("WorkoutStatistics"):
-            st_type = ws.get("type")
-            if not st_type:
-                continue
+        for ws in wkt.statistics:
             conn.execute(
                 """INSERT INTO workout_statistics
                       (workout_message_id, stat_type, value_min, value_avg, value_max, value_sum,
@@ -422,81 +301,18 @@ class AppleHealthAdapter(Adapter):
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     message_id,
-                    st_type,
-                    _safe_float(ws.get("minimum")),
-                    _safe_float(ws.get("average")),
-                    _safe_float(ws.get("maximum")),
-                    _safe_float(ws.get("sum")),
-                    ws.get("unit"),
-                    _parse_apple_date(ws.get("startDate")),
-                    _parse_apple_date(ws.get("endDate")),
+                    ws.stat_type,
+                    ws.value_min,
+                    ws.value_avg,
+                    ws.value_max,
+                    ws.value_sum,
+                    ws.unit,
+                    ws.date_start,
+                    ws.date_end,
                 ),
             )
 
-        for wr in elem.findall("WorkoutRoute"):
-            fr = wr.find("FileReference")
-            if fr is None:
-                continue
-            gpx_rel = fr.get("path", "")
-            if not gpx_rel:
-                continue
-            zip_internal = "apple_health_export" + gpx_rel
-            try:
-                with zf.open(zip_internal) as gf:
-                    self._ingest_gpx(conn, gf, message_id)
-            except KeyError:
-                pass
-
-        return touched
-
-    def _ingest_gpx(
-        self,
-        conn: sqlite3.Connection,
-        file_obj: IO[bytes],
-        parent_message_id: int,
-    ) -> None:
-        point_idx = 0
-        for _ev, elem in ET.iterparse(file_obj, events=("end",)):
-            tag_local = elem.tag.split("}")[-1]
-            if tag_local != "trkpt":
-                elem.clear()
-                continue
-            try:
-                lat = float(elem.get("lat", ""))
-                lon = float(elem.get("lon", ""))
-            except (TypeError, ValueError):
-                elem.clear()
-                continue
-
-            ele_v: float | None = None
-            ts_v: str | None = None
-            speed: float | None = None
-            course: float | None = None
-            h_acc: float | None = None
-            v_acc: float | None = None
-
-            for child in list(elem):
-                local = child.tag.split("}")[-1]
-                txt = (child.text or "").strip() if child.text else ""
-                if local == "ele" and txt:
-                    ele_v = _safe_float(txt)
-                elif local == "time" and txt:
-                    ts_v = txt
-                elif local == "extensions":
-                    for sub in child.iter():
-                        sub_local = sub.tag.split("}")[-1]
-                        sub_txt = (sub.text or "").strip() if sub.text else ""
-                        if not sub_txt:
-                            continue
-                        if sub_local == "speed":
-                            speed = _safe_float(sub_txt)
-                        elif sub_local == "course":
-                            course = _safe_float(sub_txt)
-                        elif sub_local == "hAcc":
-                            h_acc = _safe_float(sub_txt)
-                        elif sub_local == "vAcc":
-                            v_acc = _safe_float(sub_txt)
-
+        for idx, pt in enumerate(wkt.gpx_points):
             conn.execute(
                 """INSERT INTO geo_traces
                       (parent_message_id, source_kind, point_idx, ts, lat, lon,
@@ -504,47 +320,36 @@ class AppleHealthAdapter(Adapter):
                        vertical_accuracy_m, extra_json)
                    VALUES (?, 'apple-health-gpx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    parent_message_id, point_idx, ts_v, lat, lon, ele_v,
-                    speed, course, h_acc, v_acc, None,
+                    message_id, idx, pt.ts, pt.lat, pt.lon, pt.elevation_m,
+                    pt.speed_mps, pt.course, pt.horizontal_accuracy_m,
+                    pt.vertical_accuracy_m, None,
                 ),
             )
-            point_idx += 1
-            elem.clear()
+
+        return touched
 
     def _handle_clinical(
         self,
         conn: sqlite3.Connection,
-        elem: ET.Element,
+        clin: ParsedClinical,
         source_file_id: int,
         clinical_thread_id: int,
         report: IngestReport,
     ) -> None:
-        rtype = elem.get("type", "")
-        identifier = elem.get("identifier", "")
-        source_name = elem.get("sourceName", "")
-        received_date = _parse_apple_date(elem.get("receivedDate"))
-        fhir_resource_type = elem.get("fhirResourceType", "")
-
-        subject = f"Clinical: {fhir_resource_type or rtype}"
-        body_text = f"{rtype} | {identifier} | source={source_name}"[:MAX_BODY_LEN]
-
-        dedup_seed = f"apple-health|clinical|{rtype}|{identifier}|{received_date}"
-        raw_hash = hashlib.sha256(dedup_seed.encode()).hexdigest()
-
         row = AdapterRow(
             schema_type="MedicalRecord",
-            rfc822_message_id=f"apple-health:clin:{raw_hash[:16]}",
-            subject=subject,
-            sender_address=f"apple-health:{source_name}",
-            sender_name=source_name,
+            rfc822_message_id=f"apple-health:clin:{clin.raw_hash[:16]}",
+            subject=clin.subject,
+            sender_address=f"apple-health:{clin.source_name}",
+            sender_name=clin.source_name,
             direction="inbound",
-            date_sent=received_date,
-            body_text=body_text,
+            date_sent=clin.received_date,
+            body_text=clin.body_text,
             body_text_source="apple-health-xml",
             is_bulk=1,
             bulk_signal="apple-health-clinical",
-            raw_hash=raw_hash,
-            body_text_hash=hashlib.sha256(body_text.encode()).hexdigest(),
+            raw_hash=clin.raw_hash,
+            body_text_hash=hashlib.sha256(clin.body_text.encode()).hexdigest(),
         )
 
         report.rows_yielded += 1

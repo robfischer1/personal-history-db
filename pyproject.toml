@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-history-db"
-version = "0.2.0"
+version = "0.3.0"
 description = "A framework for ingesting, indexing, and querying personal digital history across dozens of source formats."
 requires-python = ">=3.11"
 license = "Apache-2.0"

@@ -1,9 +1,11 @@
 """Apple iPhone backup adapter — ingests decrypted backup SQLite databases.
 
+Consumes typed records from phdb.formats.apple_dbs_sqlite.
+
 Source: a directory produced by ``decrypt_iphone_backup.py`` containing
 per-target subdirs (addressbook/, callhistory/, voicemail/, etc.).
 
-Handlers (each reads its own source SQLite and yields AdapterRows):
+Handlers:
   - callhistory  — ZCALLRECORD → schema_type='Action'
   - voicemail    — voicemail table → schema_type='Message'
   - safari_history — history_visits → schema_type='WebPage'
@@ -15,17 +17,25 @@ Per-handler resume: completed handler names tracked in source_files.notes JSON.
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import sqlite3
 import time
 from collections.abc import Iterator
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.formats.apple_dbs_sqlite import (
+    HANDLER_NAMES,
+    AppleDbsRecord,
+    CallRecord,
+    DigitalDocument,
+    WebActivity,
+    apple_ts_to_iso as _apple_ts_to_iso,
+    normalize_phone as _normalize_phone,
+    parse,
+)
 from phdb.log import get_logger
 
 if TYPE_CHECKING:
@@ -33,284 +43,76 @@ if TYPE_CHECKING:
 
 log = get_logger("phdb.adapters.apple_dbs")
 
-APPLE_EPOCH = datetime(2001, 1, 1)
 
+def _record_to_adapter_row(rec: AppleDbsRecord) -> AdapterRow:
+    """Map a typed record from the format parser to an AdapterRow for DB insert."""
+    prov = rec.provenance
 
-def _apple_ts_to_iso(seconds_since_2001: float | None) -> str | None:
-    if seconds_since_2001 is None:
-        return None
-    try:
-        return (APPLE_EPOCH + timedelta(seconds=float(seconds_since_2001))).isoformat()
-    except (ValueError, OverflowError):
-        return None
-
-
-def _normalize_phone(addr: str) -> str:
-    if not addr:
-        return ""
-    normalized = "".join(c for c in addr if c.isdigit() or c == "+")
-    if not normalized:
-        return ""
-    if not normalized.startswith("+"):
-        if len(normalized) == 10:
-            normalized = "+1" + normalized
-        elif len(normalized) == 11 and normalized.startswith("1"):
-            normalized = "+" + normalized
-    return normalized
-
-
-def _iter_callhistory(src_dir: Path) -> Iterator[AdapterRow]:
-    src_db = src_dir / "CallHistory.storedata"
-    if not src_db.exists():
-        return
-
-    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
-    src.row_factory = sqlite3.Row
-    try:
-        rows = list(src.execute(
-            "SELECT Z_PK, ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED FROM ZCALLRECORD"
-        ))
-    except sqlite3.OperationalError:
-        src.close()
-        return
-
-    log.info("[apple_dbs:callhistory] %d call records", len(rows))
-
-    for r in rows:
-        addr = (r["ZADDRESS"] or "").strip()
-        normalized = _normalize_phone(addr)
-        if not normalized:
-            continue
-
-        date_iso = _apple_ts_to_iso(r["ZDATE"])
-        duration_s = int(r["ZDURATION"]) if r["ZDURATION"] else 0
-        outbound = bool(r["ZORIGINATED"])
-        answered = bool(r["ZANSWERED"])
-
-        body = f"Call: {duration_s}s, {'answered' if answered else 'missed'}"
-        synth_id = f"callhistory:{r['Z_PK']}"
-        raw_hash = hashlib.sha256(synth_id.encode()).hexdigest()
-
-        yield AdapterRow(
+    if isinstance(rec, CallRecord):
+        body = f"Call: {rec.duration_seconds or 0}s, {rec.call_type}"
+        return AdapterRow(
             schema_type="Action",
-            rfc822_message_id=synth_id,
-            sender_address=normalized,
-            direction="outbound" if outbound else "inbound",
-            date_sent=date_iso,
-            body_text=body,
-            body_text_source="callhistory",
-            raw_hash=raw_hash,
-            body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-            thread_key=f"calls:{normalized}",
+            rfc822_message_id=f"callhistory:{prov.raw_hash[:12]}"
+            if not prov.source_byte_offset
+            else f"callhistory:{prov.source_byte_offset}",
+            sender_address=rec.caller_address,
+            direction=rec.direction,
+            date_sent=rec.date_start,
+            body_text=rec.voicemail_text or body,
+            body_text_source="voicemail" if rec.call_type.startswith("voicemail") else "callhistory",
+            raw_hash=prov.raw_hash,
+            body_text_hash=hashlib.sha256((rec.voicemail_text or body).encode()).hexdigest(),
+            thread_key=(
+                f"voicemail:{rec.caller_address}"
+                if rec.call_type.startswith("voicemail")
+                else f"calls:{rec.caller_address}"
+            ),
         )
-    src.close()
 
-
-def _iter_voicemail(src_dir: Path) -> Iterator[AdapterRow]:
-    src_db = src_dir / "voicemail.db"
-    if not src_db.exists():
-        return
-
-    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
-    src.row_factory = sqlite3.Row
-    try:
-        rows = list(src.execute(
-            "SELECT ROWID, sender, date, duration, callback_num, trashed_date FROM voicemail"
-        ))
-    except sqlite3.OperationalError:
-        src.close()
-        return
-
-    log.info("[apple_dbs:voicemail] %d voicemails", len(rows))
-
-    for r in rows:
-        addr = (r["sender"] or r["callback_num"] or "").strip()
-        normalized = _normalize_phone(addr)
-        if not normalized:
-            continue
-
-        date_iso = None
-        if r["date"]:
-            with contextlib.suppress(ValueError, OSError):
-                date_iso = datetime.fromtimestamp(r["date"]).isoformat()
-
-        duration_s = int(r["duration"]) if r["duration"] else 0
-        body = f"Voicemail: {duration_s}s"
-        if r["trashed_date"]:
-            body += " (trashed)"
-        synth_id = f"voicemail:{r['ROWID']}"
-        raw_hash = hashlib.sha256(synth_id.encode()).hexdigest()
-
-        yield AdapterRow(
-            schema_type="Message",
-            rfc822_message_id=synth_id,
-            sender_address=normalized,
-            direction="inbound",
-            date_sent=date_iso,
-            body_text=body,
-            body_text_source="voicemail",
-            raw_hash=raw_hash,
-            body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-            thread_key=f"voicemail:{normalized}",
-        )
-    src.close()
-
-
-def _iter_safari_history(src_dir: Path) -> Iterator[AdapterRow]:
-    src_db = src_dir / "History.db"
-    if not src_db.exists():
-        return
-
-    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
-    src.row_factory = sqlite3.Row
-
-    rows: list[sqlite3.Row] = []
-    try:
-        rows = list(src.execute(
-            "SELECT i.url, v.title, v.visit_time "
-            "FROM history_items i JOIN history_visits v ON v.history_item = i.id"
-        ))
-    except sqlite3.OperationalError:
-        try:
-            rows = list(src.execute(
-                "SELECT i.url, i.title, v.visit_time "
-                "FROM history_items i JOIN history_visits v ON v.history_item = i.id"
-            ))
-        except sqlite3.OperationalError:
-            src.close()
-            return
-
-    log.info("[apple_dbs:safari_history] %d visits", len(rows))
-
-    for r in rows:
-        date_iso = _apple_ts_to_iso(r["visit_time"])
-        url = r["url"] or ""
-        synth_id = f"safari:{url}:{r['visit_time']}"
-        body = f"Visited: {url}"
-        raw_hash = hashlib.sha256(synth_id.encode()).hexdigest()
-
-        yield AdapterRow(
+    if isinstance(rec, WebActivity):
+        if rec.activity_type == "visit":
+            body = f"Visited: {rec.url or ''}"
+            return AdapterRow(
+                schema_type="WebPage",
+                rfc822_message_id=f"safari:{rec.url}:{rec.date_performed}",
+                subject=rec.title,
+                direction="self",
+                date_sent=rec.date_performed or None,
+                body_text=body,
+                body_text_source="safari-visit",
+                raw_hash=prov.raw_hash,
+                body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
+            )
+        # bookmark
+        body = f"Bookmark: {rec.url or ''}"
+        return AdapterRow(
             schema_type="WebPage",
-            rfc822_message_id=synth_id,
-            subject=r["title"],
-            direction="self",
-            date_sent=date_iso,
-            body_text=body,
-            body_text_source="safari-visit",
-            raw_hash=raw_hash,
-            body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-        )
-    src.close()
-
-
-def _iter_safari_bookmarks(src_dir: Path) -> Iterator[AdapterRow]:
-    src_db = src_dir / "Bookmarks.db"
-    if not src_db.exists():
-        return
-
-    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
-    src.row_factory = sqlite3.Row
-    try:
-        rows = list(src.execute("SELECT title, url FROM bookmarks WHERE url IS NOT NULL"))
-    except sqlite3.OperationalError:
-        src.close()
-        return
-
-    log.info("[apple_dbs:safari_bookmarks] %d bookmarks", len(rows))
-
-    for r in rows:
-        url = r["url"] or ""
-        synth_id = f"safari-bm:{url}"
-        body = f"Bookmark: {url}"
-        raw_hash = hashlib.sha256(synth_id.encode()).hexdigest()
-
-        yield AdapterRow(
-            schema_type="WebPage",
-            rfc822_message_id=synth_id,
-            subject=r["title"],
+            rfc822_message_id=f"safari-bm:{rec.url}",
+            subject=rec.title,
             direction="self",
             body_text=body,
             body_text_source="safari-bookmark",
-            raw_hash=raw_hash,
+            raw_hash=prov.raw_hash,
             body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
         )
-    src.close()
 
-
-def _iter_notes(src_dir: Path) -> Iterator[AdapterRow]:
-    src_db = src_dir / "NoteStore.sqlite"
-    if not src_db.exists():
-        legacy = src_dir / "notes.sqlite"
-        if legacy.exists():
-            src_db = legacy
-        else:
-            return
-
-    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
-    src.row_factory = sqlite3.Row
-
-    is_modern = True
-    try:
-        rows = list(src.execute("""
-            SELECT n.Z_PK, n.ZTITLE1, n.ZSNIPPET,
-                   n.ZCREATIONDATE1, n.ZMODIFICATIONDATE1,
-                   f.ZTITLE2 AS folder
-              FROM ZICCLOUDSYNCINGOBJECT n
-              LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON f.Z_PK = n.ZFOLDER
-             WHERE n.ZTITLE1 IS NOT NULL
-        """))
-    except sqlite3.OperationalError:
-        is_modern = False
-        try:
-            rows = list(src.execute("SELECT ROWID, title, summary, body FROM Note"))
-        except sqlite3.OperationalError:
-            src.close()
-            return
-
-    log.info("[apple_dbs:notes] %d notes (%s schema)", len(rows), "modern" if is_modern else "legacy")
-
-    for r in rows:
-        if is_modern:
-            title = r["ZTITLE1"] or "(untitled)"
-            snippet = r["ZSNIPPET"] or ""
-            ts_iso = _apple_ts_to_iso(r["ZCREATIONDATE1"]) or _apple_ts_to_iso(r["ZMODIFICATIONDATE1"])
-            folder = r["folder"]
-            pk = r["Z_PK"]
-        else:
-            title = r["title"] or "(untitled)"
-            snippet = r["summary"] or r["body"] or ""
-            ts_iso = None
-            folder = None
-            pk = r["ROWID"]
-
-        body = snippet
-        if folder:
-            body = f"[Folder: {folder}]\n{body}"
-        synth_id = f"notes:{pk}"
-        raw_hash = hashlib.sha256(synth_id.encode()).hexdigest()
-
-        yield AdapterRow(
+    if isinstance(rec, DigitalDocument):
+        body = rec.body_text or ""
+        return AdapterRow(
             schema_type="DigitalDocument",
-            rfc822_message_id=synth_id,
-            subject=title,
+            rfc822_message_id=f"notes:{prov.raw_hash[:12]}",
+            subject=rec.title,
             sender_name="Me",
             direction="self",
-            date_sent=ts_iso,
-            body_text=body or None,
+            date_sent=rec.created_date,
+            body_text=rec.body_text,
             body_text_source="apple-notes-snippet",
-            raw_hash=raw_hash,
+            raw_hash=prov.raw_hash,
             body_text_hash=hashlib.sha256(body.encode()).hexdigest() if body else None,
         )
-    src.close()
 
-
-_HANDLER_FUNCS = {
-    "callhistory": _iter_callhistory,
-    "voicemail": _iter_voicemail,
-    "safari_history": _iter_safari_history,
-    "safari_bookmarks": _iter_safari_bookmarks,
-    "notes": _iter_notes,
-}
+    msg = f"Unexpected record type: {type(rec)}"
+    raise TypeError(msg)
 
 
 class AppleDbsAdapter(Adapter):
@@ -383,9 +185,9 @@ class AppleDbsAdapter(Adapter):
         report.source_file_id = source_file_id
         log.info("[%s] Source registered: id=%d path=%s", self.name, source_file_id, source_path)
 
-        handlers_to_run = self.only or list(_HANDLER_FUNCS.keys())
+        handlers_to_run = self.only or list(HANDLER_NAMES)
         done_handlers = self._get_done_handlers(conn, source_file_id)
-        todo = [h for h in handlers_to_run if h not in done_handlers and h in _HANDLER_FUNCS]
+        todo = [h for h in handlers_to_run if h not in done_handlers and h in HANDLER_NAMES]
 
         log.info(
             "[%s] Handlers: %d total, %d done, %d remaining",
@@ -400,14 +202,14 @@ class AppleDbsAdapter(Adapter):
                 log.info("[%s] Time budget reached", self.name)
                 break
 
-            handler_func = _HANDLER_FUNCS[handler_name]
             handler_dir = source_path / handler_name
             if not handler_dir.exists():
                 handler_dir = source_path
 
             try:
-                for row in handler_func(handler_dir):
+                for rec in parse(handler_dir, handler_name):
                     report.rows_yielded += 1
+                    row = _record_to_adapter_row(rec)
 
                     if row.body_text and not row.body_text_hash:
                         row.body_text_hash = hashlib.sha256(

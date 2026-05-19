@@ -19,18 +19,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import sqlite3
 import time
 import zipfile
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urlparse
 
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.formats.discord_json import (
+    _derive_other_party,
+    _derive_thread_label,
+    parse_channel,
+)
 from phdb.log import get_logger
+from phdb.records import ChatMessage
 
 if TYPE_CHECKING:
     from phdb.settings import Settings
@@ -42,95 +45,60 @@ _LOG_EVERY_CHANNELS = 10
 _BATCH_COMMIT = 25
 
 
-def _parse_discord_ts(ts_str: str | None) -> str | None:
-    if not ts_str:
-        return None
-    try:
-        dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-        return dt.isoformat()
-    except ValueError:
-        return None
+def _record_to_row(
+    record: ChatMessage,
+    sender_address: str,
+    sender_name: str | None,
+    label: str,
+    channel_idx: int,
+    msg_idx: int,
+) -> AdapterRow:
+    """Map a ChatMessage record to an AdapterRow for DB insert."""
+    body = record.body_text
+    if body and len(body) > _MAX_BODY_LEN:
+        body = body[:_MAX_BODY_LEN]
 
+    body_hash = hashlib.sha256(body.encode()).hexdigest() if body else None
 
-def _split_attachments(att_field: str | None) -> list[str]:
-    if not att_field:
-        return []
-    return [u.strip() for u in att_field.split() if u.strip().startswith("http")]
+    recipients: list[dict[str, str]] = [
+        {"address": r.address, "name": r.name or "", "rtype": r.rtype}
+        for r in record.recipients
+    ]
 
+    attachments: list[dict[str, str | int | None]] = [
+        {
+            "filename": a.filename,
+            "content_type": a.content_type,
+            "content_disposition": a.content_disposition,
+            "size_bytes": a.size_bytes,
+            "on_disk_path": a.on_disk_path,
+            "content_hash": a.content_hash,
+        }
+        for a in record.attachments
+    ]
 
-def _filename_from_url(url: str) -> str | None:
-    try:
-        path = urlparse(url).path
-        name = unquote(path.rsplit("/", 1)[-1])
-        return name or None
-    except Exception:
-        return None
-
-
-_CONTENT_TYPES: dict[str, str] = {
-    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-    "gif": "image/gif", "webp": "image/webp", "heic": "image/heic",
-    "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
-    "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4",
-    "pdf": "application/pdf", "txt": "text/plain", "json": "application/json",
-    "zip": "application/zip",
-}
-
-
-def _content_type_from_filename(fn: str | None) -> str | None:
-    if not fn:
-        return None
-    ext = fn.lower().rsplit(".", 1)[-1] if "." in fn else ""
-    return _CONTENT_TYPES.get(ext)
-
-
-def _derive_thread_label(
-    channel_meta: dict[str, object], index_label: str | None
-) -> str:
-    if index_label:
-        return index_label
-    guild = channel_meta.get("guild")
-    name = channel_meta.get("name")
-    if isinstance(guild, dict) and name:
-        return f'{name} in {guild.get("name", "?")}'
-    if name:
-        return str(name)
-    return f'Discord channel {channel_meta.get("id", "?")}'
-
-
-def _derive_other_party(
-    channel_meta: dict[str, object],
-    index_label: str | None,
-    my_user_id: str | None,
-) -> tuple[str, str | None, str | None]:
-    """Return (address, handle, other_id) for the other side of the conversation."""
-    ctype = channel_meta.get("type", "")
-
-    if ctype == "DM":
-        recips = channel_meta.get("recipients", [])
-        other_id = None
-        if isinstance(recips, list):
-            other_id = next((r for r in recips if r != my_user_id), None)
-        m = re.match(r"Direct Message with (.+?)\s*$", index_label or "")
-        handle = m.group(1).strip() if m else None
-        addr = (
-            f"discord:{handle}" if handle
-            else (f"discord:user:{other_id}" if other_id else "discord:unknown")
-        )
-        return addr, handle, str(other_id) if other_id else None
-
-    if ctype == "GROUP_DM":
-        name = channel_meta.get("name")
-        return "discord:group-dm", str(name) if name else "Group DM", None
-
-    guild = channel_meta.get("guild")
-    if isinstance(guild, dict):
-        gname = guild.get("name", "?")
-        cname = channel_meta.get("name") or channel_meta.get("id", "?")
-        return f"discord-channel:{gname}/{cname}", f"#{cname} ({gname})", None
-
-    cid = channel_meta.get("id", "unknown")
-    return f"discord:{cid}", None, None
+    return AdapterRow(
+        schema_type="Message",
+        rfc822_message_id=record.platform_id,
+        sender_address=sender_address,
+        sender_name=sender_name or label,
+        sender_domain="discord",
+        direction="outbound",
+        date_sent=record.date_sent or None,
+        body_text=body or None,
+        body_text_source="discord-export",
+        is_multipart=0,
+        has_attachments=int(record.has_attachments),
+        attachment_count=record.attachment_count,
+        is_bulk=0,
+        source_byte_offset=channel_idx,
+        source_byte_length=msg_idx,
+        raw_hash=record.provenance.raw_hash,
+        body_text_hash=body_hash,
+        recipients=recipients,
+        attachments=attachments,
+        thread_key=record.thread_key,
+    )
 
 
 class DiscordAdapter(Adapter):
@@ -212,87 +180,19 @@ class DiscordAdapter(Adapter):
         sender_name: str | None,
         channel_idx: int,
     ) -> Iterator[AdapterRow]:
-        """Yield AdapterRows for one channel."""
-        try:
-            msgs = json.loads(zf.read(f"Messages/c{channel_id}/messages.json"))
-        except (KeyError, json.JSONDecodeError):
-            return
-
-        if not msgs:
-            return
-
-        other_addr, other_handle, _other_id = _derive_other_party(
-            channel_meta, index_label, my_user_id,
-        )
-        thread_key = channel_id
+        """Yield AdapterRows for one channel via the format parser."""
         label = _derive_thread_label(channel_meta, index_label)
 
-        for msg_idx, msg in enumerate(msgs):
-            snowflake = str(msg.get("ID", ""))
-            if not snowflake:
+        msg_idx = 0
+        for record in parse_channel(zf, channel_id, channel_meta, index_label, my_user_id):
+            # Apply adapter-level since filter
+            if self.since and record.date_sent and record.date_sent < self.since:
                 continue
 
-            body = (msg.get("Contents") or "").strip()
-            att_urls = _split_attachments(msg.get("Attachments"))
-            if not body and not att_urls:
-                continue
-
-            ts = _parse_discord_ts(msg.get("Timestamp"))
-            if self.since and ts and ts < self.since:
-                continue
-
-            if len(body) > _MAX_BODY_LEN:
-                body = body[:_MAX_BODY_LEN]
-
-            synthetic_id = f"discord:{snowflake}"
-            raw_hash = hashlib.sha256(
-                f"discord|{channel_id}|{snowflake}|{body[:200]}".encode()
-            ).hexdigest()
-            body_hash = hashlib.sha256(body.encode()).hexdigest() if body else None
-
-            recipients: list[dict[str, str]] = []
-            if other_addr:
-                recipients.append({
-                    "address": other_addr,
-                    "name": other_handle or "",
-                    "rtype": "to",
-                })
-
-            attachments: list[dict[str, str | int | None]] = []
-            for url in att_urls:
-                fname = _filename_from_url(url)
-                ctype = _content_type_from_filename(fname)
-                attachments.append({
-                    "filename": fname,
-                    "content_type": ctype,
-                    "content_disposition": None,
-                    "size_bytes": None,
-                    "on_disk_path": url,
-                    "content_hash": None,
-                })
-
-            yield AdapterRow(
-                schema_type="Message",
-                rfc822_message_id=synthetic_id,
-                sender_address=sender_address,
-                sender_name=sender_name or label,
-                sender_domain="discord",
-                direction="outbound",
-                date_sent=ts,
-                body_text=body or None,
-                body_text_source="discord-export",
-                is_multipart=0,
-                has_attachments=int(bool(att_urls)),
-                attachment_count=len(att_urls),
-                is_bulk=0,
-                source_byte_offset=channel_idx,
-                source_byte_length=msg_idx,
-                raw_hash=raw_hash,
-                body_text_hash=body_hash,
-                recipients=recipients,
-                attachments=attachments,
-                thread_key=thread_key,
+            yield _record_to_row(
+                record, sender_address, sender_name, label, channel_idx, msg_idx,
             )
+            msg_idx += 1
 
     def run(
         self,

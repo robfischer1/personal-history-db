@@ -6,20 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.chat_logs import (
-    ChatLogsAdapter,
+from phdb.adapters.chat_logs import ChatLogsAdapter
+from phdb.formats.chat_logs_text import (
     _combine_date_and_time,
-    _detect_format,
     _html_unescape,
-    _infer_filename_date,
     _normalize_handle,
-    _parse_aim_html,
-    _parse_bracketed_time_log,
-    _parse_plaintext_log,
     _parse_session_handle,
     _parse_session_timestamp,
     _strip_html_tags,
     _strip_msn_color_codes,
+    detect_format,
+    infer_filename_date,
+    parse_file,
 )
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
@@ -87,14 +85,14 @@ class TestStripMsnColors:
 
 class TestFilenameDate:
     def test_standard(self) -> None:
-        d = _infer_filename_date(Path("chat/2003-07-14 [Monday].htm"))
+        d = infer_filename_date(Path("chat/2003-07-14 [Monday].htm"))
         assert d is not None
         assert d.year == 2003
         assert d.month == 7
         assert d.day == 14
 
     def test_month_year(self) -> None:
-        d = _infer_filename_date(Path("chat/July 2003.txt"))
+        d = infer_filename_date(Path("chat/July 2003.txt"))
         assert d is not None
         assert d.year == 2003
         assert d.month == 7
@@ -121,61 +119,44 @@ class TestCombineDateAndTime:
 
 class TestDetectFormat:
     def test_aim_html(self) -> None:
-        assert _detect_format(Path("test.htm"), b"<HTML><BODY>") == "aim_html"
+        assert detect_format(Path("test.htm"), b"<HTML><BODY>") == "aim_html"
 
     def test_plaintext(self) -> None:
-        assert _detect_format(Path("test.txt"), b"Session Start (MSN - a:b): Mon Jul 14") == "plaintext"
+        assert detect_format(Path("test.txt"), b"Session Start (MSN - a:b): Mon Jul 14") == "plaintext"
 
     def test_bracketed(self) -> None:
-        assert _detect_format(Path("test.log"), b"[14:30] User: hello\n[14:31] Other: hi") == "bracketed_time"
+        assert detect_format(Path("test.log"), b"[14:30] User: hello\n[14:31] Other: hi") == "bracketed_time"
 
 
 class TestParseAimHtml:
     def test_basic(self) -> None:
-        content = (FIXTURES / "AIM" / "TestUser" / "Friend1" / "2003-07-14 [Monday].htm").read_text()
-        from datetime import datetime
-
-        result = _parse_aim_html(
-            content,
-            FIXTURES / "AIM" / "TestUser" / "Friend1" / "2003-07-14 [Monday].htm",
-            datetime(2003, 7, 14),
-        )
-        assert result is not None
-        assert result["protocol"] == "aim"
-        assert result["my_handle"] == "testuser"
-        assert result["remote_handle"] == "friend1"
-        msgs = result["messages"]
-        assert isinstance(msgs, list)
-        assert len(msgs) == 4
+        file_path = FIXTURES / "AIM" / "TestUser" / "Friend1" / "2003-07-14 [Monday].htm"
+        sessions = parse_file(file_path, FIXTURES)
+        assert len(sessions) == 1
+        result = sessions[0]
+        assert result.protocol == "aim"
+        assert result.my_handle == "testuser"
+        assert result.remote_handle == "friend1"
+        assert len(result.messages) == 4
 
 
 class TestParsePlaintextLog:
     def test_multi_session(self) -> None:
-        content = (FIXTURES / "MSN" / "msn_chat.txt").read_text()
-        sessions = _parse_plaintext_log(content, FIXTURES / "MSN" / "msn_chat.txt", None)
+        file_path = FIXTURES / "MSN" / "msn_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
         assert len(sessions) == 2
-        s1_msgs = sessions[0].get("messages")
-        assert isinstance(s1_msgs, list)
-        assert len(s1_msgs) == 3
-        s2_msgs = sessions[1].get("messages")
-        assert isinstance(s2_msgs, list)
-        assert len(s2_msgs) == 4
+        assert len(sessions[0].messages) == 3
+        assert len(sessions[1].messages) == 4
 
 
 class TestParseBracketedTimeLog:
     def test_basic(self) -> None:
-        from datetime import datetime
-
-        content = (FIXTURES / "MSN" / "bracketed_2003-08-01.log").read_text()
-        sessions = _parse_bracketed_time_log(
-            content, FIXTURES / "MSN" / "bracketed_2003-08-01.log", datetime(2003, 8, 1)
-        )
+        file_path = FIXTURES / "MSN" / "bracketed_2003-08-01.log"
+        sessions = parse_file(file_path, FIXTURES)
         assert len(sessions) == 1
-        msgs = sessions[0].get("messages")
-        assert isinstance(msgs, list)
-        assert len(msgs) == 4
-        assert "multi-line" in str(msgs[2].get("body_text"))
-        assert "continuation" in str(msgs[2].get("body_text"))
+        assert len(sessions[0].messages) == 4
+        assert "multi-line" in (sessions[0].messages[2].body_text or "")
+        assert "continuation" in (sessions[0].messages[2].body_text or "")
 
 
 # ---- Integration tests ----

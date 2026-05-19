@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.discord import (
-    DiscordAdapter,
+from phdb.adapters.discord import DiscordAdapter
+from phdb.formats.discord_json import (
     _content_type_from_filename,
     _derive_other_party,
     _derive_thread_label,

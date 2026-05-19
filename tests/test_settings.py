@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from phdb.identity import IdentitySettings
 from phdb.settings import Settings
 
 
-def test_default_settings() -> None:
+def test_default_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.delenv("PHDB_DB_PATH", raising=False)
     s = Settings.load(db_path=":memory:")
     assert s.db_path == Path(":memory:")
     assert s.embedding.model == "nomic-embed-text"

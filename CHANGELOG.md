@@ -4,6 +4,24 @@ All notable changes to personal-history-db are documented here.
 
 This project uses [Semantic Versioning](https://semver.org/). During the 0.x series, the API may change between minor versions. A 1.0 release will be tagged once the adapter and schema contracts stabilize.
 
+## [0.3.0] - 2026-05-19
+
+### Added
+
+- **Records-layer architecture** — `Source → Extractor → Format Parser → Typed Record → Vendor Adapter → AdapterRow → DB` pipeline fully realized across all 34 adapters
+- **`phdb.formats.*` module** — 15 format parsers extracted from adapters as pure functions yielding frozen dataclass records; no DB or identity dependencies
+- **`phdb.records.*` module** — typed record dataclasses (`ChatMessage`, `ChatSession`, `BookmarkEvent`, `Connection`, `MediaPlay`, `ArticleRecord`, `ParsedRecord`, `ParsedWorkout`, `CallRecord`, `WebActivity`, `DigitalDocument`)
+- **Sidecar-table API** — `SidecarTableDef` declared on adapter class; base auto-creates tables and auto-inserts child rows via `AdapterRow.sidecar_rows`
+- **Core/extras repo split** — 5 Rob-specific adapters moved to `personal-history-extras`; discovered via `phdb.adapters` entry-point group
+- **`articles` adapter** — writes to the new `articles` table (migration 0014)
+- **Migration 0014** — `articles` table + `commit_authorship` support
+
+### Changed
+
+- All adapters consume typed records from format parsers instead of inline parsing
+- `ADAPTERS.md` restructured into Core (29) and Extras (5) sections
+- `loader.py` discovers adapters from both `adapter_paths` config and `importlib.metadata` entry points
+
 ## [0.2.0] - 2026-05-17
 
 ### Added
@@ -48,5 +66,6 @@ Initial release. Framework rewrite (Phases 1-8) from legacy single-script ingest
 - 563 tests with synthetic fixtures
 - Full documentation set (architecture, configuration, writing-an-adapter, fresh-start)
 
+[0.3.0]: https://github.com/robfischer1/personal-history-db/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/robfischer1/personal-history-db/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/robfischer1/personal-history-db/releases/tag/v0.1.0

@@ -7,11 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.apple_dbs import (
-    AppleDbsAdapter,
-    _apple_ts_to_iso,
-    _normalize_phone,
-)
+from phdb.adapters.apple_dbs import AppleDbsAdapter
+from phdb.formats.apple_dbs_sqlite import apple_ts_to_iso as _apple_ts_to_iso
+from phdb.formats.apple_dbs_sqlite import normalize_phone as _normalize_phone
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings

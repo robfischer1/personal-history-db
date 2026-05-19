@@ -1,8 +1,10 @@
 # Adapters Reference
 
-34 adapters ship with personal-history-db. Each adapter transforms a specific export format into the unified schema.
+29 adapters ship with `personal-history-db` (core). 5 additional adapters are available in `personal-history-extras`. Each adapter transforms a specific export format into the unified schema.
 
-## Quick reference
+Extras adapters are discovered automatically via the `phdb.adapters` entry-point group when `personal-history-extras` is installed. The `settings.adapter_paths` mechanism remains available for power-user overrides.
+
+## Core adapters
 
 | `--adapter` | Source | Input format | Notes |
 |:---|:---|:---|:---|
@@ -10,6 +12,7 @@
 | `apple_dbs` | iPhone backup | SQLite directory | Calls, voicemail, Safari, notes (multi-handler) |
 | `apple_health` | Apple Health | `Health_Export.zip` | Records, workouts, clinical; streaming parse for large files |
 | `apple_notes_full` | Apple Notes | `NoteStore.sqlite` | Upgrades `apple_dbs` rows with full note bodies |
+| `articles` | Articles | Markdown with frontmatter | Writes to `articles` table |
 | `calendar` | Google Calendar | `.ics` file, zip, or directory | Per-calendar threads |
 | `chat_logs` | AIM/Trillian/MSN/Yahoo | Directory of `.htm`/`.log`/`.txt` | Three format auto-detected |
 | `claude_chat` | Claude (claude.ai) | JSON data export | conversations, memories, users, projects |
@@ -19,8 +22,6 @@
 | `facebook_connections` | Facebook Friends | Takeout zip (HTML) | Writes to `connections` table |
 | `facebook_posts` | Facebook Posts | Takeout zip (HTML) | Wall posts, status updates |
 | `facebook_residuals` | Facebook misc. | Takeout zip (HTML) | Comments, likes, joins, invites |
-| `gemini_scribe` | Gemini (vault) | Markdown with frontmatter | Vault AI session files |
-| `gemini_web` | Gemini (web) | Markdown landmark files | Share + app format |
 | `goodreads` | Goodreads | CSV export | Library/reading history |
 | `google_activity` | Google My Activity | Takeout HTML | Search, YouTube, app activity |
 | `google_contacts` | Google Contacts | Takeout `.vcf` | vCard parser (no external lib) |
@@ -33,13 +34,22 @@
 | `onedrive` | OneDrive | Local directory | Selective body-extract by subdirectory |
 | `phone_calls_xml` | Call logs | SMS Backup & Restore XML | Incoming/outgoing/missed/voicemail |
 | `phone_photos` | Camera roll | Directory of image/video files | Date from filename patterns |
-| `phone_photos_metadata` | Android MediaStore | `tar.gz` with SQLite | Photo metadata extraction |
 | `phone_sms` | Android SMS/MMS | `mmssms.db` | Direct SQLite from TitaniumBackup |
 | `raindrop` | Raindrop.io | CSV (also HTML, Session Buddy) | Writes to `bookmarks` table |
 | `sms_xml` | SMS/MMS | SMS Backup & Restore XML | Falls back to lxml recovery parser |
 | `spotify` | Spotify | Extended history JSON | Tracks, podcasts, audiobooks |
 | `staged_md` | Generic markdown | Directory of `.md` with frontmatter | Catch-all adapter |
 | `strong` | Strong (workout) | `Strong4.sqlite` | Core Data; exercise sets with weights |
+
+## Extras adapters (`personal-history-extras`)
+
+Install: `pip install personal-history-extras` (or `uv pip install -e ../personal-history-extras` for local dev).
+
+| `--adapter` | Source | Input format | Notes |
+|:---|:---|:---|:---|
+| `gemini_scribe` | Gemini (vault) | Markdown with frontmatter | Vault AI session files |
+| `gemini_web` | Gemini (web) | Markdown landmark files | Share + app format |
+| `phone_photos_metadata` | Android MediaStore | `tar.gz` with SQLite | Photo metadata extraction |
 | `titaniumbackup_browser_bookmarks` | Android Browser | TitaniumBackup `.tar.gz` | Writes to `bookmarks` table |
 | `titaniumbackup_twitter` | Twitter/X | TitaniumBackup `.tar.gz` | Tweets, DMs, stories |
 
@@ -95,10 +105,6 @@ Session files are at `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`. Po
 2. Format: **HTML** (not JSON)
 3. Select: Messages, Posts, Friends, Activity Log
 4. The same zip works for all four Facebook adapters
-
-### Gemini
-
-Vault files at `Timelines/AI Sessions/Gemini - *.md` (web) or files with `session_id` frontmatter (scribe).
 
 ### Goodreads
 
@@ -165,7 +171,7 @@ Each adapter declares how duplicate detection works:
 |:---|:---|:---|
 | `PLATFORM_SYNTHETIC` | Hash from stable platform-specific fields | Most adapters |
 | `RFC822_MESSAGE_ID` | Uses Message-ID header or stable UUID as-is | `mbox`, `onedrive` |
-| `CONTENT_HASH` | Hash of body text | `facebook_residuals`, `google_drive`, `phone_photos`, `titaniumbackup_browser_bookmarks` |
+| `CONTENT_HASH` | Hash of body text | `facebook_residuals`, `google_drive`, `phone_photos` |
 
 Re-ingesting the same source file is always safe — dedup ensures no duplicates.
 
@@ -175,7 +181,7 @@ Most adapters write to the `messages` table. Exceptions:
 
 | Adapter | Target table |
 |:---|:---|
-| `raindrop`, `titaniumbackup_browser_bookmarks` | `bookmarks` |
+| `raindrop` | `bookmarks` |
 | `facebook_connections` | `connections` |
 | `google_drive`, `onedrive`, `staged_md` (DigitalDocument types) | `documents` |
 | `apple_health` | `messages` + sidecar tables (`record_metadata`, `hr_samples`, `workout_events`, `workout_statistics`, `geo_traces`) |

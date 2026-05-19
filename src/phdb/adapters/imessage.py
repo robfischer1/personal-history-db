@@ -1,10 +1,10 @@
 """iMessage adapter — ingests imessage-exporter HTML output.
 
-Source: a directory of .html files produced by `imessage-exporter`, one per
-contact or group chat. Filenames encode participants (comma-separated).
+Source: a directory of .html files produced by ``imessage-exporter``, one per
+contact or group chat.  Filenames encode participants (comma-separated).
 
 Two-pass strategy:
-  Pass 1: 1-on-1 files — build a contact display-name → phone lookup.
+  Pass 1: 1-on-1 files — build a contact display-name -> phone lookup.
   Pass 2: group files — resolve display names via the lookup.
 
 Threads are created per conversation file (keyed on sorted participants).
@@ -14,146 +14,88 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import sqlite3
 import time
 from collections.abc import Iterator
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bs4 import BeautifulSoup, Tag
-
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.formats.imessage_html import (
+    discover_html_files,
+    is_bulk_sender,
+    normalize_addr,
+    parse_file,
+    parse_filename_participants,
+)
 from phdb.log import get_logger
+from phdb.records import ChatMessage
 
 if TYPE_CHECKING:
     from phdb.settings import Settings
 
 log = get_logger("phdb.adapters.imessage")
 
-_SHORT_CODE_RE = re.compile(r"^\+?\d{3,7}$")
-_TS_RE = re.compile(r"([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)")
-
-_SPAM_DOMAINS = {"galaxyhit.com", "zzz28.cn", "o4rnupex.asia"}
-_KNOWN_AUTOMATED = {
-    "verizon", "info@orders.apple.com", "noreply@orders.apple.com",
-    "do_not_reply", "no-reply", "noreply",
-}
-
-_SNIPPET_LEN = 280
 _MAX_BODY_LEN = 50_000
 
 
-def _normalize_addr(addr: str) -> str:
-    return (addr or "").strip().lower()
+def _record_to_row(
+    record: ChatMessage,
+    direction: str,
+) -> AdapterRow:
+    """Map a ChatMessage record to an AdapterRow for DB insert."""
+    body = record.body_text
+    if body and len(body) > _MAX_BODY_LEN:
+        body = body[:_MAX_BODY_LEN]
 
+    body_hash = hashlib.sha256(body.encode()).hexdigest() if body else None
 
-def _parse_filename_participants(filename: str) -> list[str]:
-    stem = Path(filename).stem
-    parts = [p.strip() for p in stem.split(",")]
-    return [_normalize_addr(p) for p in parts if p]
+    sender_domain: str | None = None
+    if record.sender_address and "@" in record.sender_address:
+        sender_domain = record.sender_address.split("@", 1)[1]
 
+    bulk_flag, bulk_sig = is_bulk_sender(record.sender_address) if record.sender_address else (False, None)
 
-def _is_short_code(addr: str) -> bool:
-    return bool(_SHORT_CODE_RE.match(addr or ""))
+    recipients: list[dict[str, str]] = [
+        {"address": r.address, "name": r.name or "", "rtype": r.rtype}
+        for r in record.recipients
+    ]
 
+    attachments: list[dict[str, str | int | None]] = [
+        {
+            "filename": a.filename,
+            "content_type": a.content_type,
+            "content_disposition": a.content_disposition,
+            "size_bytes": a.size_bytes,
+            "on_disk_path": a.on_disk_path,
+            "content_hash": a.content_hash,
+        }
+        for a in record.attachments
+    ]
 
-def _parse_timestamp(ts_text: str) -> str | None:
-    if not ts_text:
-        return None
-    m = _TS_RE.search(ts_text)
-    if not m:
-        return None
-    try:
-        dt = datetime.strptime(m.group(1), "%b %d, %Y %I:%M:%S %p")
-        return dt.isoformat()
-    except ValueError:
-        return None
-
-
-def _is_bulk_sender(addr: str) -> tuple[bool, str | None]:
-    a = (addr or "").lower()
-    if not a:
-        return False, None
-    if _is_short_code(a):
-        return True, "short-code"
-    if a in _KNOWN_AUTOMATED:
-        return True, "known-automated"
-    if "@" in a:
-        domain = a.split("@", 1)[1]
-        if domain in _SPAM_DOMAINS:
-            return True, "spam-domain"
-        if domain.startswith("orders.") or domain.startswith("noreply"):
-            return True, "automated-domain"
-    if a.startswith("noreply") or a.startswith("no-reply") or a.startswith("donotreply"):
-        return True, "noreply-pattern"
-    return False, None
-
-
-def _parse_message_block(msg_div: Tag) -> dict[str, object] | None:
-    """Extract fields from a single .message div. Returns None if empty."""
-    direction = "sent" if msg_div.select_one(".sent") else (
-        "received" if msg_div.select_one(".received") else "unknown"
+    return AdapterRow(
+        schema_type="Message",
+        rfc822_message_id=record.platform_id,
+        sender_address=record.sender_address or None,
+        sender_name=record.sender_name,
+        sender_domain=sender_domain,
+        direction=direction,
+        date_sent=record.date_sent or None,
+        body_text=body or None,
+        body_text_source="imessage-html",
+        body_text_hash=body_hash,
+        is_multipart=int(record.is_multipart),
+        has_attachments=int(record.has_attachments),
+        attachment_count=record.attachment_count,
+        is_bulk=int(bulk_flag),
+        bulk_signal=bulk_sig,
+        source_byte_offset=record.provenance.source_byte_offset,
+        source_byte_length=record.provenance.source_byte_length,
+        raw_hash=record.provenance.raw_hash,
+        recipients=recipients,
+        attachments=attachments,
+        thread_key=record.thread_key,
     )
-
-    sender_name: str | None = None
-    for s in msg_div.select(".sender"):
-        in_reply = False
-        for parent in s.parents:
-            if parent is msg_div:
-                break
-            if isinstance(parent, Tag) and "class" in parent.attrs:
-                cls = parent.get("class")
-                if isinstance(cls, list) and ("reply" in cls or "reply_context" in cls):
-                    in_reply = True
-                    break
-        if not in_reply:
-            sender_name = s.get_text(strip=True)
-            break
-
-    if direction == "sent":
-        sender_name = "Me"
-
-    ts_el = msg_div.select_one(".timestamp")
-    ts_iso = _parse_timestamp(ts_el.get_text(strip=True)) if ts_el else None
-
-    parts = msg_div.select(".message_part")
-    body_text: str | None = None
-    if parts:
-        texts = [p.get_text(" ", strip=True) for p in parts]
-        body_text = " ".join(t for t in texts if t).strip() or None
-        if body_text and len(body_text) > _MAX_BODY_LEN:
-            body_text = body_text[:_MAX_BODY_LEN]
-
-    attachments: list[dict[str, str | None]] = []
-    for a in msg_div.select(".attachment"):
-        href: str | None = None
-        link = a.find("a", href=True)
-        if isinstance(link, Tag):
-            href = str(link["href"])
-        else:
-            img = a.find("img", src=True)
-            if isinstance(img, Tag):
-                href = str(img["src"])
-        att_text = a.get_text(" ", strip=True) or None
-        attachments.append({
-            "filename": Path(href).name if href else (att_text[:120] if att_text else None),
-            "content_type": None,
-            "size_bytes": None,
-        })
-
-    if not body_text and not attachments:
-        return None
-
-    return {
-        "direction": direction,
-        "sender_name": sender_name,
-        "date_sent": ts_iso,
-        "body_text": body_text,
-        "attachments": attachments,
-        "is_multipart": len(parts) > 1,
-    }
 
 
 class IMessageAdapter(Adapter):
@@ -175,7 +117,7 @@ class IMessageAdapter(Adapter):
         self._name_to_phone: dict[str, str] = {}
 
     def detect_bulk(self, row: AdapterRow) -> tuple[bool, str | None]:
-        return _is_bulk_sender(row.sender_address) if row.sender_address else (False, None)
+        return is_bulk_sender(row.sender_address) if row.sender_address else (False, None)
 
     def compute_raw_hash(self, row: AdapterRow) -> str:
         seed = (
@@ -188,117 +130,6 @@ class IMessageAdapter(Adapter):
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
         """Not used directly — run() drives per-file iteration."""
         yield from ()
-
-    def _iter_file_rows(
-        self,
-        html_path: Path,
-        owner_phones: set[str],
-        owner_names: set[str],
-    ) -> Iterator[AdapterRow]:
-        """Parse one HTML file and yield AdapterRows."""
-        participants = _parse_filename_participants(html_path.name)
-        is_group = len(participants) > 1
-        thread_key = ",".join(sorted(participants))
-
-        src = html_path.read_bytes()
-        raw_size = len(src)
-        soup = BeautifulSoup(src, "lxml")
-        msg_divs = soup.select("div.message")
-
-        owner_phone = next(iter(owner_phones), None)
-        other_party_phone = participants[0] if (not is_group and participants) else None
-
-        for msg_idx, div in enumerate(msg_divs):
-            info = _parse_message_block(div)
-            if info is None:
-                continue
-
-            sender_addr: str | None = None
-            sender_name: str | None = str(info["sender_name"]) if info["sender_name"] else None
-            direction_str = str(info["direction"])
-
-            if direction_str == "sent":
-                sender_addr = owner_phone
-                if not sender_name:
-                    sender_name = "Me"
-            else:
-                if not is_group and other_party_phone:
-                    sender_addr = other_party_phone
-                    if (
-                        sender_name
-                        and sender_name.lower() not in owner_names
-                        and sender_name not in self._name_to_phone
-                    ):
-                        self._name_to_phone[sender_name] = other_party_phone
-                else:
-                    if sender_name and sender_name in self._name_to_phone:
-                        sender_addr = self._name_to_phone[sender_name]
-                    elif sender_name and (
-                        "@" in sender_name
-                        or (sender_name.startswith("+") and sender_name[1:].replace(" ", "").isdigit())
-                    ):
-                        sender_addr = _normalize_addr(sender_name)
-
-            recipients: list[dict[str, str]] = []
-            if direction_str == "sent":
-                for p in participants:
-                    recipients.append({"address": p, "name": "", "rtype": "to"})
-            else:
-                if owner_phone:
-                    recipients.append({"address": owner_phone, "name": "Me", "rtype": "to"})
-                if is_group:
-                    for p in participants:
-                        if p != sender_addr:
-                            recipients.append({"address": p, "name": "", "rtype": "to"})
-
-            sender_domain: str | None = None
-            if sender_addr and "@" in sender_addr:
-                sender_domain = sender_addr.split("@", 1)[1]
-
-            body_text: str | None = str(info["body_text"]) if info["body_text"] else None
-            bulk_flag, bulk_sig = _is_bulk_sender(sender_addr) if sender_addr else (False, None)
-            if bulk_flag and body_text and len(body_text) > _SNIPPET_LEN:
-                body_text = body_text[:_SNIPPET_LEN]
-
-            raw_hash = hashlib.sha256(
-                f"{thread_key}|{msg_idx}|{info['date_sent']}|{sender_addr}|{(body_text or '')[:100]}".encode()
-            ).hexdigest()
-
-            direction = (
-                "outbound" if direction_str == "sent"
-                else ("inbound" if direction_str == "received" else "unknown")
-            )
-
-            raw_atts = info["attachments"]
-            att_list: list[dict[str, str | None]] = list(raw_atts) if isinstance(raw_atts, list) else []
-
-            yield AdapterRow(
-                schema_type="Message",
-                rfc822_message_id=f"imessage:{raw_hash}",
-                sender_address=sender_addr,
-                sender_name=sender_name,
-                sender_domain=sender_domain,
-                direction=direction,
-                date_sent=str(info["date_sent"]) if info["date_sent"] else None,
-                body_text=body_text,
-                body_text_source="imessage-html",
-                is_multipart=int(bool(info["is_multipart"])),
-                has_attachments=int(bool(att_list)),
-                attachment_count=len(att_list),
-                is_bulk=int(bulk_flag),
-                bulk_signal=bulk_sig,
-                source_byte_offset=msg_idx,
-                source_byte_length=raw_size,
-                raw_hash=raw_hash,
-                recipients=recipients,
-                attachments=[
-                    {"filename": a.get("filename"), "content_type": a.get("content_type"),
-                     "content_disposition": None, "size_bytes": a.get("size_bytes"),
-                     "on_disk_path": None, "content_hash": None}
-                    for a in att_list
-                ],
-                thread_key=thread_key,
-            )
 
     def _get_done_files(self, conn: sqlite3.Connection, source_file_id: int) -> set[str]:
         row = conn.execute(
@@ -327,7 +158,7 @@ class IMessageAdapter(Adapter):
     def _rebuild_name_lookup(
         self, conn: sqlite3.Connection, source_file_id: int
     ) -> None:
-        """Rebuild name→phone lookup from previously ingested rows (for resume)."""
+        """Rebuild name->phone lookup from previously ingested rows (for resume)."""
         for r in conn.execute(
             """SELECT sender_name, sender_address FROM messages
                WHERE sender_address IS NOT NULL AND sender_name IS NOT NULL
@@ -355,17 +186,16 @@ class IMessageAdapter(Adapter):
 
         owner_phones = settings.identity.owner_phones
         owner_names = settings.identity.owner_names
+        owner_phone = next(iter(owner_phones), None)
 
-        all_files = sorted(f for f in source_path.iterdir() if f.suffix.lower() == ".html")
-        one_on_one = [f for f in all_files if "," not in f.stem]
-        groups = [f for f in all_files if "," in f.stem]
+        one_on_one, groups = discover_html_files(source_path)
         ordered = one_on_one + groups
 
         done_files = self._get_done_files(conn, source_file_id)
         todo = [f for f in ordered if f.name not in done_files]
         log.info(
             "[%s] Files: %d total (%d 1-on-1, %d group), %d done, %d remaining",
-            self.name, len(all_files), len(one_on_one), len(groups),
+            self.name, len(one_on_one) + len(groups), len(one_on_one), len(groups),
             len(done_files), len(todo),
         )
 
@@ -385,8 +215,28 @@ class IMessageAdapter(Adapter):
                 break
 
             try:
-                for row in self._iter_file_rows(html_file, owner_phones, owner_names):
+                for record in parse_file(
+                    html_file,
+                    owner_phone=owner_phone,
+                    name_to_phone=self._name_to_phone,
+                    owner_names=owner_names,
+                ):
                     report.rows_yielded += 1
+
+                    # Derive direction: format parser sets sender_address
+                    # to owner_phone on sent messages
+                    if (
+                        record.sender_address
+                        and owner_phone
+                        and normalize_addr(record.sender_address) == normalize_addr(owner_phone)
+                    ):
+                        direction = "outbound"
+                    elif record.sender_address:
+                        direction = "inbound"
+                    else:
+                        direction = "unknown"
+
+                    row = _record_to_row(record, direction)
 
                     if row.body_text and not row.body_text_hash:
                         row.body_text_hash = hashlib.sha256(row.body_text.encode("utf-8")).hexdigest()
@@ -403,7 +253,7 @@ class IMessageAdapter(Adapter):
                     self._insert_sidecars(conn, message_id, row)
 
                     if row.thread_key:
-                        participants = _parse_filename_participants(html_file.name)
+                        participants = parse_filename_participants(html_file.name)
                         thread_id, created = self._upsert_thread(conn, row.thread_key, participants)
                         self._link_message_thread(conn, message_id, thread_id)
                         if created:

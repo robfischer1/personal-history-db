@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.imessage import (
-    IMessageAdapter,
-    _is_bulk_sender,
-    _normalize_addr,
-    _parse_filename_participants,
-    _parse_message_block,
-    _parse_timestamp,
+from phdb.adapters.imessage import IMessageAdapter
+from phdb.formats.imessage_html import (
+    is_bulk_sender,
+    normalize_addr,
+    parse_filename_participants,
+    parse_message_block,
+    parse_timestamp,
 )
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
@@ -26,54 +26,54 @@ FIXTURES = Path(__file__).parent / "fixtures" / "imessage"
 
 class TestParseTimestamp:
     def test_standard(self) -> None:
-        assert _parse_timestamp("Jan 19, 2017 12:22:55 PM") == "2017-01-19T12:22:55"
+        assert parse_timestamp("Jan 19, 2017 12:22:55 PM") == "2017-01-19T12:22:55"
 
     def test_with_suffix(self) -> None:
-        result = _parse_timestamp("Jan 19, 2017 12:22:55 PM (Read by Jane)")
+        result = parse_timestamp("Jan 19, 2017 12:22:55 PM (Read by Jane)")
         assert result == "2017-01-19T12:22:55"
 
     def test_am(self) -> None:
-        assert _parse_timestamp("Dec 01, 2020 08:05:00 AM") == "2020-12-01T08:05:00"
+        assert parse_timestamp("Dec 01, 2020 08:05:00 AM") == "2020-12-01T08:05:00"
 
     def test_empty(self) -> None:
-        assert _parse_timestamp("") is None
+        assert parse_timestamp("") is None
 
     def test_garbage(self) -> None:
-        assert _parse_timestamp("not a date") is None
+        assert parse_timestamp("not a date") is None
 
 
 class TestParseFilenameParticipants:
     def test_single_phone(self) -> None:
-        assert _parse_filename_participants("+15551234567.html") == ["+15551234567"]
+        assert parse_filename_participants("+15551234567.html") == ["+15551234567"]
 
     def test_group(self) -> None:
-        result = _parse_filename_participants("+15551234567, +15559876543.html")
+        result = parse_filename_participants("+15551234567, +15559876543.html")
         assert result == ["+15551234567", "+15559876543"]
 
     def test_email(self) -> None:
-        assert _parse_filename_participants("user@example.com.html") == ["user@example.com"]
+        assert parse_filename_participants("user@example.com.html") == ["user@example.com"]
 
 
 class TestBulkSender:
     def test_short_code(self) -> None:
-        assert _is_bulk_sender("22345") == (True, "short-code")
+        assert is_bulk_sender("22345") == (True, "short-code")
 
     def test_noreply(self) -> None:
-        assert _is_bulk_sender("noreply@orders.apple.com") == (True, "known-automated")
+        assert is_bulk_sender("noreply@orders.apple.com") == (True, "known-automated")
 
     def test_normal_phone(self) -> None:
-        assert _is_bulk_sender("+15551234567") == (False, None)
+        assert is_bulk_sender("+15551234567") == (False, None)
 
     def test_empty(self) -> None:
-        assert _is_bulk_sender("") == (False, None)
+        assert is_bulk_sender("") == (False, None)
 
 
 class TestNormalizeAddr:
     def test_strips_whitespace(self) -> None:
-        assert _normalize_addr("  Foo@BAR.com  ") == "foo@bar.com"
+        assert normalize_addr("  Foo@BAR.com  ") == "foo@bar.com"
 
     def test_empty(self) -> None:
-        assert _normalize_addr("") == ""
+        assert normalize_addr("") == ""
 
 
 class TestParseMessageBlock:
@@ -88,7 +88,7 @@ class TestParseMessageBlock:
         soup = BeautifulSoup(html, "lxml")
         div = soup.select_one("div.message")
         assert div is not None
-        info = _parse_message_block(div)
+        info = parse_message_block(div)
         assert info is not None
         assert info["direction"] == "sent"
         assert info["sender_name"] == "Me"
@@ -102,7 +102,7 @@ class TestParseMessageBlock:
         soup = BeautifulSoup(html, "lxml")
         div = soup.select_one("div.message")
         assert div is not None
-        assert _parse_message_block(div) is None
+        assert parse_message_block(div) is None
 
 
 # ---- Integration tests ----

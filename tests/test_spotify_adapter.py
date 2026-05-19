@@ -1,4 +1,4 @@
-"""Tests for the spotify adapter."""
+"""Tests for the spotify adapter and format parser."""
 
 from __future__ import annotations
 
@@ -6,66 +6,86 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.spotify import SpotifyAdapter, _parse_event
+from phdb.adapters.spotify import SpotifyAdapter
 from phdb.db import connect
+from phdb.formats.spotify_json import parse
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "spotify"
 
 
-class TestParseEvent:
-    def test_track(self) -> None:
-        evt = {
+class TestSpotifyFormatParser:
+    def test_track(self, tmp_path: Path) -> None:
+        import json
+        data = [{
             "ts": "2024-01-15T14:30:00Z",
             "master_metadata_track_name": "Bohemian Rhapsody",
             "master_metadata_album_artist_name": "Queen",
             "master_metadata_album_album_name": "A Night at the Opera",
             "spotify_track_uri": "spotify:track:abc",
             "ms_played": 354000,
-        }
-        row = _parse_event(evt, 0, 0)
-        assert row is not None
-        assert row.schema_type == "ListenAction"
-        assert "Bohemian Rhapsody" in row.subject
-        assert "Queen" in row.subject
-        assert row.is_bulk == 1
+        }]
+        f = tmp_path / "Streaming_History_Audio_0.json"
+        f.write_text(json.dumps(data))
+        records = list(parse(tmp_path))
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.media_type == "music"
+        assert "Bohemian Rhapsody" in rec.title
+        assert rec.artist == "Queen"
+        assert rec.album == "A Night at the Opera"
+        assert rec.duration_ms == 354000
 
-    def test_podcast(self) -> None:
-        evt = {
+    def test_podcast(self, tmp_path: Path) -> None:
+        import json
+        data = [{
             "ts": "2024-01-15T14:44:00Z",
             "episode_name": "The Daily",
             "episode_show_name": "NYT News",
             "spotify_episode_uri": "spotify:episode:ghi789",
             "ms_played": 1200000,
-        }
-        row = _parse_event(evt, 0, 2)
-        assert row is not None
-        assert "The Daily" in row.subject
-        assert "Podcast" in row.body_text
+        }]
+        f = tmp_path / "Streaming_History_Audio_0.json"
+        f.write_text(json.dumps(data))
+        records = list(parse(tmp_path))
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.media_type == "podcast"
+        assert "The Daily" in rec.title
 
-    def test_audiobook(self) -> None:
-        evt = {
+    def test_audiobook(self, tmp_path: Path) -> None:
+        import json
+        data = [{
             "ts": "2024-01-15T15:04:00Z",
             "audiobook_title": "Project Hail Mary",
             "audiobook_chapter_title": "Chapter 1",
             "audiobook_uri": "spotify:show:jkl012",
             "ms_played": 2400000,
-        }
-        row = _parse_event(evt, 0, 3)
-        assert row is not None
-        assert "Project Hail Mary" in row.subject
-        assert "Audiobook" in row.body_text
+        }]
+        f = tmp_path / "Streaming_History_Audio_0.json"
+        f.write_text(json.dumps(data))
+        records = list(parse(tmp_path))
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.media_type == "audiobook"
+        assert "Project Hail Mary" in rec.title
 
-    def test_no_timestamp_skipped(self) -> None:
-        evt = {"ts": "", "master_metadata_track_name": "Song", "ms_played": 100}
-        row = _parse_event(evt, 0, 4)
-        assert row is None
+    def test_no_timestamp_skipped(self, tmp_path: Path) -> None:
+        import json
+        data = [{"ts": "", "master_metadata_track_name": "Song", "ms_played": 100}]
+        f = tmp_path / "Streaming_History_Audio_0.json"
+        f.write_text(json.dumps(data))
+        records = list(parse(tmp_path))
+        assert len(records) == 0
 
-    def test_no_track_no_episode_skipped(self) -> None:
-        evt = {"ts": "2024-01-15T14:30:00Z", "ms_played": 100}
-        row = _parse_event(evt, 0, 5)
-        assert row is None
+    def test_no_track_no_episode_skipped(self, tmp_path: Path) -> None:
+        import json
+        data = [{"ts": "2024-01-15T14:30:00Z", "ms_played": 100}]
+        f = tmp_path / "Streaming_History_Audio_0.json"
+        f.write_text(json.dumps(data))
+        records = list(parse(tmp_path))
+        assert len(records) == 0
 
 
 @pytest.fixture

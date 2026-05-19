@@ -21,3 +21,10 @@ class BookmarkEvent:
     tags: tuple[str, ...] = ()
     folder: str | None = None
     is_dead: bool | None = None
+    # Extra fields carried through from format-specific parsers for DB storage.
+    note: str | None = None
+    excerpt: str | None = None
+    cover_url: str | None = None
+    favorite: bool = False
+    highlights: str | None = None
+    raindrop_id: str | None = None
