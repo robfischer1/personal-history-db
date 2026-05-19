@@ -46,6 +46,9 @@ from phdb.query import (  # noqa: E402
     search as _search,
     server_info as _server_info,
     top_correspondents as _top_correspondents,
+    writing_arc as _writing_arc,
+    writing_session_detail as _writing_session_detail,
+    writing_stats as _writing_stats,
 )
 from phdb.scoring import record_engagement  # noqa: E402
 
@@ -399,6 +402,58 @@ def log_engagement(
     with contextlib.suppress(Exception):
         record_engagement(conn, chunk_id, event_type, source=source)
     return {"status": "ok", "chunk_id": chunk_id, "event_type": event_type}
+
+
+# ---------------------------------------------------------------------------
+# Writing delta-stream — back the `obsidian-delta-stream` Obsidian plugin
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def writing_arc(note_path: str, limit: int = 20) -> dict[str, Any]:
+    """Writing sessions for a given vault-relative note path, most recent first.
+
+    Each session row carries timing (started_at, ended_at, ended_reason,
+    duration_ms) and aggregates (doc_change_count, insert/delete chars,
+    undo_count, paste_count, rewrite_ratio).
+    """
+    return _writing_arc(_get_conn(), note_path, limit=limit)
+
+
+@mcp.tool()
+def writing_session_detail(
+    session_id: str,
+    delta_sample_size: int = 10,
+) -> dict[str, Any]:
+    """One writing session's metadata + first/last/reversal delta samples.
+
+    `reversals` returns every `undo` and `input.paste` event in the session
+    in arrival order — the merit-#2 signal of the capture project, where
+    abandoned-text and pasted-then-undone moments live.
+    """
+    return _writing_session_detail(
+        _get_conn(), session_id, delta_sample_size=delta_sample_size,
+    )
+
+
+@mcp.tool()
+def writing_stats(
+    since: str | None = None,
+    until: str | None = None,
+    note_path: str | None = None,
+    top_n: int = 10,
+) -> dict[str, Any]:
+    """Corpus-level writing-stream stats with optional filters.
+
+    `since` / `until` are 'YYYY-MM-DD' UTC date bounds. `note_path` narrows
+    to one vault file. Top-edited notes are ranked by doc_change_count.
+    """
+    return _writing_stats(
+        _get_conn(),
+        since=since,
+        until=until,
+        note_path=note_path,
+        top_n=top_n,
+    )
 
 
 def main() -> None:

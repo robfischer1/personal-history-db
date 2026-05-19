@@ -837,3 +837,261 @@ def top_correspondents(
             for r in rows
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Writing delta-stream queries — back the `obsidian-delta-stream` capture
+# ---------------------------------------------------------------------------
+
+def _iso_date_to_epoch_ms(iso_date: str, *, end_of_day: bool = False) -> int | None:
+    """Convert 'YYYY-MM-DD' to epoch milliseconds (UTC midnight, or next-day midnight)."""
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        d = datetime.strptime(iso_date, "%Y-%m-%d").replace(tzinfo=UTC)
+        if end_of_day:
+            d = d + timedelta(days=1)
+        return int(d.timestamp() * 1000)
+    except (ValueError, TypeError):
+        return None
+
+
+def _serialize_delta(r: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "ts": r["ts"],
+        "event_type": r["event_type"],
+        "user_event": r["user_event"],
+        "inserted_text": r["inserted_text"],
+        "deleted_text": r["deleted_text"],
+        "from_a": r["from_a"],
+        "to_a": r["to_a"],
+        "from_b": r["from_b"],
+        "to_b": r["to_b"],
+    }
+
+
+def writing_arc(
+    conn: sqlite3.Connection,
+    note_path: str,
+    *,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return writing sessions for a given note, most recent first."""
+    rows = conn.execute(
+        """SELECT session_id, note_path, vault_folder, note_type,
+                  started_at, ended_at, ended_reason,
+                  doc_change_count, selection_change_count,
+                  insert_count, delete_count,
+                  total_inserted_chars, total_deleted_chars,
+                  undo_count, paste_count
+           FROM writing_sessions
+           WHERE note_path = ?
+           ORDER BY started_at DESC
+           LIMIT ?""",
+        (note_path, limit),
+    ).fetchall()
+
+    sessions: list[dict[str, Any]] = []
+    for r in rows:
+        duration_ms: int | None = None
+        if r["ended_at"] is not None and r["started_at"] is not None:
+            duration_ms = int(r["ended_at"]) - int(r["started_at"])
+        inserted = int(r["total_inserted_chars"] or 0)
+        deleted = int(r["total_deleted_chars"] or 0)
+        rewrite_ratio = (deleted / inserted) if inserted > 0 else 0.0
+        sessions.append({
+            "session_id": r["session_id"],
+            "started_at": r["started_at"],
+            "ended_at": r["ended_at"],
+            "ended_reason": r["ended_reason"],
+            "duration_ms": duration_ms,
+            "vault_folder": r["vault_folder"],
+            "note_type": r["note_type"],
+            "doc_change_count": int(r["doc_change_count"] or 0),
+            "selection_change_count": int(r["selection_change_count"] or 0),
+            "insert_count": int(r["insert_count"] or 0),
+            "delete_count": int(r["delete_count"] or 0),
+            "total_inserted_chars": inserted,
+            "total_deleted_chars": deleted,
+            "undo_count": int(r["undo_count"] or 0),
+            "paste_count": int(r["paste_count"] or 0),
+            "rewrite_ratio": round(rewrite_ratio, 3),
+        })
+
+    return {
+        "note_path": note_path,
+        "session_count": len(sessions),
+        "sessions": sessions,
+    }
+
+
+def writing_session_detail(
+    conn: sqlite3.Connection,
+    session_id: str,
+    *,
+    delta_sample_size: int = 10,
+) -> dict[str, Any]:
+    """Return one writing session + first/last/reversal samples of its deltas."""
+    session = conn.execute(
+        """SELECT id, session_id, note_path, vault_folder, note_type,
+                  started_at, ended_at, ended_reason,
+                  doc_change_count, selection_change_count,
+                  insert_count, delete_count,
+                  total_inserted_chars, total_deleted_chars,
+                  undo_count, paste_count, ingested_at
+           FROM writing_sessions WHERE session_id = ?""",
+        (session_id,),
+    ).fetchone()
+    if session is None:
+        return {"error": f"No writing session with session_id={session_id!r}"}
+
+    session_pk = int(session["id"])
+    first_rows = conn.execute(
+        """SELECT ts, event_type, user_event, inserted_text, deleted_text,
+                  from_a, to_a, from_b, to_b
+           FROM writing_deltas WHERE session_pk = ?
+           ORDER BY ts ASC LIMIT ?""",
+        (session_pk, delta_sample_size),
+    ).fetchall()
+    last_rows = conn.execute(
+        """SELECT ts, event_type, user_event, inserted_text, deleted_text,
+                  from_a, to_a, from_b, to_b
+           FROM writing_deltas WHERE session_pk = ?
+           ORDER BY ts DESC LIMIT ?""",
+        (session_pk, delta_sample_size),
+    ).fetchall()
+    reversals = conn.execute(
+        """SELECT ts, event_type, user_event, inserted_text, deleted_text,
+                  from_a, to_a, from_b, to_b
+           FROM writing_deltas WHERE session_pk = ?
+             AND user_event IN ('undo', 'input.paste')
+           ORDER BY ts ASC""",
+        (session_pk,),
+    ).fetchall()
+
+    duration_ms: int | None = None
+    if session["ended_at"] is not None and session["started_at"] is not None:
+        duration_ms = int(session["ended_at"]) - int(session["started_at"])
+
+    return {
+        "session_id": session["session_id"],
+        "note_path": session["note_path"],
+        "vault_folder": session["vault_folder"],
+        "note_type": session["note_type"],
+        "started_at": session["started_at"],
+        "ended_at": session["ended_at"],
+        "ended_reason": session["ended_reason"],
+        "duration_ms": duration_ms,
+        "aggregates": {
+            "doc_change_count": int(session["doc_change_count"] or 0),
+            "selection_change_count": int(session["selection_change_count"] or 0),
+            "insert_count": int(session["insert_count"] or 0),
+            "delete_count": int(session["delete_count"] or 0),
+            "total_inserted_chars": int(session["total_inserted_chars"] or 0),
+            "total_deleted_chars": int(session["total_deleted_chars"] or 0),
+            "undo_count": int(session["undo_count"] or 0),
+            "paste_count": int(session["paste_count"] or 0),
+        },
+        "first_events": [_serialize_delta(r) for r in first_rows],
+        "last_events": [_serialize_delta(r) for r in reversed(list(last_rows))],
+        "reversals": [_serialize_delta(r) for r in reversals],
+        "ingested_at": session["ingested_at"],
+    }
+
+
+def writing_stats(
+    conn: sqlite3.Connection,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    note_path: str | None = None,
+    top_n: int = 10,
+) -> dict[str, Any]:
+    """Corpus-level writing-stream stats with optional date / note_path filters.
+
+    `since` and `until` are 'YYYY-MM-DD' strings interpreted as UTC date bounds.
+    `since` is inclusive (>= midnight UTC of that date), `until` is inclusive
+    (< midnight UTC of the next day).
+    """
+    where: list[str] = []
+    args: list[Any] = []
+
+    if since:
+        since_ms = _iso_date_to_epoch_ms(since)
+        if since_ms is not None:
+            where.append("started_at >= ?")
+            args.append(since_ms)
+    if until:
+        until_ms = _iso_date_to_epoch_ms(until, end_of_day=True)
+        if until_ms is not None:
+            where.append("started_at < ?")
+            args.append(until_ms)
+    if note_path:
+        where.append("note_path = ?")
+        args.append(note_path)
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    agg = conn.execute(
+        f"""SELECT
+            COUNT(*) as session_count,
+            COUNT(DISTINCT note_path) as notes_touched,
+            COALESCE(SUM(doc_change_count), 0) as total_doc_changes,
+            COALESCE(SUM(selection_change_count), 0) as total_selection_changes,
+            COALESCE(SUM(insert_count), 0) as total_inserts,
+            COALESCE(SUM(delete_count), 0) as total_deletes,
+            COALESCE(SUM(total_inserted_chars), 0) as total_inserted_chars,
+            COALESCE(SUM(total_deleted_chars), 0) as total_deleted_chars,
+            COALESCE(SUM(undo_count), 0) as total_undos,
+            COALESCE(SUM(paste_count), 0) as total_pastes,
+            MIN(started_at) as earliest_start,
+            MAX(COALESCE(ended_at, started_at)) as latest_end
+            FROM writing_sessions{where_sql}""",
+        args,
+    ).fetchone()
+
+    top_notes = conn.execute(
+        f"""SELECT note_path,
+                   COUNT(*) as session_count,
+                   COALESCE(SUM(doc_change_count), 0) as total_doc_changes,
+                   COALESCE(SUM(total_inserted_chars), 0) as total_inserted_chars,
+                   COALESCE(SUM(total_deleted_chars), 0) as total_deleted_chars
+           FROM writing_sessions{where_sql}
+           GROUP BY note_path
+           ORDER BY total_doc_changes DESC, session_count DESC
+           LIMIT ?""",
+        args + [top_n],
+    ).fetchall()
+
+    total_inserted = int(agg["total_inserted_chars"] or 0)
+    total_deleted = int(agg["total_deleted_chars"] or 0)
+    rewrite_ratio = (total_deleted / total_inserted) if total_inserted > 0 else 0.0
+
+    return {
+        "since": since,
+        "until": until,
+        "note_path": note_path,
+        "session_count": int(agg["session_count"] or 0),
+        "notes_touched": int(agg["notes_touched"] or 0),
+        "total_doc_changes": int(agg["total_doc_changes"] or 0),
+        "total_selection_changes": int(agg["total_selection_changes"] or 0),
+        "total_inserts": int(agg["total_inserts"] or 0),
+        "total_deletes": int(agg["total_deletes"] or 0),
+        "total_inserted_chars": total_inserted,
+        "total_deleted_chars": total_deleted,
+        "total_undos": int(agg["total_undos"] or 0),
+        "total_pastes": int(agg["total_pastes"] or 0),
+        "rewrite_ratio": round(rewrite_ratio, 3),
+        "earliest_start": agg["earliest_start"],
+        "latest_end": agg["latest_end"],
+        "top_notes": [
+            {
+                "note_path": r["note_path"],
+                "session_count": int(r["session_count"] or 0),
+                "total_doc_changes": int(r["total_doc_changes"] or 0),
+                "total_inserted_chars": int(r["total_inserted_chars"] or 0),
+                "total_deleted_chars": int(r["total_deleted_chars"] or 0),
+            }
+            for r in top_notes
+        ],
+    }
