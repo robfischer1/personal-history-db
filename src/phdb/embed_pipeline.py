@@ -132,6 +132,13 @@ def get_embed_status(conn: sqlite3.Connection) -> EmbedStatus:
             (MIN_CHUNK_CHARS,),
         ).fetchone()[0]
 
+    if _has_table(conn, "articles"):
+        n_eligible += conn.execute(
+            "SELECT COUNT(*) FROM articles "
+            "WHERE body_text IS NOT NULL AND length(body_text) >= ?",
+            (MIN_CHUNK_CHARS,),
+        ).fetchone()[0]
+
     n_done = conn.execute(
         "SELECT COUNT(DISTINCT d.source_id) "
         "FROM chunks d "
@@ -185,6 +192,20 @@ SELECT doc.id, doc.subject, doc.body_text, doc.bucket, doc.mtime
  ORDER BY doc.id
 """
 
+_PENDING_ARTICLES_SQL = """\
+SELECT a.id, a.subject, a.body_text, a.bucket, a.mtime
+  FROM articles a
+ WHERE a.body_text IS NOT NULL
+   AND length(a.body_text) >= ?
+   AND NOT EXISTS (
+       SELECT 1 FROM chunks d
+        WHERE d.source_table = 'articles'
+          AND d.source_id = a.id
+          AND d.embedded_at IS NOT NULL
+   )
+ ORDER BY a.id
+"""
+
 _UPSERT_CHUNK_SQL = """\
 INSERT INTO chunks
   (schema_type, source_table, source_id, chunk_index, chunk_strategy,
@@ -225,6 +246,8 @@ def run_embed_pipeline(
     ]
     if _has_table(conn, "documents"):
         sources.append((_PENDING_DOCUMENTS_SQL, "documents", "DigitalDocument"))
+    if _has_table(conn, "articles"):
+        sources.append((_PENDING_ARTICLES_SQL, "articles", "Article"))
 
     buf: list[tuple[str, str, int, int, str, str, str, str]] = []
 

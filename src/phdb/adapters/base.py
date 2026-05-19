@@ -203,6 +203,15 @@ INSERT OR IGNORE INTO documents (
     raw_hash, is_bulk, source_file_id, bucket
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
+_INSERT_ARTICLE_SQL = """\
+INSERT OR IGNORE INTO articles (
+    schema_type, subject, url, publisher, creator, description, image_url,
+    categories, tags, aliases, note_type, author_type,
+    file_path, file_size, ctime, mtime,
+    body_text, body_text_source, body_text_hash,
+    raw_hash, bucket, source_file_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
 
 class Adapter(ABC):
     """Base class for personal-history-db ingesters."""
@@ -362,9 +371,11 @@ class Adapter(ABC):
     def _insert_row(
         self, conn: sqlite3.Connection, row: AdapterRow, source_file_id: int
     ) -> int | None:
-        """Insert a single row. Routes to messages or documents based on target_table."""
+        """Insert a single row. Routes to messages / documents / articles by target_table."""
         if self.target_table == "documents":
             return self._insert_document(conn, row, source_file_id)
+        if self.target_table == "articles":
+            return self._insert_article(conn, row, source_file_id)
         cur = conn.execute(
             _INSERT_MESSAGE_SQL,
             (
@@ -396,6 +407,35 @@ class Adapter(ABC):
                 row.file_path, row.file_size, row.date_sent, row.ctime,
                 row.body_text, row.body_text_source, row.body_text_hash,
                 row.raw_hash, row.is_bulk, source_file_id, row.bucket,
+            ),
+        )
+        if cur.rowcount == 0:
+            return None
+        return cur.lastrowid
+
+    def _insert_article(
+        self, conn: sqlite3.Connection, row: AdapterRow, source_file_id: int
+    ) -> int | None:
+        """Insert a single row into the articles typed table. Returns article ID or None if skipped.
+
+        Article-specific fields travel on AdapterRow.extra (keyed by column name);
+        shared document-shaped fields use the standard AdapterRow attributes.
+        """
+        def _s(key: str) -> str | None:
+            v = row.extra.get(key)
+            return None if v is None else str(v)
+
+        cur = conn.execute(
+            _INSERT_ARTICLE_SQL,
+            (
+                row.schema_type, row.subject,
+                _s("url"), _s("publisher"), _s("creator"),
+                _s("description"), _s("image_url"),
+                _s("categories"), _s("tags"), _s("aliases"),
+                _s("note_type"), _s("author_type"),
+                row.file_path, row.file_size, row.ctime, _s("mtime"),
+                row.body_text, row.body_text_source, row.body_text_hash,
+                row.raw_hash, row.bucket, source_file_id,
             ),
         )
         if cur.rowcount == 0:
@@ -501,7 +541,7 @@ class Adapter(ABC):
         log.info("[%s] Source registered: id=%d path=%s", self.name, source_file_id, source_path)
 
         _touched_threads: set[int] = set()
-        _is_document = self.target_table == "documents"
+        _is_document = self.target_table in ("documents", "articles")
         batch_count = 0
         for row in self.iter_rows(source_path):
             report.rows_yielded += 1
