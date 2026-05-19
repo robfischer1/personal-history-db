@@ -1,0 +1,2 @@
+{"type":"session-start","ts":1000000002000,"sessionId":"sess_cross","notePath":"Notes/cross.md"}
+{"type":"doc-change","ts":1000000002100,"sessionId":"sess_cross","notePath":"Notes/cross.md","fromA":0,"toA":0,"fromB":0,"toB":4,"insertedText":"late","deletedText":"","userEvent":"input.type","noteType":null,"vaultFolder":"Notes"}

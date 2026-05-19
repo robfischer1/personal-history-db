@@ -1,0 +1,4 @@
+{"type":"session-start","ts":1000000001000,"sessionId":"sess_test_2","notePath":"Notes/partial.md"}
+{"type":"doc-change","ts":1000000001100,"sessionId":"sess_test_2","notePath":"Notes/partial.md","fromA":0,"toA":0,"fromB":0,"toB":3,"insertedText":"abc","deletedText":"","userEvent":"input.type","noteType":null,"vaultFolder":"Notes"}
+{"type":"doc-change","ts":1000000001200,"sessionId":"sess_test_2","notePath":"Notes/partial.md","fromA":3,"toA":3,"fromB":3,"toB":6,"insertedText":"def","deletedText":"","userEvent":"input.type","noteType":null,"vaultFolder":"Notes"}
+{"type":"doc-change","ts":1000000001300,"sessio

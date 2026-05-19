@@ -1,0 +1,9 @@
+{"type":"note-switch","ts":1000000000000,"sessionId":"","notePath":"Notes/test.md","fromPath":null,"toPath":"Notes/test.md"}
+{"type":"session-start","ts":1000000000100,"sessionId":"sess_test_1","notePath":"Notes/test.md"}
+{"type":"doc-change","ts":1000000000200,"sessionId":"sess_test_1","notePath":"Notes/test.md","fromA":0,"toA":0,"fromB":0,"toB":5,"insertedText":"hello","deletedText":"","userEvent":"input.type","noteType":"Observation","vaultFolder":"Notes"}
+{"type":"doc-change","ts":1000000000300,"sessionId":"sess_test_1","notePath":"Notes/test.md","fromA":5,"toA":5,"fromB":5,"toB":11,"insertedText":" world","deletedText":"","userEvent":"input.type","noteType":"Observation","vaultFolder":"Notes"}
+{"type":"doc-change","ts":1000000000400,"sessionId":"sess_test_1","notePath":"Notes/test.md","fromA":10,"toA":11,"fromB":10,"toB":10,"insertedText":"","deletedText":"d","userEvent":"delete.backward","noteType":"Observation","vaultFolder":"Notes"}
+{"type":"doc-change","ts":1000000000500,"sessionId":"sess_test_1","notePath":"Notes/test.md","fromA":10,"toA":10,"fromB":10,"toB":11,"insertedText":"!","deletedText":"","userEvent":"input.paste","noteType":"Observation","vaultFolder":"Notes"}
+{"type":"doc-change","ts":1000000000600,"sessionId":"sess_test_1","notePath":"Notes/test.md","fromA":10,"toA":11,"fromB":10,"toB":10,"insertedText":"","deletedText":"!","userEvent":"undo","noteType":"Observation","vaultFolder":"Notes"}
+{"type":"selection-change","ts":1000000000700,"sessionId":"sess_test_1","notePath":"Notes/test.md","ranges":[{"anchor":0,"head":5}]}
+{"type":"session-end","ts":1000000000800,"sessionId":"sess_test_1","notePath":"Notes/test.md","reason":"blur"}
