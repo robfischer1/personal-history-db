@@ -32,3 +32,6 @@ htmlcov/
 *.jpg
 *.mp4
 .phdb.lock
+
+# Build artifacts / per-run state (instance-only, never commit)
+runs/

@@ -34,7 +34,7 @@ Owner identity for direction inference. Every adapter uses this to classify mess
 
 ```toml
 [identity]
-owner_names = ["<owner-name>", "Rob", "robfischer1"]
+owner_names = ["Your Name", "Nickname", "your-handle"]
 owner_emails = ["rob@example.com", "rob.fischer@work.com"]
 owner_phones = ["+15551234567"]
 
