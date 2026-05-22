@@ -48,6 +48,7 @@ class PhonePhotosAdapter(Adapter):
     source_kind = "phone-camera"
     file_kind = "directory"
     schema_type = "Photograph"
+    target_table = "photographs"
     dedup_strategy = DedupStrategy.CONTENT_HASH
     batch_size = 500
 
@@ -83,28 +84,16 @@ class PhonePhotosAdapter(Adapter):
 
             yield AdapterRow(
                 schema_type="Photograph",
-                rfc822_message_id=f"phone-camera:{raw_hash}",
-                subject=photo.file_name[:200],
-                sender_address=self.owner_sender("phone-camera")[0],
-                sender_name="phone-camera",
-                direction="self",
-                date_sent=date_iso,
-                body_text=None,
-                body_text_source="photo-metadata",
-                has_attachments=1,
-                attachment_count=1,
-                is_bulk=1,
-                bulk_signal="photograph-no-body",
                 raw_hash=raw_hash,
-                thread_key=thread_key,
-                attachments=[
-                    {
-                        "filename": photo.file_name,
-                        "content_type": content_type,
-                        "content_disposition": "inline",
-                        "size_bytes": size,
-                        "on_disk_path": on_disk_path,
-                        "content_hash": raw_hash,
-                    }
-                ],
+                extra={
+                    "source_path": on_disk_path,
+                    "album_root": bucket_label,
+                    "content_hash": raw_hash,
+                    "captured_at": date_iso,
+                    "format": content_type,
+                    "file_size": size,
+                    "source_org": "phone-camera",
+                    "source_kind": "directory",
+                    "provenance": "filename-datetime",
+                },
             )

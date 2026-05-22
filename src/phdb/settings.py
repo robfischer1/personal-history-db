@@ -12,6 +12,7 @@ personal-history-instance/ (separate from this project repo).
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,28 @@ class EmbeddingSettings(BaseModel):
     model: str = "nomic-embed-text"
     dim: int = 768
     endpoint: str = "http://localhost:11434"
+
+
+def _discover_instance_dir() -> Path | None:
+    """Walk up from cwd looking for a personal-history-instance/ dir or .phdbrc marker."""
+    current = Path.cwd().resolve()
+    while True:
+        candidate = current / "personal-history-instance"
+        if candidate.is_dir():
+            return candidate
+        marker = current / ".phdbrc"
+        if marker.is_file():
+            text = marker.read_text(encoding="utf-8").strip()
+            if text:
+                p = Path(text)
+                if not p.is_absolute():
+                    p = current / p
+                if p.is_dir():
+                    return p
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
 
 
 def _load_instance_toml(instance_dir: Path | None) -> dict[str, Any]:
@@ -78,6 +101,13 @@ class Settings(BaseSettings):
         Then code defaults.
         """
         inst_dir = Path(instance_dir) if instance_dir else None
+
+        if inst_dir is None:
+            env_inst = os.environ.get("PHDB_INSTANCE_DIR")
+            if env_inst:
+                inst_dir = Path(env_inst)
+            else:
+                inst_dir = _discover_instance_dir()
 
         toml_data = _load_instance_toml(inst_dir)
 

@@ -160,7 +160,7 @@ class IMessageAdapter(Adapter):
     ) -> None:
         """Rebuild name->phone lookup from previously ingested rows (for resume)."""
         for r in conn.execute(
-            """SELECT sender_name, sender_address FROM messages
+            """SELECT sender_name, sender_address FROM chat_messages
                WHERE sender_address IS NOT NULL AND sender_name IS NOT NULL
                  AND sender_address LIKE '+%' AND source_file_id = ?
                GROUP BY sender_name""",
@@ -208,6 +208,7 @@ class IMessageAdapter(Adapter):
         t_start = time.time()
         files_done = 0
         touched_threads: set[int] = set()
+        thread_dates: dict[int, tuple[str, str]] = {}
 
         for html_file in todo:
             if self.max_seconds and (time.time() - t_start) > self.max_seconds:
@@ -259,6 +260,12 @@ class IMessageAdapter(Adapter):
                         if created:
                             report.threads_created += 1
                         touched_threads.add(thread_id)
+                        rd = row.date_sent
+                        if rd and thread_id in thread_dates:
+                            lo, hi = thread_dates[thread_id]
+                            thread_dates[thread_id] = (min(lo, rd), max(hi, rd))
+                        elif rd:
+                            thread_dates[thread_id] = (rd, rd)
 
                 self._mark_file_done(conn, source_file_id, html_file.name)
                 conn.commit()
@@ -269,15 +276,16 @@ class IMessageAdapter(Adapter):
                 report.errors.append(html_file.name)
 
         for tid in touched_threads:
-            self._update_thread_aggregates(conn, tid)
+            dates = thread_dates.get(tid)
+            self._update_thread_aggregates(
+                conn, tid,
+                dates[0] if dates else None,
+                dates[1] if dates else None,
+            )
 
-        actual = conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE source_file_id = ?",
-            (source_file_id,),
-        ).fetchone()[0]
         conn.execute(
             "UPDATE source_files SET message_count = ? WHERE id = ?",
-            (actual, source_file_id),
+            (report.rows_inserted, source_file_id),
         )
         conn.commit()
 

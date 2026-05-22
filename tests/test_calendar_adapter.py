@@ -14,7 +14,7 @@ FIXTURE_ICS = Path(__file__).parent / "fixtures" / "calendar" / "test.ics"
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -37,7 +37,7 @@ class TestCalendarIntegration:
         adapter = CalendarAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ICS, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM events").fetchall()
         assert all(t[0] == "Event" for t in types)
 
     def test_event_subjects(self, tmp_path: Path) -> None:
@@ -45,7 +45,7 @@ class TestCalendarIntegration:
         adapter = CalendarAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ICS, conn, settings)
-            subjects = {r[0] for r in conn.execute("SELECT subject FROM messages").fetchall()}
+            subjects = {r[0] for r in conn.execute("SELECT subject FROM events").fetchall()}
         assert "Team Meeting" in subjects
         assert "Lunch with Alice" in subjects
 
@@ -54,7 +54,7 @@ class TestCalendarIntegration:
         adapter = CalendarAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ICS, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 1
 
     def test_uid_based_dedup(self, tmp_path: Path) -> None:
@@ -71,5 +71,5 @@ class TestCalendarIntegration:
         adapter = CalendarAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ICS, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

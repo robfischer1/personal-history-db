@@ -42,7 +42,7 @@ def _make_row(
 
 def test_adapter_run_inserts_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     rows = [_make_row(f"message {i}") for i in range(5)]
@@ -57,13 +57,13 @@ def test_adapter_run_inserts_rows(tmp_path: Path) -> None:
     assert report.rows_skipped == 0
 
     with connect(db_path) as conn:
-        count = conn.execute("SELECT count(*) FROM messages").fetchone()[0]
+        count = conn.execute("SELECT count(*) FROM chat_messages").fetchone()[0]
         assert count == 5
 
 
 def test_adapter_dedup_skips_duplicates(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     rows = [_make_row("same message")] * 3
@@ -79,7 +79,7 @@ def test_adapter_dedup_skips_duplicates(tmp_path: Path) -> None:
 
 def test_adapter_registers_source_file(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     adapter = StubAdapter([_make_row()])
@@ -98,7 +98,7 @@ def test_adapter_registers_source_file(tmp_path: Path) -> None:
 
 def test_adapter_direction_inference(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     rows = [
@@ -114,15 +114,15 @@ def test_adapter_direction_inference(tmp_path: Path) -> None:
     with connect(db_path) as conn:
         adapter.run(Path("source.csv"), conn, settings)
         directions = [r[0] for r in conn.execute(
-            "SELECT direction FROM messages ORDER BY id"
+            "SELECT direction FROM chat_messages ORDER BY id"
         ).fetchall()]
 
     assert directions == ["outbound", "inbound"]
 
 
-def test_adapter_inserts_recipients(tmp_path: Path) -> None:
+def test_adapter_emits_recipient_triples(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     row = _make_row()
@@ -135,14 +135,28 @@ def test_adapter_inserts_recipients(tmp_path: Path) -> None:
 
     with connect(db_path) as conn:
         adapter.run(Path("source.csv"), conn, settings)
-        rcpt_count = conn.execute("SELECT count(*) FROM recipients").fetchone()[0]
+        # Verify sentTo triples were emitted (one per recipient)
+        sent_to_id = conn.execute(
+            "SELECT id FROM predicates WHERE name = 'sentTo'"
+        ).fetchone()[0]
+        triple_count = conn.execute(
+            "SELECT count(*) FROM triples WHERE predicate_id = ?",
+            (sent_to_id,),
+        ).fetchone()[0]
 
-    assert rcpt_count == 2
+    assert triple_count == 2
+
+    # Verify contact nodes were created
+    with connect(db_path) as conn:
+        contacts = conn.execute(
+            "SELECT normalized_label FROM nodes WHERE kind = 'contact' ORDER BY normalized_label"
+        ).fetchall()
+        assert [c[0] for c in contacts] == ["alice@example.com", "bob@example.com"]
 
 
 def test_adapter_inserts_attachments(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     row = _make_row()
@@ -162,7 +176,7 @@ def test_adapter_inserts_attachments(tmp_path: Path) -> None:
 
 def test_adapter_direction_inference_with_handles(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     rows = [
@@ -182,7 +196,7 @@ def test_adapter_direction_inference_with_handles(tmp_path: Path) -> None:
     with connect(db_path) as conn:
         adapter.run(Path("source.csv"), conn, settings)
         directions = [r[0] for r in conn.execute(
-            "SELECT direction FROM messages ORDER BY id"
+            "SELECT direction FROM chat_messages ORDER BY id"
         ).fetchall()]
 
     assert directions == ["outbound", "inbound", "outbound"]

@@ -123,7 +123,7 @@ def imessage_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def imessage_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -141,13 +141,13 @@ class TestIMessageAdapterIntegration:
         assert report.threads_created > 0
 
         with connect(imessage_db) as conn:
-            msgs = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            msgs = conn.execute("SELECT COUNT(*) FROM chat_messages").fetchone()[0]
             assert msgs == report.rows_inserted
 
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
             assert threads > 0
 
-            bridges = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridges = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
             assert bridges == msgs
 
     def test_direction_inference(self, imessage_db: Path, imessage_settings: Settings) -> None:
@@ -156,10 +156,10 @@ class TestIMessageAdapterIntegration:
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             sent = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction = 'outbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction = 'outbound'"
             ).fetchone()[0]
             received = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction = 'inbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction = 'inbound'"
             ).fetchone()[0]
 
         assert sent > 0
@@ -181,7 +181,7 @@ class TestIMessageAdapterIntegration:
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             bulk = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE is_bulk = 1"
+                "SELECT COUNT(*) FROM chat_messages WHERE is_bulk = 1"
             ).fetchone()[0]
 
         assert bulk >= 1
@@ -200,20 +200,26 @@ class TestIMessageAdapterIntegration:
         assert r2.rows_skipped == 0
         assert r2.rows_yielded == 0
 
-    def test_thread_aggregates(self, imessage_db: Path, imessage_settings: Settings) -> None:
+    def test_thread_nodes_and_triples(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
         adapter = IMessageAdapter()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
-            threads = conn.execute(
-                "SELECT thread_key, message_count, date_first, date_last FROM threads ORDER BY thread_key"
+            thread_nodes = conn.execute(
+                "SELECT id, label FROM nodes WHERE kind = 'thread' ORDER BY label"
             ).fetchall()
+            in_thread_id = conn.execute(
+                "SELECT id FROM predicates WHERE name = 'inThread'"
+            ).fetchone()[0]
 
-        for thread_key, msg_count, date_first, date_last in threads:
-            assert msg_count > 0, f"Thread {thread_key} has 0 messages"
-            assert date_first is not None
-            assert date_last is not None
-            assert date_first <= date_last
+        assert len(thread_nodes) > 0
+        for node_id, label in thread_nodes:
+            with connect(imessage_db) as conn:
+                triple_count = conn.execute(
+                    "SELECT COUNT(*) FROM triples WHERE predicate_id = ? AND object_node_id = ?",
+                    (in_thread_id, node_id),
+                ).fetchone()[0]
+            assert triple_count > 0, f"Thread {label} has 0 inThread triples"
 
     def test_attachments_recorded(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
@@ -230,7 +236,7 @@ class TestIMessageAdapterIntegration:
         adapter = IMessageAdapter()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
-            rcpts = conn.execute("SELECT DISTINCT address FROM recipients").fetchall()
+            rcpts = conn.execute("SELECT normalized_label FROM nodes WHERE kind = 'contact' ORDER BY normalized_label").fetchall()
 
         addresses = {r[0] for r in rcpts}
         assert "+15555555555" in addresses or "+15551234567" in addresses
@@ -241,7 +247,7 @@ class TestIMessageAdapterIntegration:
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             email_msgs = conn.execute(
-                "SELECT sender_address, sender_domain FROM messages WHERE sender_domain IS NOT NULL"
+                "SELECT sender_address, sender_domain FROM chat_messages WHERE sender_domain IS NOT NULL"
             ).fetchall()
 
         assert len(email_msgs) >= 1
@@ -255,7 +261,7 @@ class TestIMessageAdapterIntegration:
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             jane_in_group = conn.execute(
-                """SELECT sender_address FROM messages
+                """SELECT sender_address FROM chat_messages
                    WHERE sender_name = 'Jane Doe'
                      AND sender_address = '+15551234567'
                 """,

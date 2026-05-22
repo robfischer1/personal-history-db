@@ -24,12 +24,12 @@ class AtomType:
 
 _CANONICAL_TYPES: list[AtomType] = [
     AtomType("Dataset", "source_files", identity_columns=("source_path",)),
-    AtomType("EmailMessage", "messages", identity_columns=("rfc822_message_id",)),
-    AtomType("Message", "messages", identity_columns=("source_file_id", "raw_hash")),
+    AtomType("EmailMessage", "emails", identity_columns=("rfc822_message_id",)),
+    AtomType("Message", "chat_messages", identity_columns=("source_file_id", "raw_hash")),
     AtomType("Conversation", "threads", identity_columns=("source_kind", "thread_key")),
     AtomType(
         "DigitalDocument",
-        "messages",
+        "digital_documents",
         identity_columns=("source_file_id", "raw_hash"),
         description="Attachments metadata or document-shaped messages",
     ),
@@ -43,8 +43,8 @@ _CANONICAL_TYPES: list[AtomType] = [
         "connections",
         identity_columns=("dedupe_key", "instrument"),
     ),
-    AtomType("CreativeWork", "messages", identity_columns=("source_file_id", "raw_hash")),
-    AtomType("ListenAction", "messages", identity_columns=("source_file_id", "raw_hash")),
+    AtomType("CreativeWork", "creative_works", identity_columns=("source_file_id", "raw_hash")),
+    AtomType("ListenAction", "listen_actions", identity_columns=("source_file_id", "raw_hash")),
 ]
 
 
@@ -87,7 +87,7 @@ class AtomRegistry:
 
         Expected TOML format:
             [types.MyCustomType]
-            table = "messages"
+            table = "chat_messages"
             identity_columns = ["source_file_id", "raw_hash"]
             description = "Optional description"
         """
@@ -100,7 +100,7 @@ class AtomRegistry:
         for name, config in data.get("types", {}).items():
             atom = AtomType(
                 name=name,
-                table=config.get("table", "messages"),
+                table=config["table"],
                 is_canonical=False,
                 identity_columns=tuple(config.get("identity_columns", [])),
                 description=config.get("description", ""),

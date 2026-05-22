@@ -83,7 +83,7 @@ def gc_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def gc_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -103,7 +103,7 @@ class TestGoogleContactsIntegration:
         adapter = GoogleContactsAdapter()
         with connect(gc_db) as conn:
             adapter.run(FIXTURE_DIR, conn, gc_settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM persons").fetchall()
         assert all(t[0] == "Person" for t in types)
 
     def test_all_bulk(self, gc_db: Path, gc_settings: Settings) -> None:
@@ -111,8 +111,8 @@ class TestGoogleContactsIntegration:
         adapter = GoogleContactsAdapter()
         with connect(gc_db) as conn:
             adapter.run(FIXTURE_DIR, conn, gc_settings)
-            bulk = conn.execute("SELECT COUNT(*) FROM messages WHERE is_bulk = 1").fetchone()[0]
-            total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            bulk = conn.execute("SELECT COUNT(*) FROM persons WHERE is_bulk = 1").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
         assert bulk == total
 
     def test_body_contains_info(self, gc_db: Path, gc_settings: Settings) -> None:
@@ -121,7 +121,7 @@ class TestGoogleContactsIntegration:
         with connect(gc_db) as conn:
             adapter.run(FIXTURE_DIR, conn, gc_settings)
             row = conn.execute(
-                "SELECT body_text FROM messages WHERE subject = 'Jane Doe'"
+                "SELECT body_text FROM persons WHERE subject = 'Jane Doe'"
             ).fetchone()
         body = row[0]
         assert "Acme Corp" in body
@@ -133,7 +133,7 @@ class TestGoogleContactsIntegration:
         with connect(gc_db) as conn:
             adapter.run(FIXTURE_DIR, conn, gc_settings)
             row = conn.execute(
-                "SELECT sender_address FROM messages WHERE subject = 'Jane Doe'"
+                "SELECT sender_address FROM persons WHERE subject = 'Jane Doe'"
             ).fetchone()
         assert row[0] == "jane.doe@example.com"
 
@@ -153,7 +153,7 @@ class TestGoogleContactsIntegration:
         adapter = GoogleContactsAdapter()
         with connect(gc_db) as conn:
             adapter.run(FIXTURE_DIR, conn, gc_settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads >= 1
 
     def test_message_thread_bridge(self, gc_db: Path, gc_settings: Settings) -> None:
@@ -161,5 +161,5 @@ class TestGoogleContactsIntegration:
         adapter = GoogleContactsAdapter()
         with connect(gc_db) as conn:
             report = adapter.run(FIXTURE_DIR, conn, gc_settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

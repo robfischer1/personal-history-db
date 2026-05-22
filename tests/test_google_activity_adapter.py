@@ -14,7 +14,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "google_activity"
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -37,7 +37,11 @@ class TestGoogleActivityIntegration:
         adapter = GoogleActivityAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            bulk = conn.execute("SELECT DISTINCT is_bulk FROM messages").fetchall()
+            bulk = conn.execute(
+                "SELECT DISTINCT is_bulk FROM search_actions"
+                " UNION SELECT DISTINCT is_bulk FROM watch_actions"
+                " UNION SELECT DISTINCT is_bulk FROM actions"
+            ).fetchall()
         assert all(b[0] == 1 for b in bulk)
 
     def test_threads_per_stream(self, tmp_path: Path) -> None:
@@ -45,7 +49,7 @@ class TestGoogleActivityIntegration:
         adapter = GoogleActivityAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads >= 1
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
@@ -63,5 +67,5 @@ class TestGoogleActivityIntegration:
         adapter = GoogleActivityAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

@@ -99,7 +99,7 @@ def spotify_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def spotify_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -119,8 +119,8 @@ class TestSpotifyIntegration:
         adapter = SpotifyAdapter()
         with connect(spotify_db) as conn:
             adapter.run(FIXTURE_DIR, conn, spotify_settings)
-            bulk = conn.execute("SELECT COUNT(*) FROM messages WHERE is_bulk = 1").fetchone()[0]
-            total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            bulk = conn.execute("SELECT COUNT(*) FROM listen_actions WHERE is_bulk = 1").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM listen_actions").fetchone()[0]
         assert bulk == total
 
     def test_single_thread(self, spotify_db: Path, spotify_settings: Settings) -> None:
@@ -128,7 +128,7 @@ class TestSpotifyIntegration:
         adapter = SpotifyAdapter()
         with connect(spotify_db) as conn:
             adapter.run(FIXTURE_DIR, conn, spotify_settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 1
 
     def test_thread_key(self, spotify_db: Path, spotify_settings: Settings) -> None:
@@ -136,8 +136,10 @@ class TestSpotifyIntegration:
         adapter = SpotifyAdapter()
         with connect(spotify_db) as conn:
             adapter.run(FIXTURE_DIR, conn, spotify_settings)
-            key = conn.execute("SELECT thread_key FROM threads").fetchone()[0]
-        assert key == "spotify:listening"
+            label = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread'"
+            ).fetchone()[0]
+        assert "spotify:listening" in label
 
     def test_idempotent_rerun(self, spotify_db: Path, spotify_settings: Settings) -> None:
         spotify_settings.db_path = spotify_db
@@ -162,7 +164,7 @@ class TestSpotifyIntegration:
         adapter = SpotifyAdapter()
         with connect(spotify_db) as conn:
             adapter.run(FIXTURE_DIR, conn, spotify_settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM listen_actions").fetchall()
         assert all(t[0] == "ListenAction" for t in types)
 
     def test_message_thread_bridge(self, spotify_db: Path, spotify_settings: Settings) -> None:
@@ -170,5 +172,5 @@ class TestSpotifyIntegration:
         adapter = SpotifyAdapter()
         with connect(spotify_db) as conn:
             report = adapter.run(FIXTURE_DIR, conn, spotify_settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

@@ -14,7 +14,7 @@ FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "apple_health" / "Health_Expo
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -39,7 +39,10 @@ class TestAppleHealthIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             types = conn.execute(
-                "SELECT schema_type, COUNT(*) FROM messages GROUP BY schema_type ORDER BY schema_type"
+                "SELECT schema_type, COUNT(*) FROM observations GROUP BY schema_type"
+                " UNION ALL SELECT schema_type, COUNT(*) FROM exercise_actions GROUP BY schema_type"
+                " UNION ALL SELECT schema_type, COUNT(*) FROM medical_records GROUP BY schema_type"
+                " ORDER BY schema_type"
             ).fetchall()
         type_map = dict(types)
         assert type_map["Observation"] == 2
@@ -99,7 +102,7 @@ class TestAppleHealthIntegration:
         adapter = AppleHealthAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 3
         assert report.threads_created == 3
 
@@ -109,7 +112,7 @@ class TestAppleHealthIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             subjects = conn.execute(
-                "SELECT subject FROM messages WHERE schema_type='Observation' ORDER BY date_sent"
+                "SELECT subject FROM observations ORDER BY date_observed"
             ).fetchall()
         assert subjects[0][0].startswith("StepCount:")
         assert subjects[1][0].startswith("HeartRate:")
@@ -120,7 +123,7 @@ class TestAppleHealthIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             d = conn.execute(
-                "SELECT direction FROM messages WHERE schema_type='MedicalRecord'"
+                "SELECT direction FROM medical_records"
             ).fetchone()[0]
         assert d == "inbound"
 
@@ -139,7 +142,7 @@ class TestAppleHealthIntegration:
         adapter = AppleHealthAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted
 
     def test_all_bulk(self, tmp_path: Path) -> None:
@@ -147,5 +150,11 @@ class TestAppleHealthIntegration:
         adapter = AppleHealthAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            non_bulk = conn.execute("SELECT COUNT(*) FROM messages WHERE is_bulk != 1").fetchone()[0]
+            non_bulk = conn.execute(
+                "SELECT SUM(c) FROM ("
+                " SELECT COUNT(*) AS c FROM observations WHERE is_bulk != 1"
+                " UNION ALL SELECT COUNT(*) FROM exercise_actions WHERE is_bulk != 1"
+                " UNION ALL SELECT COUNT(*) FROM medical_records WHERE is_bulk != 1"
+                ")"
+            ).fetchone()[0]
         assert non_bulk == 0

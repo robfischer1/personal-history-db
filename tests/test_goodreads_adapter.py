@@ -25,7 +25,7 @@ def gr_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def gr_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -45,7 +45,7 @@ class TestGoodreadsIntegration:
         adapter = GoodreadsAdapter()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
-            titles = conn.execute("SELECT subject FROM messages").fetchall()
+            titles = conn.execute("SELECT subject FROM books").fetchall()
         title_list = [t[0] for t in titles]
         assert "" not in title_list
         assert None not in title_list
@@ -55,7 +55,7 @@ class TestGoodreadsIntegration:
         adapter = GoodreadsAdapter()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM books").fetchall()
         assert all(t[0] == "Book" for t in types)
 
     def test_single_thread(self, gr_db: Path, gr_settings: Settings) -> None:
@@ -63,7 +63,7 @@ class TestGoodreadsIntegration:
         adapter = GoodreadsAdapter()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 1
 
     def test_thread_key(self, gr_db: Path, gr_settings: Settings) -> None:
@@ -71,8 +71,10 @@ class TestGoodreadsIntegration:
         adapter = GoodreadsAdapter()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
-            key = conn.execute("SELECT thread_key FROM threads").fetchone()[0]
-        assert key == "goodreads:library"
+            label = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread'"
+            ).fetchone()[0]
+        assert "goodreads:library" in label
 
     def test_isbn_as_sender_address(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
@@ -80,7 +82,7 @@ class TestGoodreadsIntegration:
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             addrs = conn.execute(
-                "SELECT sender_address FROM messages WHERE subject = 'To Kill a Mockingbird'"
+                "SELECT sender_address FROM books WHERE subject = 'To Kill a Mockingbird'"
             ).fetchone()
         assert addrs[0] == "0061120081"
 
@@ -90,7 +92,7 @@ class TestGoodreadsIntegration:
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             row = conn.execute(
-                "SELECT sender_address, sender_name FROM messages WHERE subject = 'Untitled Book'"
+                "SELECT sender_address, sender_name FROM books WHERE subject = 'Untitled Book'"
             ).fetchone()
         assert row[0] is None
         assert row[1] == "Self Published"
@@ -113,7 +115,7 @@ class TestGoodreadsIntegration:
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             row = conn.execute(
-                "SELECT subject FROM messages WHERE sender_address = '0061120081'"
+                "SELECT subject FROM books WHERE sender_address = '0061120081'"
             ).fetchone()
         assert row is not None
         assert row[0] == "To Kill a Mockingbird"
@@ -123,5 +125,5 @@ class TestGoodreadsIntegration:
         adapter = GoodreadsAdapter()
         with connect(gr_db) as conn:
             report = adapter.run(FIXTURE_CSV, conn, gr_settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

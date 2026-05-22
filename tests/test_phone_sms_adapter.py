@@ -14,7 +14,7 @@ FIXTURE_DB = Path(__file__).parent / "fixtures" / "phone_sms" / "mmssms.db"
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -39,7 +39,7 @@ class TestPhoneSmsIntegration:
         adapter = PhoneSmsAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM chat_messages").fetchall()
         assert all(t[0] == "Message" for t in types)
 
     def test_direction_inference(self, tmp_path: Path) -> None:
@@ -48,10 +48,10 @@ class TestPhoneSmsIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             inbound = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction = 'inbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction = 'inbound'"
             ).fetchone()[0]
             outbound = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction = 'outbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction = 'outbound'"
             ).fetchone()[0]
         assert inbound >= 1
         assert outbound >= 1
@@ -61,7 +61,7 @@ class TestPhoneSmsIntegration:
         adapter = PhoneSmsAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads >= 1
 
     def test_mms_with_attachment(self, tmp_path: Path) -> None:
@@ -70,7 +70,7 @@ class TestPhoneSmsIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             mms = conn.execute(
-                "SELECT body_text FROM messages WHERE body_text_source = 'phone-mms'"
+                "SELECT body_text FROM chat_messages WHERE body_text_source = 'phone-mms'"
             ).fetchall()
         assert len(mms) >= 1
         assert "photo" in mms[0][0].lower() or "attachment" in mms[0][0].lower()
@@ -90,5 +90,5 @@ class TestPhoneSmsIntegration:
         adapter = PhoneSmsAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DB, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

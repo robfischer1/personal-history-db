@@ -81,7 +81,7 @@ def calls_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def calls_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -102,7 +102,7 @@ class TestPhoneCallsXmlIntegration:
         with connect(calls_db) as conn:
             adapter.run(FIXTURE_XML, conn, calls_settings)
             rows = conn.execute(
-                "SELECT direction FROM messages ORDER BY date_sent"
+                "SELECT direction FROM actions ORDER BY date_performed"
             ).fetchall()
         dirs = [r[0] for r in rows]
         assert "inbound" in dirs
@@ -113,7 +113,7 @@ class TestPhoneCallsXmlIntegration:
         adapter = PhoneCallsXmlAdapter()
         with connect(calls_db) as conn:
             adapter.run(FIXTURE_XML, conn, calls_settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM actions").fetchall()
         assert all(t[0] == "Action" for t in types)
 
     def test_threads_per_number(self, calls_db: Path, calls_settings: Settings) -> None:
@@ -121,9 +121,11 @@ class TestPhoneCallsXmlIntegration:
         adapter = PhoneCallsXmlAdapter()
         with connect(calls_db) as conn:
             adapter.run(FIXTURE_XML, conn, calls_settings)
-            threads = conn.execute("SELECT thread_key FROM threads ORDER BY thread_key").fetchall()
-        keys = {t[0] for t in threads}
-        assert "calls:+15551234567" in keys
+            threads = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread' ORDER BY label"
+            ).fetchall()
+        labels = {t[0] for t in threads}
+        assert any("calls:+15551234567" in lbl for lbl in labels)
 
     def test_idempotent_rerun(self, calls_db: Path, calls_settings: Settings) -> None:
         calls_settings.db_path = calls_db
@@ -142,7 +144,7 @@ class TestPhoneCallsXmlIntegration:
         adapter = PhoneCallsXmlAdapter()
         with connect(calls_db) as conn:
             report = adapter.run(FIXTURE_XML, conn, calls_settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted
 
     def test_body_text_content(self, calls_db: Path, calls_settings: Settings) -> None:
@@ -150,7 +152,7 @@ class TestPhoneCallsXmlIntegration:
         adapter = PhoneCallsXmlAdapter()
         with connect(calls_db) as conn:
             adapter.run(FIXTURE_XML, conn, calls_settings)
-            bodies = conn.execute("SELECT body_text FROM messages").fetchall()
+            bodies = conn.execute("SELECT body_text FROM actions").fetchall()
         for (body,) in bodies:
             assert body is not None
             assert len(body) > 0

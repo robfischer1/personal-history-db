@@ -14,7 +14,7 @@ FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "facebook_posts" / "facebook_
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -36,7 +36,7 @@ class TestFacebookPostsIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM social_postings").fetchall()
         assert all(t[0] == "SocialMediaPosting" for t in types)
 
     def test_direction_outbound(self, tmp_path: Path) -> None:
@@ -44,7 +44,7 @@ class TestFacebookPostsIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            dirs = conn.execute("SELECT DISTINCT direction FROM messages").fetchall()
+            dirs = conn.execute("SELECT DISTINCT direction FROM social_postings").fetchall()
         assert all(d[0] == "outbound" for d in dirs)
 
     def test_thread_per_bucket(self, tmp_path: Path) -> None:
@@ -52,8 +52,10 @@ class TestFacebookPostsIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            keys = conn.execute("SELECT thread_key FROM threads").fetchall()
-        assert any("Posts" in k[0] for k in keys)
+            labels = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread'"
+            ).fetchall()
+        assert any("Posts" in lbl[0] for lbl in labels)
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
@@ -70,5 +72,5 @@ class TestFacebookPostsIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

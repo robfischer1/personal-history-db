@@ -38,6 +38,20 @@ FTS_STOPWORDS = {
     "under", "before", "after", "just", "like", "not", "no", "yes",
 }
 
+# All 28 typed tables that replaced the monolithic messages table.
+_TYPED_TABLES = [
+    "emails", "chat_messages", "conversations_messages", "observations",
+    "exercise_actions", "search_actions", "listen_actions", "watch_actions",
+    "actions", "events", "products", "order_actions", "like_actions",
+    "persons", "social_postings", "comments", "places", "travel_actions",
+    "geo_shapes", "books", "medical_records", "reviews", "invite_actions",
+    "creative_works", "web_pages", "join_actions", "digital_documents", "things",
+]
+
+# Communication tables — the ones with sender_address / direction / date_sent
+# semantics that mirror the old messages queries.
+_COMM_TABLES = ["emails", "chat_messages", "conversations_messages"]
+
 
 # ---------------------------------------------------------------------------
 # FTS query building
@@ -80,22 +94,33 @@ def _date_filter_ids(
     since: str | None,
     until: str | None,
 ) -> set[int]:
-    """Filter chunk IDs by the date of their parent row (messages or documents)."""
+    """Filter chunk IDs by the date of their parent row.
+
+    Uses metadata_json for typed-table chunks (date_sent stored at ingest)
+    and the documents table join for document chunks.
+    """
     if not (since or until) or not ids:
         return set(ids)
     placeholders = ",".join("?" * len(ids))
     args: list[Any] = list(ids)
     clauses: list[str] = []
     if since:
-        clauses.append("substr(COALESCE(m.date_sent, doc.mtime), 1, 10) >= ?")
+        clauses.append(
+            "substr(COALESCE("
+            "json_extract(d.metadata_json, '$.date_sent'), doc.mtime"
+            "), 1, 10) >= ?"
+        )
         args.append(since)
     if until:
-        clauses.append("substr(COALESCE(m.date_sent, doc.mtime), 1, 10) <= ?")
+        clauses.append(
+            "substr(COALESCE("
+            "json_extract(d.metadata_json, '$.date_sent'), doc.mtime"
+            "), 1, 10) <= ?"
+        )
         args.append(until)
     where = " AND ".join(clauses)
     rows = conn.execute(
         f"SELECT d.id AS doc_id FROM chunks d"
-        f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
         f" LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
         f" WHERE d.id IN ({placeholders}) AND {where}",
         args,
@@ -171,25 +196,32 @@ def _hydrate(
     doc_ids: list[int],
     snippet_chars: int = 240,
 ) -> list[dict[str, Any]]:
-    """Pull chunk + parent row metadata for a list of chunk IDs."""
+    """Pull chunk + parent row metadata for a list of chunk IDs.
+
+    Joins against the three communication typed tables (emails,
+    chat_messages, conversations_messages) and the documents table
+    to resolve parent metadata polymorphically.
+    """
     if not doc_ids:
         return []
     placeholders = ",".join(["?"] * len(doc_ids))
     rows = conn.execute(
         f"SELECT d.id AS doc_id, d.source_table, d.source_id, d.title, d.content,"
         f" d.chunk_index, d.schema_type AS doc_schema_type,"
-        f" COALESCE(m.id, doc.id) AS source_row_id,"
-        f" COALESCE(m.subject, doc.subject) AS subject,"
-        f" m.sender_address,"
-        f" COALESCE(m.sender_name, doc.bucket) AS sender_name,"
-        f" COALESCE(m.date_sent, doc.mtime) AS date_sent,"
-        f" m.direction,"
-        f" m.gmail_thread_id,"
-        f" COALESCE(m.is_bulk, doc.is_bulk) AS is_bulk,"
-        f" m.kind,"
+        f" COALESCE(e.id, cm.id, cv.id, doc.id) AS source_row_id,"
+        f" COALESCE(e.subject, cm.subject, cv.subject, doc.subject) AS subject,"
+        f" COALESCE(e.sender_address, cm.sender_address, cv.sender_address) AS sender_address,"
+        f" COALESCE(e.sender_name, cm.sender_name, cv.sender_name, doc.bucket) AS sender_name,"
+        f" COALESCE(e.date_sent, cm.date_sent, cv.date_sent, doc.mtime) AS date_sent,"
+        f" COALESCE(e.direction, cm.direction, cv.direction) AS direction,"
+        f" e.gmail_thread_id,"
+        f" COALESCE(e.is_bulk, cm.is_bulk, cv.is_bulk, doc.is_bulk) AS is_bulk,"
+        f" cv.kind,"
         f" doc.file_path, doc.bucket"
         f" FROM chunks d"
-        f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
+        f" LEFT JOIN emails e ON e.id = d.source_id AND d.source_table = 'emails'"
+        f" LEFT JOIN chat_messages cm ON cm.id = d.source_id AND d.source_table = 'chat_messages'"
+        f" LEFT JOIN conversations_messages cv ON cv.id = d.source_id AND d.source_table = 'conversations_messages'"
         f" LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
         f" WHERE d.id IN ({placeholders})",
         doc_ids,
@@ -236,14 +268,19 @@ def _hydrate(
 
 
 def _corpus_year_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    """Return {year_str: chunk_count} for the entire embedded corpus."""
+    """Return {year_str: chunk_count} for the entire embedded corpus.
+
+    Uses metadata_json for typed-table chunks and documents.mtime for
+    document chunks, eliminating the need for parent table joins.
+    """
     rows = conn.execute(
-        "SELECT substr(COALESCE(m.date_sent, doc.mtime), 1, 4) AS year, COUNT(*) AS cnt"
+        "SELECT substr(COALESCE("
+        "  json_extract(d.metadata_json, '$.date_sent'), doc.mtime"
+        "), 1, 4) AS year, COUNT(*) AS cnt"
         " FROM chunks d"
-        " LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
         " LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
-        " WHERE COALESCE(m.date_sent, doc.mtime) IS NOT NULL"
-        " AND length(COALESCE(m.date_sent, doc.mtime)) >= 4"
+        " WHERE COALESCE(json_extract(d.metadata_json, '$.date_sent'), doc.mtime) IS NOT NULL"
+        " AND length(COALESCE(json_extract(d.metadata_json, '$.date_sent'), doc.mtime)) >= 4"
         " GROUP BY year"
     ).fetchall()
     return {r[0]: r[1] for r in rows}
@@ -269,9 +306,10 @@ def _lookup_doc_years(
         return {}
     placeholders = ",".join(["?"] * len(doc_ids))
     rows = conn.execute(
-        f"SELECT d.id AS doc_id, substr(COALESCE(m.date_sent, doc.mtime), 1, 4) AS year"
+        f"SELECT d.id AS doc_id, substr(COALESCE("
+        f"  json_extract(d.metadata_json, '$.date_sent'), doc.mtime"
+        f"), 1, 4) AS year"
         f" FROM chunks d"
-        f" LEFT JOIN messages m ON m.id = d.source_id AND d.source_table = 'messages'"
         f" LEFT JOIN documents doc ON doc.id = d.source_id AND d.source_table = 'documents'"
         f" WHERE d.id IN ({placeholders})",
         doc_ids,
@@ -299,6 +337,30 @@ def _lookup_decay_scores(
         return {r[0]: r[1] for r in rows}
     except sqlite3.OperationalError:
         return {}
+
+
+def _count_typed_tables(conn: sqlite3.Connection) -> int:
+    """Sum row counts across all 28 typed tables (replaces COUNT(*) FROM messages)."""
+    total = 0
+    for t in _TYPED_TABLES:
+        with contextlib.suppress(sqlite3.OperationalError):
+            r = conn.execute(f"SELECT COUNT(*) FROM [{t}]").fetchone()
+            if r:
+                total += r[0]
+    return total
+
+
+def _comm_union_sql(
+    *,
+    select_cols: str = "date_sent, direction, sender_address, sender_name, is_bulk",
+    alias: str = "msgs",
+) -> str:
+    """Build a CTE that unions the three communication tables."""
+    parts = [
+        f"SELECT {select_cols} FROM [{t}]"
+        for t in _COMM_TABLES
+    ]
+    return f"WITH {alias} AS ({' UNION ALL '.join(parts)})"
 
 
 # ===================================================================
@@ -408,26 +470,64 @@ def get_message(
     include_recipients: bool = True,
     include_attachments: bool = True,
 ) -> dict[str, Any]:
-    """Fetch a full message by messages.id."""
-    row = conn.execute(
-        "SELECT id, schema_type, rfc822_message_id, gmail_thread_id, gmail_labels,"
-        " subject, sender_address, sender_name, sender_domain, direction,"
-        " date_sent, date_received, body_text, body_text_source,"
-        " is_multipart, has_attachments, attachment_count, is_bulk,"
-        " bulk_signal, source_file_id"
-        " FROM messages WHERE id = ?",
-        (msg_id,),
-    ).fetchone()
+    """Fetch a full message by ID, searching across typed tables.
+
+    Tries emails first (most common for this use case), then chat_messages,
+    then conversations_messages. Returns the first match.
+    """
+    # Table-specific queries — each typed table has its own column names.
+    _table_queries: list[tuple[str, str]] = [
+        ("emails", (
+            "SELECT id, schema_type, rfc822_message_id, gmail_thread_id, gmail_labels,"
+            " subject, sender_address, sender_name, sender_domain, direction,"
+            " date_sent, date_received, body_text, body_text_source,"
+            " is_multipart, has_attachments, attachment_count, is_bulk,"
+            " bulk_signal, source_file_id"
+            " FROM emails WHERE id = ?"
+        )),
+        ("chat_messages", (
+            "SELECT id, schema_type, message_key AS rfc822_message_id,"
+            " NULL AS gmail_thread_id, NULL AS gmail_labels,"
+            " subject, sender_address, sender_name, sender_domain, direction,"
+            " date_sent, date_received, body_text, body_text_source,"
+            " is_multipart, has_attachments, attachment_count, is_bulk,"
+            " bulk_signal, source_file_id"
+            " FROM chat_messages WHERE id = ?"
+        )),
+        ("conversations_messages", (
+            "SELECT id, schema_type, conversation_key AS rfc822_message_id,"
+            " NULL AS gmail_thread_id, NULL AS gmail_labels,"
+            " subject, sender_address, sender_name, sender_domain, direction,"
+            " date_sent, NULL AS date_received, body_text, body_text_source,"
+            " 0 AS is_multipart, 0 AS has_attachments, 0 AS attachment_count, is_bulk,"
+            " bulk_signal, source_file_id"
+            " FROM conversations_messages WHERE id = ?"
+        )),
+    ]
+    row = None
+    matched_table = None
+    for table_name, sql in _table_queries:
+        row = conn.execute(sql, (msg_id,)).fetchone()
+        if row is not None:
+            matched_table = table_name
+            break
     if row is None:
         return {"error": f"No message with id={msg_id}"}
     out = dict(row)
+    out["source_table"] = matched_table
     if include_recipients:
         rs = conn.execute(
-            "SELECT address, name, rtype FROM recipients"
-            " WHERE message_id = ? ORDER BY rtype, id",
-            (msg_id,),
+            "SELECT n_obj.label AS address"
+            " FROM triples t"
+            " JOIN nodes n_sub ON n_sub.id = t.subject_node_id"
+            " JOIN nodes n_obj ON n_obj.id = t.object_node_id"
+            " JOIN predicates p ON p.id = t.predicate_id"
+            " WHERE p.name = 'sentTo'"
+            " AND n_sub.source_table = ? AND n_sub.source_id = ?"
+            " ORDER BY n_obj.label",
+            (matched_table, msg_id),
         ).fetchall()
-        out["recipients"] = [dict(r) for r in rs]
+        out["recipients"] = [{"address": r[0], "name": None, "rtype": "to"} for r in rs]
     if include_attachments and row["attachment_count"]:
         atts = conn.execute(
             "SELECT filename, content_type, size_bytes, on_disk_path"
@@ -463,12 +563,15 @@ def get_thread(
     msg_id: int | None = None,
     max_messages: int = 50,
 ) -> dict[str, Any]:
-    """Fetch all messages in a thread, ordered by date."""
+    """Fetch all emails in a thread, ordered by date.
+
+    Gmail threads are email-only — queries the emails table directly.
+    """
     if thread_id is None and msg_id is None:
         return {"error": "provide thread_id or msg_id"}
     if thread_id is None:
         r = conn.execute(
-            "SELECT gmail_thread_id FROM messages WHERE id = ?", (msg_id,)
+            "SELECT gmail_thread_id FROM emails WHERE id = ?", (msg_id,)
         ).fetchone()
         if r is None or not r["gmail_thread_id"]:
             return {"error": f"msg_id={msg_id} has no gmail_thread_id"}
@@ -476,7 +579,7 @@ def get_thread(
     rows = conn.execute(
         "SELECT id AS msg_id, subject, sender_address, sender_name, direction,"
         " date_sent, is_bulk, substr(body_text, 1, 300) AS body_preview"
-        " FROM messages WHERE gmail_thread_id = ? ORDER BY date_sent LIMIT ?",
+        " FROM emails WHERE gmail_thread_id = ? ORDER BY date_sent LIMIT ?",
         (thread_id, max_messages),
     ).fetchall()
     return {
@@ -499,19 +602,39 @@ def list_sources(conn: sqlite3.Connection) -> dict[str, Any]:
         " SUM(CASE WHEN embedded_at IS NOT NULL THEN 1 ELSE 0 END) AS embedded"
         " FROM chunks GROUP BY source_table ORDER BY chunks DESC"
     ).fetchall()
-    totals = conn.execute(
-        "SELECT (SELECT COUNT(*) FROM messages) AS messages,"
-        " (SELECT COUNT(*) FROM chunks) AS chunks,"
-        " (SELECT COUNT(*) FROM doc_vectors) AS vectors,"
-        " (SELECT COUNT(*) FROM threads) AS threads"
-    ).fetchone()
+
+    # Count typed tables (replaces COUNT(*) FROM messages)
+    typed_total = _count_typed_tables(conn)
+
+    chunk_count = 0
+    vec_count = 0
+    thread_count = 0
+    with contextlib.suppress(sqlite3.OperationalError):
+        r = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        if r:
+            chunk_count = r[0]
+    with contextlib.suppress(sqlite3.OperationalError):
+        r = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()
+        if r:
+            vec_count = r[0]
+    with contextlib.suppress(sqlite3.OperationalError):
+        r = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()
+        if r:
+            thread_count = r[0]
+
     doc_count = 0
     with contextlib.suppress(sqlite3.OperationalError):
         r = conn.execute("SELECT COUNT(*) FROM documents").fetchone()
         if r:
             doc_count = r[0]
-    t = dict(totals)
-    t["documents"] = doc_count
+
+    t = {
+        "messages": typed_total,
+        "chunks": chunk_count,
+        "vectors": vec_count,
+        "threads": thread_count,
+        "documents": doc_count,
+    }
     return {
         "totals": t,
         "source_files": [dict(r) for r in sf],
@@ -525,7 +648,11 @@ def corpus_stats(
     since: str | None = None,
     until: str | None = None,
 ) -> dict[str, Any]:
-    """Year distribution + direction/sender breakdowns."""
+    """Year distribution + direction/sender breakdowns.
+
+    Queries the three communication tables (emails, chat_messages,
+    conversations_messages) via UNION ALL.
+    """
     args: list[Any] = []
     where: list[str] = []
     if since:
@@ -536,18 +663,25 @@ def corpus_stats(
         args.append(until)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
+    cte = _comm_union_sql(
+        select_cols="date_sent, direction, sender_address, is_bulk",
+    )
+
     by_year = conn.execute(
-        f"SELECT substr(date_sent, 1, 4) AS year, COUNT(*) AS messages"
-        f" FROM messages {where_sql} GROUP BY year ORDER BY year",
+        f"{cte}"
+        f" SELECT substr(date_sent, 1, 4) AS year, COUNT(*) AS messages"
+        f" FROM msgs {where_sql} GROUP BY year ORDER BY year",
         args,
     ).fetchall()
     by_dir = conn.execute(
-        f"SELECT direction, COUNT(*) AS n FROM messages {where_sql}"
+        f"{cte}"
+        f" SELECT direction, COUNT(*) AS n FROM msgs {where_sql}"
         f" GROUP BY direction",
         args,
     ).fetchall()
     top_senders = conn.execute(
-        f"SELECT sender_address, COUNT(*) AS n FROM messages {where_sql}"
+        f"{cte}"
+        f" SELECT sender_address, COUNT(*) AS n FROM msgs {where_sql}"
         f" {'AND' if where_sql else 'WHERE'} is_bulk = 0"
         f" GROUP BY sender_address ORDER BY n DESC LIMIT 20",
         args,
@@ -605,13 +739,14 @@ def server_info(
         "ollama_model": embed_client.model if embed_client else None,
     }
     try:
-        info["counts"] = dict(
-            conn.execute(
-                "SELECT (SELECT COUNT(*) FROM messages) AS messages,"
-                " (SELECT COUNT(*) FROM chunks) AS chunks,"
-                " (SELECT COUNT(*) FROM doc_vectors) AS vectors"
-            ).fetchone()
-        )
+        typed_total = _count_typed_tables(conn)
+        chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        vec_count = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
+        info["counts"] = {
+            "messages": typed_total,
+            "chunks": chunk_count,
+            "vectors": vec_count,
+        }
     except Exception as e:
         info["db_error"] = str(e)
     if embed_client:
@@ -637,23 +772,48 @@ def find_messages_by_participant(
     limit: int = 50,
     include_bulk: bool = False,
 ) -> dict[str, Any]:
-    """Find messages where a person appears as sender, recipient, or either."""
+    """Find messages where a person appears as sender, recipient, or either.
+
+    Searches across all three communication tables (emails, chat_messages,
+    conversations_messages).
+    """
     p = f"%{participant.lower()}%"
+
+    # Build the comm CTE with the columns needed for the final output
+    comm_cte = (
+        "WITH comm AS ("
+        " SELECT id, date_sent, direction, sender_address, sender_name,"
+        "  subject, is_bulk, gmail_thread_id"
+        "  FROM emails"
+        " UNION ALL"
+        " SELECT id, date_sent, direction, sender_address, sender_name,"
+        "  subject, is_bulk, NULL AS gmail_thread_id"
+        "  FROM chat_messages"
+        " UNION ALL"
+        " SELECT id, date_sent, direction, sender_address, sender_name,"
+        "  subject, is_bulk, NULL AS gmail_thread_id"
+        "  FROM conversations_messages"
+        ")"
+    )
 
     selectors: list[tuple[str, list[Any]]] = []
     if role in ("sender", "any"):
         selectors.append((
-            "SELECT id AS msg_id, 'sender' AS matched_via FROM messages"
+            "SELECT id AS msg_id, 'sender' AS matched_via FROM comm"
             " WHERE LOWER(sender_address) LIKE ?"
             " OR LOWER(COALESCE(sender_name, '')) LIKE ?",
             [p, p],
         ))
     if role in ("recipient", "any"):
         selectors.append((
-            "SELECT message_id AS msg_id, 'recipient' AS matched_via"
-            " FROM recipients"
-            " WHERE LOWER(address) LIKE ? OR LOWER(COALESCE(name, '')) LIKE ?",
-            [p, p],
+            "SELECT n_sub.source_id AS msg_id, 'recipient' AS matched_via"
+            " FROM triples t"
+            " JOIN nodes n_sub ON n_sub.id = t.subject_node_id"
+            " JOIN nodes n_obj ON n_obj.id = t.object_node_id"
+            " JOIN predicates p ON p.id = t.predicate_id"
+            " WHERE p.name = 'sentTo'"
+            " AND n_obj.normalized_label LIKE ?",
+            [p],
         ))
     if not selectors:
         return {"error": f"role must be 'sender', 'recipient', or 'any'; got {role!r}"}
@@ -679,13 +839,14 @@ def find_messages_by_participant(
     where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
 
     sql = (
-        f"WITH matches AS ({union_sql})"
+        f"{comm_cte},"
+        f" matches AS ({union_sql})"
         f" SELECT m.id AS msg_id, m.date_sent, m.direction,"
         f" m.sender_address, m.sender_name, m.subject,"
         f" m.gmail_thread_id, m.is_bulk,"
         f" (SELECT GROUP_CONCAT(DISTINCT matched_via)"
         f"  FROM matches mt WHERE mt.msg_id = m.id) AS matched_via"
-        f" FROM messages m"
+        f" FROM comm m"
         f" WHERE m.id IN (SELECT msg_id FROM matches){where_sql}"
         f" ORDER BY m.date_sent DESC LIMIT ?"
     )
@@ -722,40 +883,47 @@ def find_threads_by_subject(
     until: str | None = None,
     limit: int = 30,
 ) -> dict[str, Any]:
-    """Find conversation threads by canonical subject line."""
+    """Find conversation threads by canonical subject line.
+
+    Queries the emails table directly, grouping by gmail_thread_id.
+    """
     q = f"%{query.lower()}%"
 
-    where = ["LOWER(COALESCE(subject_canonical, '')) LIKE ?"]
-    args: list[Any] = [q]
+    where = [
+        "gmail_thread_id IS NOT NULL",
+        "(LOWER(COALESCE(subject, '')) LIKE ? OR gmail_thread_id LIKE ?)",
+    ]
+    args: list[Any] = [q, q]
     if since:
-        where.append("substr(date_last, 1, 10) >= ?")
+        where.append("substr(date_sent, 1, 10) >= ?")
         args.append(since)
     if until:
-        where.append("substr(date_first, 1, 10) <= ?")
+        where.append("substr(date_sent, 1, 10) <= ?")
         args.append(until)
     where_sql = " AND ".join(where)
 
     rows = conn.execute(
-        f"SELECT id, gmail_thread_id, subject_canonical,"
-        f" message_count, date_first, date_last, participants"
-        f" FROM threads WHERE {where_sql} ORDER BY date_last DESC LIMIT ?",
+        f"SELECT gmail_thread_id,"
+        f" MIN(subject) AS subject_canonical,"
+        f" COUNT(*) AS message_count,"
+        f" MIN(date_sent) AS date_first,"
+        f" MAX(date_sent) AS date_last"
+        f" FROM emails WHERE {where_sql}"
+        f" GROUP BY gmail_thread_id"
+        f" ORDER BY date_last DESC LIMIT ?",
         args + [limit],
     ).fetchall()
 
     out = []
     for r in rows:
-        participants: Any = r["participants"]
-        if participants:
-            with contextlib.suppress(Exception):
-                participants = json.loads(participants)
         out.append({
-            "thread_db_id": r["id"],
+            "thread_db_id": None,
             "thread_id": r["gmail_thread_id"],
             "subject": r["subject_canonical"],
             "message_count": r["message_count"],
             "date_first": r["date_first"],
             "date_last": r["date_last"],
-            "participants": participants,
+            "participants": None,
         })
     return {
         "query": query,
@@ -776,7 +944,10 @@ def top_correspondents(
     exclude_bulk: bool = True,
     exclude_self: bool = True,
 ) -> dict[str, Any]:
-    """Most-frequent correspondents in a date window."""
+    """Most-frequent correspondents in a date window.
+
+    Queries across all three communication tables.
+    """
     where: list[str] = []
     args: list[Any] = []
     if since:
@@ -791,32 +962,61 @@ def top_correspondents(
         where.append("m.direction != 'self'")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
+    # Build a CTE for the communication tables
+    comm_cte = (
+        "WITH comm AS ("
+        " SELECT id, date_sent, direction, sender_address, sender_name, is_bulk"
+        "  FROM emails"
+        " UNION ALL"
+        " SELECT id, date_sent, direction, sender_address, sender_name, is_bulk"
+        "  FROM chat_messages"
+        " UNION ALL"
+        " SELECT id, date_sent, direction, sender_address, sender_name, is_bulk"
+        "  FROM conversations_messages"
+        ")"
+    )
+
     if role == "sender":
         sql = (
-            f"SELECT m.sender_address AS address,"
+            f"{comm_cte}"
+            f" SELECT m.sender_address AS address,"
             f" MAX(m.sender_name) AS name, COUNT(*) AS message_count"
-            f" FROM messages m {where_sql}"
+            f" FROM comm m {where_sql}"
             f" GROUP BY m.sender_address ORDER BY message_count DESC LIMIT ?"
         )
         rows = conn.execute(sql, args + [limit]).fetchall()
     elif role == "recipient":
         sql = (
-            f"SELECT r.address AS address, MAX(r.name) AS name,"
+            f"{comm_cte}"
+            f" SELECT n_obj.label AS address, NULL AS name,"
             f" COUNT(*) AS message_count"
-            f" FROM recipients r JOIN messages m ON m.id = r.message_id"
-            f" {where_sql}"
-            f" GROUP BY r.address ORDER BY message_count DESC LIMIT ?"
+            f" FROM triples t"
+            f" JOIN predicates p ON p.id = t.predicate_id"
+            f" JOIN nodes n_sub ON n_sub.id = t.subject_node_id"
+            f" JOIN nodes n_obj ON n_obj.id = t.object_node_id"
+            f" JOIN comm m ON m.id = n_sub.source_id"
+            f" WHERE p.name = 'sentTo'"
+            f" AND n_sub.source_table IN ('emails', 'chat_messages', 'conversations_messages')"
+            f" {('AND ' + ' AND '.join(where)) if where else ''}"
+            f" GROUP BY n_obj.label ORDER BY message_count DESC LIMIT ?"
         )
         rows = conn.execute(sql, args + [limit]).fetchall()
     elif role == "both":
         sql = (
-            f"WITH combined AS ("
+            f"{comm_cte},"
+            f" combined AS ("
             f" SELECT m.sender_address AS address, m.sender_name AS name"
-            f"  FROM messages m {where_sql}"
+            f"  FROM comm m {where_sql}"
             f" UNION ALL"
-            f" SELECT r.address AS address, r.name AS name"
-            f"  FROM recipients r JOIN messages m ON m.id = r.message_id"
-            f"  {where_sql})"
+            f" SELECT n_obj.label AS address, NULL AS name"
+            f"  FROM triples t"
+            f"  JOIN predicates p ON p.id = t.predicate_id"
+            f"  JOIN nodes n_sub ON n_sub.id = t.subject_node_id"
+            f"  JOIN nodes n_obj ON n_obj.id = t.object_node_id"
+            f"  JOIN comm m ON m.id = n_sub.source_id"
+            f"  WHERE p.name = 'sentTo'"
+            f"  AND n_sub.source_table IN ('emails', 'chat_messages', 'conversations_messages')"
+            f"  {('AND ' + ' AND '.join(where)) if where else ''})"
             f" SELECT address, MAX(name) AS name, COUNT(*) AS message_count"
             f" FROM combined GROUP BY address ORDER BY message_count DESC LIMIT ?"
         )

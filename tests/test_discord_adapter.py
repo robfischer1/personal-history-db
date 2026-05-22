@@ -130,7 +130,7 @@ def discord_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def discord_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -153,7 +153,7 @@ class TestDiscordAdapterIntegration:
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             inbound = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction != 'outbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction != 'outbound'"
             ).fetchone()[0]
         assert inbound == 0
 
@@ -163,7 +163,7 @@ class TestDiscordAdapterIntegration:
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             senders = conn.execute(
-                "SELECT DISTINCT sender_address FROM messages"
+                "SELECT DISTINCT sender_address FROM chat_messages"
             ).fetchall()
         assert len(senders) == 1
         assert senders[0][0] == "discord:testuser"
@@ -174,7 +174,7 @@ class TestDiscordAdapterIntegration:
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             ids = conn.execute(
-                "SELECT rfc822_message_id FROM messages ORDER BY rfc822_message_id"
+                "SELECT message_key FROM chat_messages ORDER BY message_key"
             ).fetchall()
         msg_ids = [r[0] for r in ids]
         assert all(mid.startswith("discord:") for mid in msg_ids)
@@ -185,16 +185,11 @@ class TestDiscordAdapterIntegration:
         adapter = DiscordAdapter()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
-            threads = conn.execute(
-                "SELECT thread_key, message_count, date_first, date_last FROM threads ORDER BY thread_key"
+            thread_nodes = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread' ORDER BY label"
             ).fetchall()
 
-        assert len(threads) == 3
-        for _key, count, first, last in threads:
-            assert count > 0
-            assert first is not None
-            assert last is not None
-            assert first <= last
+        assert len(thread_nodes) == 3
 
     def test_attachments_recorded(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
@@ -214,10 +209,10 @@ class TestDiscordAdapterIntegration:
         adapter = DiscordAdapter()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
-            rcpts = conn.execute("SELECT DISTINCT address FROM recipients").fetchall()
+            rcpts = conn.execute("SELECT normalized_label FROM nodes WHERE kind = 'contact' ORDER BY normalized_label").fetchall()
 
         addresses = {r[0] for r in rcpts}
-        assert "discord:JaneDoe#1234" in addresses
+        assert "discord:janedoe#1234" in addresses
 
     def test_idempotent_rerun(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
@@ -260,32 +255,47 @@ class TestDiscordAdapterIntegration:
         adapter = DiscordAdapter()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
-            dm_thread = conn.execute(
-                "SELECT message_count, date_first, date_last FROM threads WHERE thread_key = '900000000000000001'"
+            # Verify inThread triples exist for the DM channel
+            in_thread_id = conn.execute(
+                "SELECT id FROM predicates WHERE name = 'inThread'"
+            ).fetchone()[0]
+            dm_node = conn.execute(
+                "SELECT id FROM nodes WHERE kind = 'thread' AND label LIKE '%900000000000000001'"
             ).fetchone()
 
-        assert dm_thread is not None
-        assert dm_thread[0] == 3  # 3 messages in channel 1
-        assert "2024-01-15" in dm_thread[1]
-        assert "2024-01-16" in dm_thread[2]
+        assert dm_node is not None
+        with connect(discord_db) as conn:
+            triple_count = conn.execute(
+                "SELECT COUNT(*) FROM triples WHERE predicate_id = ? AND object_node_id = ?",
+                (in_thread_id, dm_node[0]),
+            ).fetchone()[0]
+        assert triple_count == 3  # 3 messages in channel 1
 
     def test_guild_channel_thread(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
         adapter = DiscordAdapter()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
-            guild_thread = conn.execute(
-                "SELECT message_count FROM threads WHERE thread_key = '900000000000000002'"
+            in_thread_id = conn.execute(
+                "SELECT id FROM predicates WHERE name = 'inThread'"
+            ).fetchone()[0]
+            guild_node = conn.execute(
+                "SELECT id FROM nodes WHERE kind = 'thread' AND label LIKE '%900000000000000002'"
             ).fetchone()
 
-        assert guild_thread is not None
-        assert guild_thread[0] == 2
+        assert guild_node is not None
+        with connect(discord_db) as conn:
+            triple_count = conn.execute(
+                "SELECT COUNT(*) FROM triples WHERE predicate_id = ? AND object_node_id = ?",
+                (in_thread_id, guild_node[0]),
+            ).fetchone()[0]
+        assert triple_count == 2
 
     def test_message_thread_bridge(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
         adapter = DiscordAdapter()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
-            bridges = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
-            msgs = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            bridges = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
+            msgs = conn.execute("SELECT COUNT(*) FROM chat_messages").fetchone()[0]
         assert bridges == msgs

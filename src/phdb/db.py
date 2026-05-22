@@ -41,6 +41,7 @@ def connect(
     *,
     load_vec: bool = False,
     readonly: bool = False,
+    create: bool = False,
 ) -> Iterator[sqlite3.Connection]:
     """Open a connection with standard pragmas.
 
@@ -48,12 +49,16 @@ def connect(
         db_path: Path to the SQLite database file.
         load_vec: Load the sqlite-vec extension for vector operations.
         readonly: Open in read-only mode (e.g. for query-only paths).
+        create: Allow creating the database if it doesn't exist.
+            Only ``migrate`` should pass True; other paths get a clear
+            error instead of silently creating a stub file.
     """
-    conn = (
-        sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        if readonly
-        else sqlite3.connect(str(db_path))
-    )
+    if readonly:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    elif create:
+        conn = sqlite3.connect(str(db_path))
+    else:
+        conn = sqlite3.connect(f"file:{db_path}?mode=rw", uri=True)
 
     try:
         _apply_pragmas(conn)
@@ -78,7 +83,9 @@ def connect_persistent(
     event loops (MCP server) and enables ``Row`` factory for dict-style
     access.
     """
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn = sqlite3.connect(
+        f"file:{db_path}?mode=rw", uri=True, check_same_thread=False
+    )
     _apply_pragmas(conn)
 
     if load_vec:

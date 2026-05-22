@@ -25,7 +25,7 @@ from phdb.triples import (
 def triple_db(tmp_path: Path) -> Path:
     """DB with all migrations applied (including 0012)."""
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -35,7 +35,7 @@ class TestPredicates:
     def test_seed_predicates_exist(self, triple_db: Path):
         with connect(triple_db) as conn:
             preds = list_predicates(conn)
-            assert len(preds) == 20
+            assert len(preds) == 35
             names = {p["name"] for p in preds}
             assert "childOf" in names
             assert "relatesTo" in names

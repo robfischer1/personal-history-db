@@ -35,7 +35,7 @@ def test_register_instance_type() -> None:
     reg = AtomRegistry()
     custom = AtomType(
         name="ChooseAction",
-        table="messages",
+        table="chat_messages",
         is_canonical=False,
         identity_columns=("source_file_id", "raw_hash"),
         description="Decision moments",
@@ -51,7 +51,7 @@ def test_load_instance_types_from_toml(tmp_path: Path) -> None:
     atoms_toml = tmp_path / "atoms.toml"
     atoms_toml.write_text(
         '[types.ChooseAction]\n'
-        'table = "messages"\n'
+        'table = "chat_messages"\n'
         'identity_columns = ["source_file_id", "raw_hash"]\n'
         'description = "Decision moments"\n',
         encoding="utf-8",
@@ -62,7 +62,7 @@ def test_load_instance_types_from_toml(tmp_path: Path) -> None:
 
     atom = reg.get("ChooseAction")
     assert atom is not None
-    assert atom.table == "messages"
+    assert atom.table == "chat_messages"
     assert not atom.is_canonical
 
 

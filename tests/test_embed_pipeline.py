@@ -57,7 +57,7 @@ def _seed_messages(
     )
     for i in range(1, count + 1):
         conn.execute(
-            "INSERT INTO messages"
+            "INSERT INTO emails"
             " (id, schema_type, subject, sender_address, direction,"
             "  date_sent, body_text, is_bulk, source_file_id)"
             " VALUES (?, 'EmailMessage', ?, 'alice@example.com', 'inbound',"
@@ -71,7 +71,7 @@ def _seed_messages(
 def embed_db(tmp_path: Path) -> Path:
     """Migrated DB with 3 eligible messages seeded."""
     db_path = tmp_path / "test.db"
-    with connect(db_path, load_vec=True) as conn:
+    with connect(db_path, create=True, load_vec=True) as conn:
         MigrationRunner(conn).apply_pending()
         ensure_vec_table(conn)
         _seed_messages(conn, count=3, body_len=100)
@@ -89,7 +89,7 @@ def fake_client() -> FakeEmbedClient:
 class TestGetEmbedStatus:
     def test_empty_db(self, tmp_path: Path) -> None:
         db_path = tmp_path / "test.db"
-        with connect(db_path, load_vec=True) as conn:
+        with connect(db_path, create=True, load_vec=True) as conn:
             MigrationRunner(conn).apply_pending()
             ensure_vec_table(conn)
             st = get_embed_status(conn)
@@ -128,7 +128,7 @@ class TestEmbedPipeline:
 
     def test_skips_bulk_messages(self, tmp_path: Path, fake_client: FakeEmbedClient) -> None:
         db_path = tmp_path / "test.db"
-        with connect(db_path, load_vec=True) as conn:
+        with connect(db_path, create=True, load_vec=True) as conn:
             MigrationRunner(conn).apply_pending()
             ensure_vec_table(conn)
             _seed_messages(conn, count=2, is_bulk=1)
@@ -138,7 +138,7 @@ class TestEmbedPipeline:
 
     def test_skips_short_body(self, tmp_path: Path, fake_client: FakeEmbedClient) -> None:
         db_path = tmp_path / "test.db"
-        with connect(db_path, load_vec=True) as conn:
+        with connect(db_path, create=True, load_vec=True) as conn:
             MigrationRunner(conn).apply_pending()
             ensure_vec_table(conn)
             conn.execute(
@@ -146,7 +146,7 @@ class TestEmbedPipeline:
                 " VALUES (1, '/test', 'test', 'mbox', 1)"
             )
             conn.execute(
-                "INSERT INTO messages"
+                "INSERT INTO emails"
                 " (id, schema_type, subject, sender_address, direction,"
                 "  date_sent, body_text, is_bulk, source_file_id)"
                 " VALUES (1, 'EmailMessage', 'Short', 'a@b.com', 'inbound',"
@@ -195,7 +195,7 @@ class TestEmbedPipeline:
         assert len(docs) > 0
         for d in docs:
             assert d[0] == "EmailMessage"
-            assert d[1] == "messages"
+            assert d[1] == "emails"
             assert d[2] == "message_body_512tok"
             assert d[3] == "fake-model"
 
@@ -249,7 +249,7 @@ class TestEmbedPipeline:
         self, tmp_path: Path, fake_client: FakeEmbedClient
     ) -> None:
         db_path = tmp_path / "test.db"
-        with connect(db_path, load_vec=True) as conn:
+        with connect(db_path, create=True, load_vec=True) as conn:
             MigrationRunner(conn).apply_pending()
             ensure_vec_table(conn)
             _seed_messages(conn, count=200, body_len=60)

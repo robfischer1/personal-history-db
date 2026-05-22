@@ -28,7 +28,7 @@ from phdb.migrations.runner import MigrationRunner
 def db_with_pre_0010_state(tmp_path: Path) -> Path:
     """Set up a DB at migration 0009, seeded with dup pairs (legacy + relocated)."""
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         # Apply migrations 0001..0009 by walking the discovered file list.
         runner = MigrationRunner(conn)
         pre_0010 = sorted(
@@ -89,8 +89,8 @@ def db_with_pre_0010_state(tmp_path: Path) -> Path:
         for i, sf_id in enumerate([legacy_id, reloc_id]):
             for j in range(3):
                 conn.execute(
-                    """INSERT INTO messages (schema_type, body_text, source_file_id, raw_hash, kind, role)
-                       VALUES ('Conversation', ?, ?, ?, 'message', 'user')""",
+                    """INSERT INTO messages (schema_type, body_text, source_file_id, raw_hash, kind, role, direction)
+                       VALUES ('Conversation', ?, ?, ?, 'message', 'user', 'unknown')""",
                     (f"msg-{j}-from-sf{sf_id}", sf_id, f"claude-code:msg-{j}-sf{sf_id}"),
                 )
         conn.commit()
@@ -197,24 +197,18 @@ def test_cleanup_preserves_lonely_legacy(migrated_db: Path) -> None:
 def test_cleanup_cascades_messages(migrated_db: Path) -> None:
     """Messages under the deleted legacy source_file are removed too."""
     with connect(migrated_db) as conn:
-        # Find any messages whose body_text mentions the deleted legacy sf id format.
-        # The seed inserted 3 messages per source_file_id; after migration the legacy
-        # source_file is gone, so its 3 messages must also be gone. Verify via the
-        # message count under the surviving relocated source_file.
         reloc_id = conn.execute(
             "SELECT id FROM source_files WHERE source_path = ?",
             (r"D:\<records>\AI Sessions\Claude\claude-code__c--Users-<owner>-Obsidian__4efecc8b-d706-4667-b922-7476858b2991.jsonl",),
         ).fetchone()[0]
         reloc_msgs = conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE source_file_id = ?",
+            "SELECT COUNT(*) FROM conversations_messages WHERE source_file_id = ?",
             (reloc_id,),
         ).fetchone()[0]
         assert reloc_msgs == 3  # untouched
 
-        # The legacy source_file_id is gone, so there should be no orphan messages
-        # pointing at a non-existent source_files.id. Verify via a JOIN.
         orphan_msgs = conn.execute(
-            """SELECT COUNT(*) FROM messages m
+            """SELECT COUNT(*) FROM conversations_messages m
                LEFT JOIN source_files sf ON sf.id = m.source_file_id
                WHERE sf.id IS NULL"""
         ).fetchone()[0]

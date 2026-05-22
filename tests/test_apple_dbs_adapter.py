@@ -128,7 +128,7 @@ def apple_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def apple_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -154,7 +154,7 @@ class TestAppleDbsIntegration:
         with connect(apple_db) as conn:
             report = adapter.run(apple_decrypt_dir, conn, apple_settings)
             rows = conn.execute(
-                "SELECT schema_type, direction, body_text FROM messages ORDER BY rfc822_message_id"
+                "SELECT schema_type, direction, body_text FROM actions ORDER BY action_key"
             ).fetchall()
 
         assert report.rows_inserted == 2
@@ -179,7 +179,7 @@ class TestAppleDbsIntegration:
         with connect(apple_db) as conn:
             report = adapter.run(apple_decrypt_dir, conn, apple_settings)
             row = conn.execute(
-                "SELECT schema_type, body_text FROM messages"
+                "SELECT schema_type, body_text FROM web_pages"
             ).fetchone()
         assert report.rows_inserted == 1
         assert row[0] == "WebPage"
@@ -192,7 +192,7 @@ class TestAppleDbsIntegration:
         adapter = AppleDbsAdapter(only=["notes"])
         with connect(apple_db) as conn:
             report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-            row = conn.execute("SELECT subject, body_text FROM messages").fetchone()
+            row = conn.execute("SELECT subject, body_text FROM digital_documents").fetchone()
         assert report.rows_inserted == 1
         assert row[0] == "My Note"
 
@@ -210,15 +210,17 @@ class TestAppleDbsIntegration:
         assert r2.rows_inserted == 0
         assert r2.rows_yielded == 0
 
-    def test_threads_created(
+    def test_thread_nodes_created(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
     ) -> None:
         apple_settings.db_path = apple_db
         adapter = AppleDbsAdapter(only=["callhistory", "voicemail"])
         with connect(apple_db) as conn:
             report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
-        assert threads >= 2
+            thread_nodes = conn.execute(
+                "SELECT COUNT(*) FROM nodes WHERE kind = 'thread'"
+            ).fetchone()[0]
+        assert thread_nodes >= 2
         assert report.threads_created >= 2
 
     def test_time_budget(

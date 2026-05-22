@@ -35,7 +35,7 @@ def test_cli_migrate(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["--db", str(db_path), "migrate"])
     assert result.exit_code == 0
-    assert "Applied 14 migration(s)" in result.output
+    assert "Applied 22 migration(s)" in result.output
 
 
 def test_cli_migrate_idempotent(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_cli_migrate_idempotent(tmp_path: Path) -> None:
 
 def test_cli_stats(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     runner = CliRunner()
@@ -64,7 +64,7 @@ def test_cli_query_fts(tmp_path: Path) -> None:
     from phdb.db import ensure_vec_table
 
     db_path = tmp_path / "test.db"
-    with connect(db_path, load_vec=True) as conn:
+    with connect(db_path, create=True, load_vec=True) as conn:
         MigrationRunner(conn).apply_pending()
         ensure_vec_table(conn)
         conn.execute(
@@ -72,7 +72,7 @@ def test_cli_query_fts(tmp_path: Path) -> None:
             " VALUES (1, '/test/inbox.mbox', 'gmail', 'mbox', 1)"
         )
         conn.execute(
-            "INSERT INTO messages (id, schema_type, subject, sender_address, direction,"
+            "INSERT INTO emails (id, schema_type, subject, sender_address, direction,"
             " date_sent, body_text, is_bulk, source_file_id)"
             " VALUES (1, 'EmailMessage', 'Test subject', 'alice@example.com', 'inbound',"
             " '2024-01-01T00:00:00Z', 'Test body content for query', 0, 1)"
@@ -80,7 +80,7 @@ def test_cli_query_fts(tmp_path: Path) -> None:
         conn.execute(
             "INSERT INTO chunks (id, schema_type, source_table, source_id,"
             " chunk_index, title, content)"
-            " VALUES (1, 'EmailMessage', 'messages', 1, 0, 'Test subject',"
+            " VALUES (1, 'EmailMessage', 'emails', 1, 0, 'Test subject',"
             " 'Test body content for query')"
         )
         conn.commit()
@@ -95,7 +95,7 @@ def test_cli_query_fts(tmp_path: Path) -> None:
 
 def test_cli_embed_status(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path, load_vec=True) as conn:
+    with connect(db_path, create=True, load_vec=True) as conn:
         MigrationRunner(conn).apply_pending()
         from phdb.db import ensure_vec_table
 
@@ -110,7 +110,7 @@ def test_cli_embed_status(tmp_path: Path) -> None:
 
 def test_cli_embed_placeholder_gone(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path, load_vec=True) as conn:
+    with connect(db_path, create=True, load_vec=True) as conn:
         MigrationRunner(conn).apply_pending()
         from phdb.db import ensure_vec_table
 
@@ -124,7 +124,7 @@ def test_cli_embed_placeholder_gone(tmp_path: Path) -> None:
 def test_cli_ingest_with_instance_dir(tmp_path: Path) -> None:
     """End-to-end: ingest with --instance-dir, verify direction inference."""
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     # Create instance dir with identity config
@@ -160,7 +160,7 @@ def test_cli_ingest_with_instance_dir(tmp_path: Path) -> None:
     assert "1 inserted" in result.output
 
     with connect(db_path) as conn:
-        direction = conn.execute("SELECT direction FROM messages LIMIT 1").fetchone()[0]
+        direction = conn.execute("SELECT direction FROM emails LIMIT 1").fetchone()[0]
     assert direction == "outbound"
 
 

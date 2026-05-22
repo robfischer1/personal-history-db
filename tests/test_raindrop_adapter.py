@@ -16,7 +16,7 @@ FIXTURE_CSV = Path(__file__).parent / "fixtures" / "raindrop" / "raindrop_export
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,

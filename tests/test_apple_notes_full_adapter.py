@@ -14,7 +14,7 @@ FIXTURE_DB = Path(__file__).parent / "fixtures" / "apple_notes_full" / "NoteStor
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -45,11 +45,7 @@ class TestAppleNotesFullIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-            msg_count = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE schema_type='DigitalDocument'"
-            ).fetchone()[0]
         assert doc_count == 2
-        assert msg_count == 0
 
     def test_full_body_preferred(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)

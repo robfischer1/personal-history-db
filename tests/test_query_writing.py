@@ -19,7 +19,7 @@ FIXTURE_DAY2 = FIXTURE_DIR / "day2_close.ndjson"
 def _setup_and_ingest(tmp_path: Path, *fixtures: Path) -> Path:
     """Build a temp DB, apply migrations, ingest each fixture in order."""
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,

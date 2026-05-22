@@ -62,7 +62,7 @@ def sms_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def sms_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -84,7 +84,7 @@ class TestSmsXmlIntegration:
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             rows = conn.execute(
-                "SELECT direction, body_text FROM messages ORDER BY date_sent"
+                "SELECT direction, body_text FROM chat_messages ORDER BY date_sent"
             ).fetchall()
 
         inbound = [r for r in rows if r[0] == "inbound"]
@@ -97,7 +97,7 @@ class TestSmsXmlIntegration:
         adapter = SmsXmlAdapter()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
-            bodies = conn.execute("SELECT body_text FROM messages").fetchall()
+            bodies = conn.execute("SELECT body_text FROM chat_messages").fetchall()
 
         for (body,) in bodies:
             assert body != "null"
@@ -109,7 +109,7 @@ class TestSmsXmlIntegration:
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             mms_rows = conn.execute(
-                "SELECT body_text, has_attachments, attachment_count FROM messages WHERE is_multipart = 1"
+                "SELECT body_text, has_attachments, attachment_count FROM chat_messages WHERE is_multipart = 1"
             ).fetchall()
 
         assert len(mms_rows) == 1
@@ -122,19 +122,33 @@ class TestSmsXmlIntegration:
         adapter = SmsXmlAdapter()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
-            recips = conn.execute(
-                "SELECT r.address FROM recipients r JOIN messages m ON r.message_id = m.id WHERE m.body_text = 'Group message test'"
+            # Find the message row for the group message
+            msg = conn.execute(
+                "SELECT id FROM chat_messages WHERE body_text = 'Group message test'"
+            ).fetchone()
+            assert msg is not None
+            # Check sentTo triples for that message's record node
+            sent_to_id = conn.execute(
+                "SELECT id FROM predicates WHERE name = 'sentTo'"
+            ).fetchone()[0]
+            record_label = f"chat_messages:{msg[0]}"
+            triples = conn.execute(
+                "SELECT n2.normalized_label FROM triples t"
+                " JOIN nodes n1 ON t.subject_node_id = n1.id"
+                " JOIN nodes n2 ON t.object_node_id = n2.id"
+                " WHERE t.predicate_id = ? AND n1.normalized_label = ?",
+                (sent_to_id, record_label.lower()),
             ).fetchall()
 
-        assert len(recips) == 1
-        assert recips[0][0] == "+15551111111"
+        assert len(triples) == 1
+        assert triples[0][0] == "+15551111111"
 
     def test_threads_created(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
         adapter = SmsXmlAdapter()
         with connect(sms_db) as conn:
             report = adapter.run(FIXTURE_XML, conn, sms_settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
 
         assert threads >= 2
         assert report.threads_created >= 2
@@ -144,11 +158,13 @@ class TestSmsXmlIntegration:
         adapter = SmsXmlAdapter()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
-            keys = conn.execute("SELECT thread_key FROM threads ORDER BY thread_key").fetchall()
+            labels = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread' ORDER BY label"
+            ).fetchall()
 
-        key_set = {k[0] for k in keys}
-        assert "sms:+15551234567" in key_set
-        assert "sms:+15559876543" in key_set
+        label_set = {k[0] for k in labels}
+        assert any("sms:+15551234567" in lbl for lbl in label_set)
+        assert any("sms:+15559876543" in lbl for lbl in label_set)
 
     def test_idempotent_rerun(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
@@ -167,7 +183,7 @@ class TestSmsXmlIntegration:
         adapter = SmsXmlAdapter()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM chat_messages").fetchall()
 
         assert all(t[0] == "Message" for t in types)
 
@@ -176,5 +192,5 @@ class TestSmsXmlIntegration:
         adapter = SmsXmlAdapter()
         with connect(sms_db) as conn:
             report = adapter.run(FIXTURE_XML, conn, sms_settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

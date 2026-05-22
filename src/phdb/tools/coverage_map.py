@@ -21,17 +21,25 @@ from phdb.tools.sparsity import compute_sparsity
 CONFIG_PATH = Path(__file__).parents[3] / "config" / "coverage_domains.toml"
 
 CONTRIBUTING_TABLES = {
-    "messages": {
-        "date_col": "m.date_sent",
-        "has_source_kind": False,  # joined via source_file_id
+    "typed_tables": {
+        "date_col": "t.dt",
+        "has_source_kind": False,
         "has_schema_type": True,
-        "has_sender_domain": True,
-        "join_source_files": True,
+        "has_sender_domain": False,
+        "join_source_files": False,
         "query": (
-            "SELECT CAST(strftime('%Y', m.date_sent) AS INTEGER) as year,"
-            " sf.source_kind, m.schema_type, m.sender_domain"
-            " FROM messages m LEFT JOIN source_files sf ON m.source_file_id = sf.id"
-            " WHERE m.date_sent IS NOT NULL AND m.date_sent != ''"
+            "SELECT year, source_kind, schema_type, NULL as sender_domain FROM ("
+            " SELECT CAST(strftime('%Y', date_observed) AS INTEGER) year, sf.source_kind, schema_type FROM observations LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_observed IS NOT NULL AND date_observed != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_sent) AS INTEGER), sf.source_kind, schema_type FROM chat_messages LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_sent IS NOT NULL AND date_sent != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_sent) AS INTEGER), sf.source_kind, schema_type FROM emails LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_sent IS NOT NULL AND date_sent != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_sent) AS INTEGER), sf.source_kind, schema_type FROM conversations_messages LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_sent IS NOT NULL AND date_sent != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_performed) AS INTEGER), sf.source_kind, schema_type FROM exercise_actions LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_performed IS NOT NULL AND date_performed != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_performed) AS INTEGER), sf.source_kind, schema_type FROM search_actions LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_performed IS NOT NULL AND date_performed != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_listened) AS INTEGER), sf.source_kind, schema_type FROM listen_actions LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_listened IS NOT NULL AND date_listened != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_watched) AS INTEGER), sf.source_kind, schema_type FROM watch_actions LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_watched IS NOT NULL AND date_watched != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_performed) AS INTEGER), sf.source_kind, schema_type FROM actions LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_performed IS NOT NULL AND date_performed != ''"
+            " UNION ALL SELECT CAST(strftime('%Y', date_event) AS INTEGER), sf.source_kind, schema_type FROM events LEFT JOIN source_files sf ON source_file_id=sf.id WHERE date_event IS NOT NULL AND date_event != ''"
+            ")"
         ),
     },
     "photographs": {

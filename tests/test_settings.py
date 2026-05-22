@@ -13,6 +13,7 @@ from phdb.settings import Settings
 def test_default_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
     monkeypatch.delenv("PHDB_DB_PATH", raising=False)
+    monkeypatch.setattr("phdb.settings._discover_instance_dir", lambda: None)
     s = Settings.load(db_path=":memory:")
     assert s.db_path == Path(":memory:")
     assert s.embedding.model == "nomic-embed-text"
@@ -35,16 +36,12 @@ def test_instance_toml_override(tmp_path: Path) -> None:
     assert s.embedding.dim == 384
 
 
-def test_env_var_override(tmp_path: Path, monkeypatch: object) -> None:
-    import pytest
-
-    monkeypatch = pytest.MonkeyPatch()  # type: ignore[assignment]
+def test_env_var_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.setattr("phdb.settings._discover_instance_dir", lambda: None)
     monkeypatch.setenv("PHDB_LOG_LEVEL", "DEBUG")
-    try:
-        s = Settings.load(db_path=":memory:")
-        assert s.log_level == "DEBUG"
-    finally:
-        monkeypatch.undo()
+    s = Settings.load(db_path=":memory:")
+    assert s.log_level == "DEBUG"
 
 
 def test_identity_is_me() -> None:
@@ -176,8 +173,10 @@ def test_identity_pii_literals_populated() -> None:
     assert "alicehandle" in literals
 
 
-def test_settings_no_identity_no_traceback() -> None:
+def test_settings_no_identity_no_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Framework loads cleanly with no identity config at all."""
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.setattr("phdb.settings._discover_instance_dir", lambda: None)
     s = Settings.load(db_path=":memory:")
     assert not s.identity.is_configured
     assert s.identity.pii_literals() == []
@@ -188,3 +187,57 @@ def test_identity_importable_from_settings() -> None:
     """Backwards-compat: IdentitySettings still importable from phdb.settings."""
     from phdb.settings import IdentitySettings as IS
     assert IS is IdentitySettings
+
+
+def test_auto_discovery_finds_sibling_instance_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings.load() discovers personal-history-instance/ by walking up."""
+    inst = tmp_path / "personal-history-instance"
+    inst.mkdir()
+    (inst / "config.toml").write_text(
+        '[embedding]\nmodel = "discovered-model"\n', encoding="utf-8"
+    )
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    s = Settings.load(db_path=":memory:")
+    assert s.instance_dir == inst
+    assert s.embedding.model == "discovered-model"
+
+
+def test_auto_discovery_reads_phdbrc_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings.load() follows a .phdbrc marker to the instance dir."""
+    inst = tmp_path / "my-instance"
+    inst.mkdir()
+    (inst / "config.toml").write_text(
+        '[embedding]\nmodel = "marker-model"\n', encoding="utf-8"
+    )
+    (tmp_path / ".phdbrc").write_text(str(inst), encoding="utf-8")
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    s = Settings.load(db_path=":memory:")
+    assert s.instance_dir == inst
+    assert s.embedding.model == "marker-model"
+
+
+def test_auto_discovery_skipped_when_instance_dir_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit instance_dir bypasses auto-discovery."""
+    inst_real = tmp_path / "personal-history-instance"
+    inst_real.mkdir()
+    (inst_real / "config.toml").write_text(
+        '[embedding]\nmodel = "discovered"\n', encoding="utf-8"
+    )
+    inst_explicit = tmp_path / "explicit-instance"
+    inst_explicit.mkdir()
+    (inst_explicit / "config.toml").write_text(
+        '[embedding]\nmodel = "explicit"\n', encoding="utf-8"
+    )
+    monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    s = Settings.load(db_path=":memory:", instance_dir=inst_explicit)
+    assert s.instance_dir == inst_explicit
+    assert s.embedding.model == "explicit"

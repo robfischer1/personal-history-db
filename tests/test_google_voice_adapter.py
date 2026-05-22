@@ -14,7 +14,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "google_voice"
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -36,15 +36,15 @@ class TestGoogleVoiceIntegration:
         adapter = GoogleVoiceAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            types = {t[0] for t in conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()}
-        assert "Message" in types
+            msg_count = conn.execute("SELECT COUNT(*) FROM chat_messages").fetchone()[0]
+        assert msg_count > 0
 
     def test_threads_per_phone(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = GoogleVoiceAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads >= 1
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
@@ -62,5 +62,5 @@ class TestGoogleVoiceIntegration:
         adapter = GoogleVoiceAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

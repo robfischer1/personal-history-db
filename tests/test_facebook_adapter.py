@@ -14,7 +14,7 @@ FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "facebook" / "facebook_test.z
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -36,7 +36,7 @@ class TestFacebookIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM chat_messages").fetchall()
         assert all(t[0] == "Message" for t in types)
 
     def test_direction_inference(self, tmp_path: Path) -> None:
@@ -45,7 +45,7 @@ class TestFacebookIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             bob_dir = conn.execute(
-                "SELECT direction FROM messages WHERE sender_address = 'bob'"
+                "SELECT direction FROM chat_messages WHERE sender_address = 'bob'"
             ).fetchone()
         if bob_dir:
             assert bob_dir[0] == "outbound"
@@ -55,7 +55,7 @@ class TestFacebookIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads >= 1
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
@@ -73,5 +73,5 @@ class TestFacebookIntegration:
         adapter = FacebookUnifiedAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

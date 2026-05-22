@@ -20,7 +20,7 @@ def tmp_db(tmp_path: Path) -> Path:
 @pytest.fixture
 def migrated_db(tmp_db: Path) -> Path:
     """Return a path to a DB with all project migrations applied."""
-    with connect(tmp_db) as conn:
+    with connect(tmp_db, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return tmp_db
@@ -69,7 +69,7 @@ def instance_dir(tmp_path: Path) -> Path:
 
     (inst / "atoms.toml").write_text(
         '[types.TestCustomType]\n'
-        'table = "messages"\n'
+        'table = "chat_messages"\n'
         'identity_columns = ["source_file_id", "raw_hash"]\n'
         'description = "Test custom type"\n',
         encoding="utf-8",

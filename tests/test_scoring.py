@@ -23,7 +23,7 @@ from phdb.scoring import (
 def db_with_chunks(tmp_path: Path) -> Path:
     """Create a DB with migrations applied and some test chunks."""
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
 
@@ -32,20 +32,20 @@ def db_with_chunks(tmp_path: Path) -> Path:
             " VALUES (1, '/test/mail.mbox', 'gmail', 'gmail', 'mbox')"
         )
         conn.execute(
-            "INSERT INTO messages (id, source_file_id, schema_type, subject, date_sent, direction)"
+            "INSERT INTO emails (id, source_file_id, schema_type, subject, date_sent, direction)"
             " VALUES (1, 1, 'EmailMessage', 'Test subject', '2024-01-15T10:00:00Z', 'inbound')"
         )
         conn.execute(
-            "INSERT INTO messages (id, source_file_id, schema_type, subject, date_sent, direction)"
+            "INSERT INTO emails (id, source_file_id, schema_type, subject, date_sent, direction)"
             " VALUES (2, 1, 'EmailMessage', 'Recent msg', '2026-05-01T08:00:00Z', 'outbound')"
         )
         conn.execute(
             "INSERT INTO chunks (id, source_table, source_id, chunk_index, content, schema_type)"
-            " VALUES (1, 'messages', 1, 0, 'Old message content', 'EmailMessage')"
+            " VALUES (1, 'emails', 1, 0, 'Old message content', 'EmailMessage')"
         )
         conn.execute(
             "INSERT INTO chunks (id, source_table, source_id, chunk_index, content, schema_type)"
-            " VALUES (2, 'messages', 2, 0, 'Recent message content', 'EmailMessage')"
+            " VALUES (2, 'emails', 2, 0, 'Recent message content', 'EmailMessage')"
         )
         conn.commit()
     return db_path

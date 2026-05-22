@@ -1,7 +1,7 @@
 """Embed pipeline — chunk source rows, embed via Ollama, store in chunks + doc_vectors.
 
 Ported from embed_messages.py (322 LOC standalone script).  Requires:
-- A migrated DB with messages, chunks, doc_vectors tables
+- A migrated DB with typed tables (emails, chat_messages, etc.), chunks, doc_vectors
 - Optionally a documents typed table (post-migration 0008)
 - A running Ollama instance with the configured model loaded
 - The write lock (acquired by the caller, not by this module)
@@ -119,11 +119,15 @@ def _has_table(conn: sqlite3.Connection, table: str) -> bool:
 
 def get_embed_status(conn: sqlite3.Connection) -> EmbedStatus:
     """Query the DB for current embedding status counts.  Read-only."""
-    n_eligible = conn.execute(
-        "SELECT COUNT(*) FROM messages "
-        "WHERE is_bulk=0 AND body_text IS NOT NULL AND length(body_text) >= ?",
-        (MIN_CHUNK_CHARS,),
-    ).fetchone()[0]
+    _EMBEDDABLE_TABLES = ["emails", "chat_messages", "conversations_messages"]
+    n_eligible = 0
+    for _etbl in _EMBEDDABLE_TABLES:
+        if _has_table(conn, _etbl):
+            n_eligible += conn.execute(
+                f"SELECT COUNT(*) FROM [{_etbl}] "
+                "WHERE is_bulk=0 AND body_text IS NOT NULL AND length(body_text) >= ?",
+                (MIN_CHUNK_CHARS,),
+            ).fetchone()[0]
 
     if _has_table(conn, "documents"):
         n_eligible += conn.execute(
@@ -135,6 +139,13 @@ def get_embed_status(conn: sqlite3.Connection) -> EmbedStatus:
     if _has_table(conn, "articles"):
         n_eligible += conn.execute(
             "SELECT COUNT(*) FROM articles "
+            "WHERE body_text IS NOT NULL AND length(body_text) >= ?",
+            (MIN_CHUNK_CHARS,),
+        ).fetchone()[0]
+
+    if _has_table(conn, "clippings"):
+        n_eligible += conn.execute(
+            "SELECT COUNT(*) FROM clippings "
             "WHERE body_text IS NOT NULL AND length(body_text) >= ?",
             (MIN_CHUNK_CHARS,),
         ).fetchone()[0]
@@ -162,20 +173,23 @@ def get_embed_status(conn: sqlite3.Connection) -> EmbedStatus:
 
 # ---- Pipeline ----
 
-_PENDING_MESSAGES_SQL = """\
+def _pending_sql(table: str) -> str:
+    """Generate pending-embed SQL for a typed communication table."""
+    return f"""\
 SELECT m.id, m.subject, m.body_text, m.sender_address, m.date_sent
-  FROM messages m
+  FROM [{table}] m
  WHERE m.is_bulk = 0
    AND m.body_text IS NOT NULL
    AND length(m.body_text) >= ?
    AND NOT EXISTS (
        SELECT 1 FROM chunks d
-        WHERE d.source_table = 'messages'
+        WHERE d.source_table = '{table}'
           AND d.source_id = m.id
           AND d.embedded_at IS NOT NULL
    )
  ORDER BY m.id
 """
+
 
 _PENDING_DOCUMENTS_SQL = """\
 SELECT doc.id, doc.subject, doc.body_text, doc.bucket, doc.mtime
@@ -206,6 +220,20 @@ SELECT a.id, a.subject, a.body_text, a.bucket, a.mtime
  ORDER BY a.id
 """
 
+_PENDING_CLIPPINGS_SQL = """\
+SELECT c.id, c.subject, c.body_text, c.bucket, c.mtime
+  FROM clippings c
+ WHERE c.body_text IS NOT NULL
+   AND length(c.body_text) >= ?
+   AND NOT EXISTS (
+       SELECT 1 FROM chunks d
+        WHERE d.source_table = 'clippings'
+          AND d.source_id = c.id
+          AND d.embedded_at IS NOT NULL
+   )
+ ORDER BY c.id
+"""
+
 _UPSERT_CHUNK_SQL = """\
 INSERT INTO chunks
   (schema_type, source_table, source_id, chunk_index, chunk_strategy,
@@ -232,7 +260,7 @@ def run_embed_pipeline(
     dry_run: bool = False,
     progress_cb: ProgressCallback | None = None,
 ) -> EmbedResult:
-    """Embed pending rows from messages + documents into chunks + doc_vectors.
+    """Embed pending rows from typed tables + documents into chunks + doc_vectors.
 
     The caller must hold the write lock and manage the connection.
     """
@@ -242,12 +270,16 @@ def run_embed_pipeline(
     errors: list[str] = []
 
     sources: list[tuple[str, str, str]] = [
-        (_PENDING_MESSAGES_SQL, "messages", "EmailMessage"),
+        (_pending_sql("emails"), "emails", "EmailMessage"),
+        (_pending_sql("chat_messages"), "chat_messages", "Message"),
+        (_pending_sql("conversations_messages"), "conversations_messages", "Conversation"),
     ]
     if _has_table(conn, "documents"):
         sources.append((_PENDING_DOCUMENTS_SQL, "documents", "DigitalDocument"))
     if _has_table(conn, "articles"):
         sources.append((_PENDING_ARTICLES_SQL, "articles", "Article"))
+    if _has_table(conn, "clippings"):
+        sources.append((_PENDING_CLIPPINGS_SQL, "clippings", "Quotation"))
 
     buf: list[tuple[str, str, int, int, str, str, str, str]] = []
 
@@ -307,7 +339,7 @@ def run_embed_pipeline(
                 continue
 
             title = (subject or "(no subject)")[:160]
-            if source_table == "messages":
+            if source_table in ("emails", "chat_messages", "conversations_messages"):
                 meta = json.dumps({"sender": meta_col3, "date_sent": meta_col4})
             else:
                 meta = json.dumps({"bucket": meta_col3, "mtime": meta_col4})

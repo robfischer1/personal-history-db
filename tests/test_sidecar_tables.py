@@ -24,7 +24,7 @@ TAGS_TABLE = SidecarTableDef(
         SidecarColumn("confidence", "REAL"),
     ),
     parent_fk_column="message_id",
-    parent_table="messages",
+    parent_table="chat_messages",
 )
 
 ANNOTATIONS_TABLE = SidecarTableDef(
@@ -35,7 +35,7 @@ ANNOTATIONS_TABLE = SidecarTableDef(
         SidecarColumn("score", "INTEGER", default="0"),
     ),
     parent_fk_column="parent_id",
-    parent_table="messages",
+    parent_table="chat_messages",
 )
 
 
@@ -102,21 +102,20 @@ def db() -> Iterator[sqlite3.Connection]:
         )
     """)
     conn.execute("""
-        CREATE TABLE messages (
+        CREATE TABLE chat_messages (
             id INTEGER PRIMARY KEY,
-            schema_type TEXT, rfc822_message_id TEXT UNIQUE,
-            in_reply_to TEXT, references_chain TEXT,
-            gmail_thread_id TEXT, gmail_labels TEXT,
+            schema_type TEXT DEFAULT 'Message',
+            message_key TEXT,
             subject TEXT, sender_address TEXT, sender_name TEXT, sender_domain TEXT,
-            direction TEXT, date_sent TEXT, date_received TEXT,
-            body_text TEXT, body_html TEXT, body_text_source TEXT,
+            direction TEXT DEFAULT 'unknown', date_sent TEXT, date_received TEXT,
+            body_text TEXT, body_text_source TEXT, body_text_hash TEXT,
             is_multipart INTEGER DEFAULT 0, has_attachments INTEGER DEFAULT 0,
             attachment_count INTEGER DEFAULT 0,
             is_bulk INTEGER DEFAULT 0, bulk_signal TEXT,
-            source_file_id INTEGER, source_byte_offset INTEGER, source_byte_length INTEGER,
-            raw_hash TEXT, body_text_hash TEXT,
-            kind TEXT, role TEXT, parent_uuid TEXT, tool_name TEXT,
-            tool_use_id TEXT, model TEXT, payload TEXT
+            source_byte_offset INTEGER, source_byte_length INTEGER,
+            raw_hash TEXT,
+            source_file_id INTEGER,
+            UNIQUE(source_file_id, raw_hash)
         )
     """)
     conn.execute("""
@@ -161,7 +160,7 @@ class TestSidecarTableDef:
     def test_create_table_sql(self) -> None:
         sql = TAGS_TABLE.create_table_sql()
         assert "CREATE TABLE IF NOT EXISTS test_tags" in sql
-        assert "message_id INTEGER NOT NULL REFERENCES messages(id)" in sql
+        assert "message_id INTEGER NOT NULL REFERENCES chat_messages(id)" in sql
         assert "tag TEXT NOT NULL" in sql
         assert "confidence REAL" in sql
 
@@ -207,7 +206,7 @@ class TestSidecarIntegration:
         assert report.rows_inserted == 2
 
         msg_id = db.execute(
-            "SELECT id FROM messages WHERE subject='msg with sidecars'"
+            "SELECT id FROM chat_messages WHERE subject='msg with sidecars'"
         ).fetchone()[0]
 
         tags = db.execute(
@@ -235,7 +234,7 @@ class TestSidecarIntegration:
             source.unlink(missing_ok=True)
 
         msg_id = db.execute(
-            "SELECT id FROM messages WHERE subject='msg without sidecars'"
+            "SELECT id FROM chat_messages WHERE subject='msg without sidecars'"
         ).fetchone()[0]
 
         tags = db.execute(

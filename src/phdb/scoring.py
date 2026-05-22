@@ -141,14 +141,7 @@ def resolve_source_kind(
     source_table: str,
     source_id: int,
 ) -> str | None:
-    if source_table == "messages":
-        row = conn.execute(
-            "SELECT sf.source_kind FROM messages m"
-            " JOIN source_files sf ON sf.id = m.source_file_id"
-            " WHERE m.id = ?",
-            (source_id,),
-        ).fetchone()
-    elif source_table == "documents":
+    if source_table == "documents":
         row = conn.execute(
             "SELECT sf.source_kind FROM documents d"
             " JOIN source_files sf ON sf.id = d.source_file_id"
@@ -156,8 +149,47 @@ def resolve_source_kind(
             (source_id,),
         ).fetchone()
     else:
-        row = None
+        # source_table is the actual typed table name (emails, chat_messages, etc.)
+        # All typed tables have source_file_id.
+        row = conn.execute(
+            f"SELECT sf.source_kind FROM [{source_table}] m"
+            f" JOIN source_files sf ON sf.id = m.source_file_id"
+            f" WHERE m.id = ?",
+            (source_id,),
+        ).fetchone()
     return row[0] if row else None
+
+
+_DATE_COLUMN: dict[str, str] = {
+    "emails": "date_sent",
+    "chat_messages": "date_sent",
+    "conversations_messages": "date_sent",
+    "observations": "date_observed",
+    "exercise_actions": "date_performed",
+    "search_actions": "date_performed",
+    "listen_actions": "date_listened",
+    "watch_actions": "date_watched",
+    "actions": "date_performed",
+    "events": "date_occurred",
+    "products": "date_recorded",
+    "order_actions": "date_ordered",
+    "like_actions": "date_liked",
+    "persons": "date_recorded",
+    "social_postings": "date_posted",
+    "comments": "date_posted",
+    "places": "date_recorded",
+    "travel_actions": "date_traveled",
+    "geo_shapes": "date_recorded",
+    "books": "date_recorded",
+    "medical_records": "date_recorded",
+    "reviews": "date_reviewed",
+    "invite_actions": "date_invited",
+    "creative_works": "date_created",
+    "web_pages": "date_recorded",
+    "join_actions": "date_joined",
+    "digital_documents": "date_created",
+    "things": "date_recorded",
+}
 
 
 def _resolve_content_date(
@@ -172,15 +204,18 @@ def _resolve_content_date(
         return content_date_cache[cache_key]
 
     date_val = ""
-    if source_table == "messages":
+    if source_table == "documents":
         row = conn.execute(
-            "SELECT date_sent FROM messages WHERE id = ?", (source_id,)
+            "SELECT COALESCE(mtime, ctime, created_at) FROM documents WHERE id = ?",
+            (source_id,),
         ).fetchone()
         if row:
             date_val = row[0] or ""
-    elif source_table == "documents":
+    else:
+        # Typed tables — look up the correct date column name
+        date_col = _DATE_COLUMN.get(source_table, "date_sent")
         row = conn.execute(
-            "SELECT COALESCE(mtime, ctime, created_at) FROM documents WHERE id = ?",
+            f"SELECT [{date_col}] FROM [{source_table}] WHERE id = ?",
             (source_id,),
         ).fetchone()
         if row:
@@ -198,7 +233,7 @@ def populate_initial_scores(
     """Compute initial scores for all chunks not yet in chunk_scores.
 
     Uses base * decay(age) only — no engagements exist yet.
-    Age is derived from the content's actual date (messages.date_sent or
+    Age is derived from the content's actual date (typed-table date column or
     documents.mtime), NOT chunks.created_at (which is ingestion timestamp).
     Returns count of rows inserted.
     """
@@ -278,7 +313,7 @@ def batch_recompute(
     """Recompute scores for all (or one tier of) chunks.
 
     Reads engagement history for each chunk and applies the full formula.
-    Age is derived from content date (messages.date_sent / documents.mtime),
+    Age is derived from content date (typed-table date column / documents.mtime),
     not chunks.created_at.
     Returns count of rows updated.
     """

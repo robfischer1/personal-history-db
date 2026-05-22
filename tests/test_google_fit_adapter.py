@@ -14,7 +14,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "google_fit"
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -37,7 +37,7 @@ class TestGoogleFitIntegration:
         adapter = GoogleFitAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            types = conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()
+            types = conn.execute("SELECT DISTINCT schema_type FROM exercise_actions").fetchall()
         assert all(t[0] == "ExerciseAction" for t in types)
 
     def test_all_bulk(self, tmp_path: Path) -> None:
@@ -45,7 +45,7 @@ class TestGoogleFitIntegration:
         adapter = GoogleFitAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            bulk = conn.execute("SELECT DISTINCT is_bulk FROM messages").fetchall()
+            bulk = conn.execute("SELECT DISTINCT is_bulk FROM exercise_actions").fetchall()
         assert all(b[0] == 1 for b in bulk)
 
     def test_thread_per_metric(self, tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ class TestGoogleFitIntegration:
         adapter = GoogleFitAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 1
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
@@ -71,5 +71,5 @@ class TestGoogleFitIntegration:
         adapter = GoogleFitAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted

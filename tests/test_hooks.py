@@ -112,14 +112,10 @@ def db() -> sqlite3.Connection:
         CREATE UNIQUE INDEX IF NOT EXISTS idx_source_files_session
             ON source_files(source_kind, session_uuid) WHERE session_uuid IS NOT NULL;
 
-        CREATE TABLE messages (
+        CREATE TABLE chat_messages (
             id INTEGER PRIMARY KEY,
             schema_type TEXT DEFAULT 'Message',
-            rfc822_message_id TEXT,
-            in_reply_to TEXT,
-            references_chain TEXT,
-            gmail_thread_id TEXT,
-            gmail_labels TEXT,
+            message_key TEXT,
             subject TEXT,
             sender_address TEXT,
             sender_name TEXT,
@@ -128,7 +124,6 @@ def db() -> sqlite3.Connection:
             date_sent TEXT,
             date_received TEXT,
             body_text TEXT,
-            body_html TEXT,
             body_text_source TEXT,
             body_text_hash TEXT,
             is_multipart INTEGER DEFAULT 0,
@@ -136,20 +131,44 @@ def db() -> sqlite3.Connection:
             attachment_count INTEGER DEFAULT 0,
             is_bulk INTEGER DEFAULT 0,
             bulk_signal TEXT,
-            source_file_id INTEGER,
             source_byte_offset INTEGER,
             source_byte_length INTEGER,
             raw_hash TEXT,
-            kind TEXT,
-            role TEXT,
-            parent_uuid TEXT,
-            tool_name TEXT,
-            tool_use_id TEXT,
-            model TEXT,
-            payload TEXT,
-            thread_metadata TEXT,
-            thread_cwd TEXT,
+            source_file_id INTEGER,
             UNIQUE(source_file_id, raw_hash)
+        );
+
+        CREATE TABLE recipients (
+            id INTEGER PRIMARY KEY,
+            message_id INTEGER NOT NULL,
+            address TEXT NOT NULL,
+            name TEXT,
+            rtype TEXT NOT NULL
+        );
+
+        CREATE TABLE attachments (
+            id INTEGER PRIMARY KEY,
+            schema_type TEXT NOT NULL DEFAULT 'DigitalDocument',
+            message_id INTEGER NOT NULL,
+            filename TEXT,
+            content_type TEXT,
+            content_disposition TEXT,
+            size_bytes INTEGER,
+            on_disk_path TEXT,
+            content_hash TEXT
+        );
+
+        CREATE TABLE threads (
+            id INTEGER PRIMARY KEY,
+            schema_type TEXT, source_kind TEXT, thread_key TEXT UNIQUE,
+            message_count INTEGER DEFAULT 0,
+            participants TEXT, metadata TEXT, cwd TEXT,
+            date_first TEXT, date_last TEXT
+        );
+
+        CREATE TABLE message_threads (
+            message_id INTEGER, thread_id INTEGER,
+            UNIQUE(message_id, thread_id)
         );
 
         CREATE TABLE test_sidecar (
@@ -183,7 +202,7 @@ class TestPostInsertHook:
         adapter.run(Path("/fake/source.txt"), db, settings)
 
         rows = db.execute(
-            "SELECT m.id, s.message_id FROM messages m JOIN test_sidecar s ON m.id = s.message_id"
+            "SELECT m.id, s.message_id FROM chat_messages m JOIN test_sidecar s ON m.id = s.message_id"
         ).fetchall()
         assert len(rows) == 2
         for msg_id, sidecar_msg_id in rows:
@@ -203,7 +222,7 @@ class TestPreInsertHook:
         adapter = _FilterAdapter()
         adapter.run(Path("/fake/source.txt"), db, settings)
 
-        rows = db.execute("SELECT sender_address FROM messages ORDER BY date_sent").fetchall()
+        rows = db.execute("SELECT sender_address FROM chat_messages ORDER BY date_sent").fetchall()
         assert len(rows) == 2
         assert rows[0][0] == "keep@test.com"
         assert rows[1][0] == "keep2@test.com"

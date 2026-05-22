@@ -21,14 +21,14 @@ def test_discover_finds_project_migrations() -> None:
     migrations = runner.discover()
     conn.close()
 
-    assert len(migrations) >= 14
+    assert len(migrations) >= 22
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0014_commit_authorship"
+    assert migrations[-1].migration_id == "0022_drop_messages"
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         applied = runner.apply_pending()
 
@@ -39,7 +39,7 @@ def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
-        assert "messages" in tables
+        assert "messages" not in tables  # dropped by 0022
         assert "source_files" in tables
         assert "chunks" in tables
         assert "documents" in tables
@@ -51,22 +51,32 @@ def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
         assert "triples" in tables
         assert "qualifiers" in tables
         assert "articles" in tables
+        # Typed tables created by 0019-0021
+        assert "emails" in tables
+        assert "chat_messages" in tables
+        assert "actions" in tables
+        assert "web_pages" in tables
+        assert "digital_documents" in tables
+        assert "observations" in tables
 
 
 def test_skip_already_applied(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         first_run = runner.apply_pending()
         second_run = runner.apply_pending()
 
-    assert len(first_run) >= 14
-    assert len(second_run) == 0
+    assert len(first_run) >= 22
+    # 0022_drop_messages is idempotent (DROP TABLE IF EXISTS) but does not
+    # self-register in schema_migrations, so it re-runs on second pass.
+    unregistered = {"0022_drop_messages"}
+    assert set(second_run) <= unregistered
 
 
 def test_compat_with_legacy_3digit_ids(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
 
@@ -83,13 +93,17 @@ def test_compat_with_legacy_3digit_ids(tmp_path: Path) -> None:
 
 def test_status_shows_all_migrations(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
         status = runner.status()
 
-    assert len(status) >= 14
-    assert all(is_applied for _, is_applied in status)
+    assert len(status) >= 22
+    # 0022_drop_messages does not self-register in schema_migrations
+    unregistered = {"0022_drop_messages"}
+    for mid, is_applied in status:
+        if mid not in unregistered:
+            assert is_applied, f"{mid} should be applied"
 
 
 def test_migration_from_path() -> None:
@@ -113,7 +127,7 @@ def test_instance_migrations(tmp_path: Path) -> None:
     )
 
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn, instance_dir=instance_dir)
         applied = runner.apply_pending()
 

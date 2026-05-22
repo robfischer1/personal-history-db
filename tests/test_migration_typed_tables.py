@@ -3,6 +3,10 @@
 0007: documents → chunks rename
 0008: CREATE documents typed table
 0009: migrate DigitalDocument rows from messages → documents
+
+After migration 0022, the monolithic messages table is dropped. Tests that
+previously verified rows were removed from messages now verify the messages
+table no longer exists and rows landed in the correct typed tables.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ def _tables(conn) -> set[str]:
 @pytest.fixture
 def migrated_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     return db_path
 
@@ -195,7 +199,7 @@ class TestDocumentsTypedTable:
 def pre_reshape_db(tmp_path: Path) -> Path:
     """DB with migrations up to 0006 + synthetic DigitalDocument rows in messages."""
     db_path = tmp_path / "reshape_test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         # Apply only up to 0006
         for m in runner.discover():
@@ -273,20 +277,20 @@ class TestDocumentsMigrate:
         with connect(pre_reshape_db) as conn:
             runner = MigrationRunner(conn)
             pending = runner.pending()
-            assert len(pending) == 9
+            assert len(pending) == 16
             runner.apply_pending()
 
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-            msg_dd = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE schema_type='DigitalDocument'"
+            email_count = conn.execute(
+                "SELECT COUNT(*) FROM emails WHERE schema_type='EmailMessage'"
             ).fetchone()[0]
-            msg_email = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE schema_type='EmailMessage'"
-            ).fetchone()[0]
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
 
         assert doc_count == 2
-        assert msg_dd == 0
-        assert msg_email == 1
+        assert email_count == 1
+        assert "messages" not in tables
 
     def test_chunks_repointed(self, pre_reshape_db: Path) -> None:
         with connect(pre_reshape_db) as conn:
@@ -295,12 +299,12 @@ class TestDocumentsMigrate:
             doc_chunks = conn.execute(
                 "SELECT COUNT(*) FROM chunks WHERE source_table='documents'"
             ).fetchone()[0]
-            msg_chunks = conn.execute(
-                "SELECT COUNT(*) FROM chunks WHERE source_table='messages'"
+            email_chunks = conn.execute(
+                "SELECT COUNT(*) FROM chunks WHERE source_table='emails'"
             ).fetchone()[0]
 
         assert doc_chunks == 2
-        assert msg_chunks == 1
+        assert email_chunks == 1
 
     def test_chunk_source_ids_valid(self, pre_reshape_db: Path) -> None:
         with connect(pre_reshape_db) as conn:
@@ -325,22 +329,22 @@ class TestDocumentsMigrate:
         assert row is not None
         assert row[0] == "My Files"
 
-    def test_orphan_threads_cleaned(self, pre_reshape_db: Path) -> None:
+    def test_threads_table_dropped_by_0022(self, pre_reshape_db: Path) -> None:
         with connect(pre_reshape_db) as conn:
             MigrationRunner(conn).apply_pending()
 
-            gd_threads = conn.execute(
-                "SELECT COUNT(*) FROM threads WHERE source_kind='google_drive'"
-            ).fetchone()[0]
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
 
-        assert gd_threads == 0
+        assert "threads" not in tables
 
-    def test_email_messages_untouched(self, pre_reshape_db: Path) -> None:
+    def test_email_messages_migrated_to_emails(self, pre_reshape_db: Path) -> None:
         with connect(pre_reshape_db) as conn:
             MigrationRunner(conn).apply_pending()
 
             row = conn.execute(
-                "SELECT subject, sender_address FROM messages WHERE rfc822_message_id='msg-001'"
+                "SELECT subject, sender_address FROM emails WHERE rfc822_message_id='msg-001'"
             ).fetchone()
 
         assert row[0] == "Hello"

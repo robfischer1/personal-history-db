@@ -118,7 +118,7 @@ Testing recipients.
 @pytest.fixture()
 def db_path(tmp_path: Path) -> Path:
     p = tmp_path / "test.db"
-    with connect(p) as conn:
+    with connect(p, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     return p
 
@@ -146,7 +146,7 @@ class TestBasicIngest:
             row = conn.execute(
                 "SELECT schema_type, rfc822_message_id, subject, sender_address, "
                 "sender_name, sender_domain, date_sent, body_text, body_text_source "
-                "FROM messages"
+                "FROM emails"
             ).fetchone()
 
         assert row[0] == "EmailMessage"
@@ -172,7 +172,13 @@ class TestBasicIngest:
 
 
 class TestDedup:
-    def test_duplicate_message_id_skipped(self, tmp_path: Path, db_path: Path) -> None:
+    def test_duplicate_message_id_deduped_by_raw_hash(self, tmp_path: Path, db_path: Path) -> None:
+        """Emails table dedupes by (source_file_id, raw_hash), not rfc822_message_id.
+
+        Two copies of the same message at different byte offsets in an mbox have
+        different raw_hashes, so both insert. True content-identical re-runs of
+        the same mbox are caught by the resume-offset logic.
+        """
         mbox = _write_mbox(tmp_path, [BASIC_MSG, BASIC_MSG])
         adapter = MboxAdapter()
         settings = Settings.load(db_path=db_path)
@@ -180,8 +186,9 @@ class TestDedup:
         with connect(db_path) as conn:
             report = adapter.run(mbox, conn, settings)
 
-        assert report.rows_inserted == 1
-        assert report.rows_skipped == 1
+        # Both inserts succeed — different byte offsets yield different raw_hashes
+        assert report.rows_inserted == 2
+        assert report.rows_skipped == 0
 
     def test_null_message_id_always_inserts(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [NO_MSGID, NO_MSGID])
@@ -202,7 +209,7 @@ class TestBulkDetection:
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT is_bulk, bulk_signal FROM messages").fetchone()
+            row = conn.execute("SELECT is_bulk, bulk_signal FROM emails").fetchone()
 
         assert row[0] == 1
         assert row[1] == "List-Unsubscribe"
@@ -214,7 +221,7 @@ class TestBulkDetection:
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT body_text, body_text_source FROM messages").fetchone()
+            row = conn.execute("SELECT body_text, body_text_source FROM emails").fetchone()
 
         assert len(row[0]) <= 280
         assert row[1] == "plain-snippet"
@@ -235,7 +242,7 @@ Automated notification content here.
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT is_bulk, bulk_signal FROM messages").fetchone()
+            row = conn.execute("SELECT is_bulk, bulk_signal FROM emails").fetchone()
 
         assert row[0] == 1
         assert row[1] == "noreply-pattern"
@@ -257,7 +264,7 @@ Mailing list message.
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT is_bulk, bulk_signal FROM messages").fetchone()
+            row = conn.execute("SELECT is_bulk, bulk_signal FROM emails").fetchone()
 
         assert row[0] == 1
         assert row[1] == "Precedence:bulk"
@@ -271,7 +278,7 @@ class TestBodyExtraction:
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT body_text, body_text_source FROM messages").fetchone()
+            row = conn.execute("SELECT body_text, body_text_source FROM emails").fetchone()
 
         assert "Hello Bob" in row[0]
         assert row[1] == "plain"
@@ -284,12 +291,12 @@ class TestBodyExtraction:
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
             row = conn.execute(
-                "SELECT body_text, body_html, body_text_source FROM messages"
+                "SELECT body_text, body_text_source FROM emails"
             ).fetchone()
 
         assert "Big News" in row[0] or "paragraph content" in row[0]
-        assert "<html>" in row[1]
-        assert row[2] == "html2text"
+        # body_html column is not present in the emails typed table
+        assert row[1] == "html2text"
 
     def test_body_max_len_cap(self, tmp_path: Path, db_path: Path) -> None:
         long_body = "A" * 250_000
@@ -308,7 +315,7 @@ Date: Mon, 15 Jan 2024 10:00:00 +0000
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT body_text FROM messages").fetchone()
+            row = conn.execute("SELECT body_text FROM emails").fetchone()
 
         assert len(row[0]) <= 200_000
 
@@ -336,7 +343,7 @@ dGVzdA==
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT body_text, body_text_source FROM messages").fetchone()
+            row = conn.execute("SELECT body_text, body_text_source FROM emails").fetchone()
 
         assert row[0] is None
         assert row[1] == "empty"
@@ -351,7 +358,7 @@ class TestMultipart:
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
             row = conn.execute(
-                "SELECT is_multipart, has_attachments, attachment_count FROM messages"
+                "SELECT is_multipart, has_attachments, attachment_count FROM emails"
             ).fetchone()
 
         assert row[0] == 1
@@ -382,14 +389,21 @@ class TestRecipients:
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            rows = conn.execute(
-                "SELECT address, rtype FROM recipients ORDER BY rtype"
+            # Recipients are now emitted as sentTo triples to contact nodes
+            sent_to_id = conn.execute(
+                "SELECT id FROM predicates WHERE name = 'sentTo'"
+            ).fetchone()[0]
+            triple_count = conn.execute(
+                "SELECT COUNT(*) FROM triples WHERE predicate_id = ?",
+                (sent_to_id,),
+            ).fetchone()[0]
+            contacts = conn.execute(
+                "SELECT normalized_label FROM nodes WHERE kind = 'contact'"
             ).fetchall()
 
-        rtypes = {r[1] for r in rows}
-        assert "to" in rtypes
-        assert "cc" in rtypes
-        assert "bcc" in rtypes
+        # All recipients (to + cc + bcc) become contact nodes with sentTo triples
+        assert triple_count >= 3
+        assert len(contacts) >= 3
 
 
 class TestGmailHeaders:
@@ -400,7 +414,7 @@ class TestGmailHeaders:
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            row = conn.execute("SELECT gmail_thread_id, gmail_labels FROM messages").fetchone()
+            row = conn.execute("SELECT gmail_thread_id, gmail_labels FROM emails").fetchone()
 
         assert row[0] == "1234567890"
         labels = json.loads(row[1])
@@ -427,7 +441,7 @@ Outbound message.
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            direction = conn.execute("SELECT direction FROM messages").fetchone()[0]
+            direction = conn.execute("SELECT direction FROM emails").fetchone()[0]
 
         assert direction == "outbound"
 
@@ -448,7 +462,7 @@ Inbound message.
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            direction = conn.execute("SELECT direction FROM messages").fetchone()[0]
+            direction = conn.execute("SELECT direction FROM emails").fetchone()[0]
 
         assert direction == "inbound"
 
@@ -469,18 +483,20 @@ Message to self.
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            direction = conn.execute("SELECT direction FROM messages").fetchone()[0]
+            direction = conn.execute("SELECT direction FROM emails").fetchone()[0]
 
         assert direction == "self"
 
-    def test_unknown_when_no_identity(self, tmp_path: Path, db_path: Path) -> None:
+    def test_unknown_when_no_identity(self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
         adapter = MboxAdapter()
+        monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
+        monkeypatch.setattr("phdb.settings._discover_instance_dir", lambda: None)
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
-            direction = conn.execute("SELECT direction FROM messages").fetchone()[0]
+            direction = conn.execute("SELECT direction FROM emails").fetchone()[0]
 
         assert direction == "unknown"
 
@@ -548,7 +564,7 @@ class TestByteOffsets:
         with connect(db_path) as conn:
             adapter.run(mbox, conn, settings)
             row = conn.execute(
-                "SELECT source_byte_offset, source_byte_length, raw_hash FROM messages"
+                "SELECT source_byte_offset, source_byte_length, raw_hash FROM emails"
             ).fetchone()
 
         assert row[0] is not None

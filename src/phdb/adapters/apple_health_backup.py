@@ -1,14 +1,15 @@
-"""Apple Health adapter — ingests Health_Export.zip via streaming XML.
+"""Apple Health backup adapter — ingests Health SQLite databases from iOS backup.
 
-Consumes parsed records from phdb.formats.apple_health_xml.
+Consumes parsed records from phdb.formats.apple_health_backup.
 
-Source: Health_Export.zip containing apple_health_export/export.xml + GPX routes.
-Three record types mapped to messages + 5 sidecar tables:
-  Record      -> Observation   + record_metadata + hr_samples
-  Workout     -> ExerciseAction + workout_events + workout_statistics + geo_traces
-  ClinicalRecord -> MedicalRecord (no sidecars)
+Source: healthdb_secure.sqlite + healthdb.sqlite extracted from an encrypted
+iOS backup (iMazing, iTunes, etc.) via extract_health_backup.py.
 
-Custom run() required for sidecar table writes.
+Two record types mapped to messages + 3 sidecar tables:
+  Record  -> Observation    + record_metadata
+  Workout -> ExerciseAction + workout_events + workout_statistics
+
+Custom run() required for sidecar table writes (same pattern as apple_health).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,8 +29,8 @@ from phdb.adapters.base import (
     SidecarColumn,
     SidecarTableDef,
 )
-from phdb.formats.apple_health_xml import (
-    ParsedClinical,
+from phdb.formats.apple_health_backup import (
+    APPLE_EPOCH,
     ParsedRecord,
     ParsedWorkout,
     parse,
@@ -38,9 +40,8 @@ from phdb.log import get_logger
 if TYPE_CHECKING:
     from phdb.settings import Settings
 
-log = get_logger("phdb.adapters.apple_health")
+log = get_logger("phdb.adapters.apple_health_backup")
 
-MAX_BODY_LEN = 2000
 COMMIT_EVERY = 25000
 
 RECORD_METADATA_TABLE = SidecarTableDef(
@@ -50,16 +51,6 @@ RECORD_METADATA_TABLE = SidecarTableDef(
         SidecarColumn("value", "TEXT"),
     ),
     parent_fk_column="message_id",
-    parent_table="observations",
-)
-
-HR_SAMPLES_TABLE = SidecarTableDef(
-    table_name="hr_samples",
-    columns=(
-        SidecarColumn("ts", "TEXT", nullable=False),
-        SidecarColumn("bpm", "INTEGER", nullable=False),
-    ),
-    parent_fk_column="parent_message_id",
     parent_table="observations",
 )
 
@@ -90,41 +81,20 @@ WORKOUT_STATISTICS_TABLE = SidecarTableDef(
     parent_table="exercise_actions",
 )
 
-GEO_TRACES_TABLE = SidecarTableDef(
-    table_name="geo_traces",
-    columns=(
-        SidecarColumn("source_kind", "TEXT", nullable=False),
-        SidecarColumn("point_idx", "INTEGER", nullable=False),
-        SidecarColumn("ts", "TEXT"),
-        SidecarColumn("lat", "REAL", nullable=False),
-        SidecarColumn("lon", "REAL", nullable=False),
-        SidecarColumn("elevation_m", "REAL"),
-        SidecarColumn("speed_mps", "REAL"),
-        SidecarColumn("course", "REAL"),
-        SidecarColumn("horizontal_accuracy_m", "REAL"),
-        SidecarColumn("vertical_accuracy_m", "REAL"),
-        SidecarColumn("extra_json", "TEXT"),
-    ),
-    parent_fk_column="parent_message_id",
-    parent_table="exercise_actions",
-)
 
+class AppleHealthBackupAdapter(Adapter):
+    """Ingest Apple Health databases extracted from an iOS backup."""
 
-class AppleHealthAdapter(Adapter):
-    """Ingest Apple Health Export zip (streaming XML + GPX)."""
-
-    name = "apple_health"
-    source_kind = "apple-health"
-    file_kind = "zip"
+    name = "apple_health_backup"
+    source_kind = "apple-health-backup"
+    file_kind = "sqlite"
     schema_type = "Observation"
     dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
     batch_size = 25000
     sidecar_tables = [
         RECORD_METADATA_TABLE,
-        HR_SAMPLES_TABLE,
         WORKOUT_EVENTS_TABLE,
         WORKOUT_STATISTICS_TABLE,
-        GEO_TRACES_TABLE,
     ]
 
     def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
@@ -146,18 +116,26 @@ class AppleHealthAdapter(Adapter):
         source_file_id = self._register_source(conn, source_path)
         report.source_file_id = source_file_id
 
-        metrics_thread_id, metrics_created = self._upsert_thread(conn, "apple-health:metrics")
-        clinical_thread_id, clinical_created = self._upsert_thread(conn, "apple-health:clinical")
+        metrics_thread_id, metrics_created = self._upsert_thread(
+            conn, "apple-health-backup:metrics",
+        )
         if metrics_created:
             report.threads_created += 1
-        if clinical_created:
-            report.threads_created += 1
 
-        touched_threads: set[int] = {metrics_thread_id, clinical_thread_id}
+        touched_threads: set[int] = {metrics_thread_id}
         thread_dates: dict[int, tuple[str, str]] = {}
-        processed = 0
 
-        for parsed in parse(source_path):
+        secure_db = self._resolve_secure_db(source_path)
+        meta_db = secure_db.parent / "healthdb.sqlite"
+        if not meta_db.exists():
+            meta_db = None
+
+        since_ts = self._last_ingest_ts(conn)
+        if since_ts is not None:
+            log.info("[%s] Incremental ingest: since_ts=%.0f", self.name, since_ts)
+
+        processed = 0
+        for parsed in parse(secure_db, meta_db, since_ts=since_ts):
             if isinstance(parsed, ParsedRecord):
                 self._handle_record(
                     conn, parsed, source_file_id, metrics_thread_id, report,
@@ -169,11 +147,6 @@ class AppleHealthAdapter(Adapter):
                     thread_dates,
                 )
                 touched_threads.update(wt_threads)
-            elif isinstance(parsed, ParsedClinical):
-                self._handle_clinical(
-                    conn, parsed, source_file_id, clinical_thread_id, report,
-                    thread_dates,
-                )
 
             processed += 1
             if processed % COMMIT_EVERY == 0:
@@ -205,6 +178,40 @@ class AppleHealthAdapter(Adapter):
         )
         return report
 
+    @staticmethod
+    def _resolve_secure_db(source_path: Path) -> Path:
+        """Accept either the directory or the sqlite file itself."""
+        if source_path.is_dir():
+            candidate = source_path / "healthdb_secure.sqlite"
+            if not candidate.exists():
+                raise FileNotFoundError(
+                    f"healthdb_secure.sqlite not found in {source_path}"
+                )
+            return candidate
+        return source_path
+
+    def _last_ingest_ts(self, conn: sqlite3.Connection) -> float | None:
+        """Find the latest date_sent from prior apple-health* source_kinds.
+
+        Returns an Apple epoch timestamp so parse() can filter at the SQL level.
+        This skips overlap with the XML export's data.
+        """
+        row = conn.execute(
+            """SELECT MAX(date_observed) FROM observations
+               JOIN source_files sf ON sf.id = observations.source_file_id
+               WHERE sf.source_kind IN ('apple-health', 'apple-health-backup')
+                 AND date_observed IS NOT NULL""",
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        try:
+            dt = datetime.fromisoformat(row[0])
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return (dt - APPLE_EPOCH).total_seconds()
+        except (ValueError, TypeError):
+            return None
+
     def _handle_record(
         self,
         conn: sqlite3.Connection,
@@ -216,7 +223,7 @@ class AppleHealthAdapter(Adapter):
     ) -> None:
         row = AdapterRow(
             schema_type="Observation",
-            rfc822_message_id=f"apple-health:rec:{rec.raw_hash[:16]}",
+            rfc822_message_id=f"apple-health-backup:rec:{rec.raw_hash[:16]}",
             subject=rec.subject,
             sender_address=f"apple-health:{rec.source_name}",
             sender_name=rec.source_name,
@@ -224,7 +231,7 @@ class AppleHealthAdapter(Adapter):
             date_sent=rec.start_date,
             date_received=rec.end_date,
             body_text=rec.body_text,
-            body_text_source="apple-health-xml",
+            body_text_source="apple-health-backup",
             is_bulk=1,
             bulk_signal="apple-health-record",
             raw_hash=rec.raw_hash,
@@ -252,12 +259,6 @@ class AppleHealthAdapter(Adapter):
                 (message_id, me.key, me.value),
             )
 
-        for hr in rec.hr_samples:
-            conn.execute(
-                "INSERT INTO hr_samples (parent_message_id, ts, bpm) VALUES (?, ?, ?)",
-                (message_id, hr.ts, hr.bpm),
-            )
-
     def _handle_workout(
         self,
         conn: sqlite3.Connection,
@@ -270,7 +271,7 @@ class AppleHealthAdapter(Adapter):
 
         row = AdapterRow(
             schema_type="ExerciseAction",
-            rfc822_message_id=f"apple-health:wkt:{wkt.raw_hash[:16]}",
+            rfc822_message_id=f"apple-health-backup:wkt:{wkt.raw_hash[:16]}",
             subject=wkt.subject,
             sender_address=f"apple-health:{wkt.source_name}",
             sender_name=wkt.source_name,
@@ -278,7 +279,7 @@ class AppleHealthAdapter(Adapter):
             date_sent=wkt.start_date,
             date_received=wkt.end_date,
             body_text=wkt.body_text,
-            body_text_source="apple-health-xml",
+            body_text_source="apple-health-backup",
             is_bulk=1,
             bulk_signal="apple-health-workout",
             raw_hash=wkt.raw_hash,
@@ -292,7 +293,7 @@ class AppleHealthAdapter(Adapter):
             return touched
         report.rows_inserted += 1
 
-        thread_key = f"apple-health:workout:{wkt.raw_hash[:16]}"
+        thread_key = f"apple-health-backup:workout:{wkt.raw_hash[:16]}"
         thread_id, created = self._upsert_thread(conn, thread_key)
         self._link_message_thread(conn, message_id, thread_id)
         if created:
@@ -332,58 +333,4 @@ class AppleHealthAdapter(Adapter):
                 ),
             )
 
-        for idx, pt in enumerate(wkt.gpx_points):
-            conn.execute(
-                """INSERT INTO geo_traces
-                      (parent_message_id, source_kind, point_idx, ts, lat, lon,
-                       elevation_m, speed_mps, course, horizontal_accuracy_m,
-                       vertical_accuracy_m, extra_json)
-                   VALUES (?, 'apple-health-gpx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    message_id, idx, pt.ts, pt.lat, pt.lon, pt.elevation_m,
-                    pt.speed_mps, pt.course, pt.horizontal_accuracy_m,
-                    pt.vertical_accuracy_m, None,
-                ),
-            )
-
         return touched
-
-    def _handle_clinical(
-        self,
-        conn: sqlite3.Connection,
-        clin: ParsedClinical,
-        source_file_id: int,
-        clinical_thread_id: int,
-        report: IngestReport,
-        thread_dates: dict[int, tuple[str, str]],
-    ) -> None:
-        row = AdapterRow(
-            schema_type="MedicalRecord",
-            rfc822_message_id=f"apple-health:clin:{clin.raw_hash[:16]}",
-            subject=clin.subject,
-            sender_address=f"apple-health:{clin.source_name}",
-            sender_name=clin.source_name,
-            direction="inbound",
-            date_sent=clin.received_date,
-            body_text=clin.body_text,
-            body_text_source="apple-health-xml",
-            is_bulk=1,
-            bulk_signal="apple-health-clinical",
-            raw_hash=clin.raw_hash,
-            body_text_hash=hashlib.sha256(clin.body_text.encode()).hexdigest(),
-        )
-
-        report.rows_yielded += 1
-        message_id = self._insert_row(conn, row, source_file_id)
-        if message_id is None:
-            report.rows_skipped += 1
-            return
-        report.rows_inserted += 1
-
-        self._link_message_thread(conn, message_id, clinical_thread_id)
-        rd = clin.received_date
-        if rd and clinical_thread_id in thread_dates:
-            lo, hi = thread_dates[clinical_thread_id]
-            thread_dates[clinical_thread_id] = (min(lo, rd), max(hi, rd))
-        elif rd:
-            thread_dates[clinical_thread_id] = (rd, rd)

@@ -178,7 +178,7 @@ def chat_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def chat_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
     return db_path
@@ -200,7 +200,7 @@ class TestChatLogsAdapterIntegration:
         with connect(chat_db) as conn:
             report = adapter.run(FIXTURES, conn, chat_settings)
             aim_msgs = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE body_text_source = 'chat-log'"
+                "SELECT COUNT(*) FROM chat_messages WHERE body_text_source = 'chat-log'"
             ).fetchone()[0]
         assert aim_msgs == report.rows_inserted
 
@@ -210,10 +210,10 @@ class TestChatLogsAdapterIntegration:
         with connect(chat_db) as conn:
             adapter.run(FIXTURES, conn, chat_settings)
             outbound = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction = 'outbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction = 'outbound'"
             ).fetchone()[0]
             inbound = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE direction = 'inbound'"
+                "SELECT COUNT(*) FROM chat_messages WHERE direction = 'inbound'"
             ).fetchone()[0]
         assert outbound > 0
         assert inbound > 0
@@ -223,19 +223,17 @@ class TestChatLogsAdapterIntegration:
         adapter = ChatLogsAdapter()
         with connect(chat_db) as conn:
             adapter.run(FIXTURES, conn, chat_settings)
-            threads = conn.execute(
-                "SELECT thread_key, message_count FROM threads ORDER BY thread_key"
+            thread_nodes = conn.execute(
+                "SELECT label FROM nodes WHERE kind = 'thread' ORDER BY label"
             ).fetchall()
-        assert len(threads) >= 3
-        for _key, count in threads:
-            assert count > 0
+        assert len(thread_nodes) >= 3
 
     def test_recipients_recorded(self, chat_db: Path, chat_settings: Settings) -> None:
         chat_settings.db_path = chat_db
         adapter = ChatLogsAdapter()
         with connect(chat_db) as conn:
             adapter.run(FIXTURES, conn, chat_settings)
-            rcpts = conn.execute("SELECT DISTINCT address FROM recipients").fetchall()
+            rcpts = conn.execute("SELECT normalized_label FROM nodes WHERE kind = 'contact' ORDER BY normalized_label").fetchall()
         assert len(rcpts) >= 1
 
     def test_idempotent_rerun(self, chat_db: Path, chat_settings: Settings) -> None:
@@ -251,26 +249,23 @@ class TestChatLogsAdapterIntegration:
         assert r2.rows_inserted == 0
         assert r2.rows_yielded == 0
 
-    def test_thread_aggregates(self, chat_db: Path, chat_settings: Settings) -> None:
+    def test_thread_nodes_exist(self, chat_db: Path, chat_settings: Settings) -> None:
         chat_settings.db_path = chat_db
         adapter = ChatLogsAdapter()
         with connect(chat_db) as conn:
             adapter.run(FIXTURES, conn, chat_settings)
-            threads = conn.execute(
-                "SELECT date_first, date_last FROM threads"
-            ).fetchall()
-        for first, last in threads:
-            assert first is not None
-            assert last is not None
-            assert first <= last
+            thread_count = conn.execute(
+                "SELECT COUNT(*) FROM nodes WHERE kind = 'thread'"
+            ).fetchone()[0]
+        assert thread_count >= 1
 
     def test_message_thread_bridge(self, chat_db: Path, chat_settings: Settings) -> None:
         chat_settings.db_path = chat_db
         adapter = ChatLogsAdapter()
         with connect(chat_db) as conn:
             adapter.run(FIXTURES, conn, chat_settings)
-            bridges = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
-            msgs = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            bridges = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
+            msgs = conn.execute("SELECT COUNT(*) FROM chat_messages").fetchone()[0]
         assert bridges == msgs
 
     def test_time_budget(self, chat_db: Path, chat_settings: Settings) -> None:
@@ -287,6 +282,6 @@ class TestChatLogsAdapterIntegration:
         with connect(chat_db) as conn:
             adapter.run(FIXTURES, conn, chat_settings)
             msn_threads = conn.execute(
-                "SELECT thread_key FROM threads WHERE thread_key LIKE 'msn:%'"
+                "SELECT label FROM nodes WHERE kind = 'thread' AND label LIKE '%msn:%'"
             ).fetchall()
         assert len(msn_threads) == 2

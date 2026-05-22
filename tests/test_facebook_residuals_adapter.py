@@ -14,7 +14,7 @@ FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "facebook_residuals" / "test_
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     settings = Settings(
         db_path=db_path,
@@ -36,29 +36,32 @@ class TestFacebookResidualsIntegration:
         adapter = FacebookResidualsAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            types = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT DISTINCT schema_type FROM messages"
-                ).fetchall()
-            }
-        assert "Comment" in types
-        assert "LikeAction" in types
+            has_comments = conn.execute(
+                "SELECT COUNT(*) FROM comments"
+            ).fetchone()[0]
+            has_likes = conn.execute(
+                "SELECT COUNT(*) FROM like_actions"
+            ).fetchone()[0]
+        assert has_comments > 0
+        assert has_likes > 0
 
     def test_direction_outbound(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = FacebookResidualsAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            dirs = conn.execute("SELECT DISTINCT direction FROM messages").fetchall()
-        assert all(d[0] == "outbound" for d in dirs)
+            dirs = set()
+            for tbl in ("comments", "like_actions", "join_actions", "invite_actions"):
+                rows = conn.execute(f"SELECT DISTINCT direction FROM [{tbl}]").fetchall()
+                dirs.update(r[0] for r in rows)
+        assert dirs == {"outbound"}
 
     def test_thread_per_kind(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
         adapter = FacebookResidualsAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 2
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
@@ -76,7 +79,7 @@ class TestFacebookResidualsIntegration:
         adapter = FacebookResidualsAdapter()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
-            bridge = conn.execute("SELECT COUNT(*) FROM message_threads").fetchone()[0]
+            bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted
 
     def test_h2_entries_have_timestamps(self, tmp_path: Path) -> None:
@@ -85,7 +88,7 @@ class TestFacebookResidualsIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             rows = conn.execute(
-                "SELECT date_sent FROM messages WHERE schema_type = 'Comment'"
+                "SELECT date_posted FROM comments"
             ).fetchall()
         assert all(r[0] is not None for r in rows)
 
@@ -95,6 +98,6 @@ class TestFacebookResidualsIntegration:
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             rows = conn.execute(
-                "SELECT body_text FROM messages WHERE schema_type = 'LikeAction'"
+                "SELECT body_text FROM like_actions"
             ).fetchall()
         assert all(r[0] and len(r[0]) > 0 for r in rows)

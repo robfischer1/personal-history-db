@@ -1,4 +1,9 @@
-"""Tests for migration 0006_ai_sessions."""
+"""Tests for migration 0006_ai_sessions.
+
+After migration 0022, the monolithic messages table is dropped. The AI session
+columns (kind, role, model, payload, parent_uuid, tool_name, tool_use_id) now
+live in conversations_messages (created by migration 0021).
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ from phdb.migrations.runner import MigrationRunner
 @pytest.fixture
 def migrated_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
     return db_path
 
@@ -32,99 +37,75 @@ def _indexes(conn, table: str) -> set[str]:
 
 # ── Column presence ─────────────────────────────────────────────────────────
 
-def test_messages_has_kind_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_kind_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "kind" in _columns(conn, "messages")
+        assert "kind" in _columns(conn, "conversations_messages")
 
 
-def test_messages_has_role_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_role_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "role" in _columns(conn, "messages")
+        assert "role" in _columns(conn, "conversations_messages")
 
 
-def test_messages_has_parent_uuid_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_parent_uuid_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "parent_uuid" in _columns(conn, "messages")
+        assert "parent_uuid" in _columns(conn, "conversations_messages")
 
 
-def test_messages_has_tool_name_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_tool_name_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "tool_name" in _columns(conn, "messages")
+        assert "tool_name" in _columns(conn, "conversations_messages")
 
 
-def test_messages_has_tool_use_id_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_tool_use_id_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "tool_use_id" in _columns(conn, "messages")
+        assert "tool_use_id" in _columns(conn, "conversations_messages")
 
 
-def test_messages_has_model_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_model_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "model" in _columns(conn, "messages")
+        assert "model" in _columns(conn, "conversations_messages")
 
 
-def test_messages_has_payload_column(migrated_db: Path) -> None:
+def test_conversations_messages_has_payload_column(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "payload" in _columns(conn, "messages")
+        assert "payload" in _columns(conn, "conversations_messages")
 
 
-def test_threads_has_metadata_column(migrated_db: Path) -> None:
+def test_threads_table_dropped(migrated_db: Path) -> None:
+    """Threads table was dropped by migration 0022."""
     with connect(migrated_db) as conn:
-        assert "metadata" in _columns(conn, "threads")
-
-
-def test_threads_has_cwd_column(migrated_db: Path) -> None:
-    with connect(migrated_db) as conn:
-        assert "cwd" in _columns(conn, "threads")
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+    assert "threads" not in tables
 
 
 # ── Index presence ───────────────────────────────────────────────────────────
 
-def test_index_messages_kind(migrated_db: Path) -> None:
+def test_index_conversations_messages_kind(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "idx_messages_kind" in _indexes(conn, "messages")
+        assert "idx_conversations_messages_kind" in _indexes(conn, "conversations_messages")
 
 
-def test_index_messages_kind_date(migrated_db: Path) -> None:
+def test_index_conversations_messages_date(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        assert "idx_messages_kind_date" in _indexes(conn, "messages")
-
-
-def test_index_messages_parent_uuid(migrated_db: Path) -> None:
-    with connect(migrated_db) as conn:
-        assert "idx_messages_parent_uuid" in _indexes(conn, "messages")
-
-
-def test_index_messages_tool_use_id(migrated_db: Path) -> None:
-    with connect(migrated_db) as conn:
-        assert "idx_messages_tool_use_id" in _indexes(conn, "messages")
-
-
-def test_index_threads_cwd(migrated_db: Path) -> None:
-    with connect(migrated_db) as conn:
-        assert "idx_threads_cwd" in _indexes(conn, "threads")
+        assert "idx_conversations_messages_date" in _indexes(conn, "conversations_messages")
 
 
 # ── Existing columns preserved ───────────────────────────────────────────────
 
-def test_existing_messages_columns_preserved(migrated_db: Path) -> None:
+def test_existing_conversations_messages_columns_preserved(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        cols = _columns(conn, "messages")
-    for col in ("id", "schema_type", "body_text", "date_sent", "sender_address",
+        cols = _columns(conn, "conversations_messages")
+    for col in ("id", "schema_type", "body_text", "date_sent",
                 "is_bulk", "raw_hash", "source_file_id"):
-        assert col in cols, f"Pre-existing column {col!r} missing after migration"
-
-
-def test_existing_threads_columns_preserved(migrated_db: Path) -> None:
-    with connect(migrated_db) as conn:
-        cols = _columns(conn, "threads")
-    for col in ("id", "schema_type", "source_kind", "thread_key",
-                "message_count", "date_first", "date_last"):
         assert col in cols, f"Pre-existing column {col!r} missing after migration"
 
 
 # ── Null defaults on existing rows ───────────────────────────────────────────
 
-def test_new_message_columns_default_null(migrated_db: Path) -> None:
+def test_new_columns_default_null(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
         conn.execute(
             "INSERT INTO source_files (source_path, file_kind, source_kind) "
@@ -132,27 +113,15 @@ def test_new_message_columns_default_null(migrated_db: Path) -> None:
         )
         src_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.execute(
-            "INSERT INTO messages (schema_type, body_text, source_file_id, raw_hash) "
+            "INSERT INTO conversations_messages (schema_type, body_text, source_file_id, raw_hash) "
             "VALUES ('Conversation', 'hello', ?, 'abc123')",
             (src_id,),
         )
         row = conn.execute(
             "SELECT kind, role, parent_uuid, tool_name, tool_use_id, model, payload "
-            "FROM messages WHERE raw_hash='abc123'"
+            "FROM conversations_messages WHERE raw_hash='abc123'"
         ).fetchone()
     assert all(v is None for v in row), f"Expected all NULL, got {row}"
-
-
-def test_new_thread_columns_default_null(migrated_db: Path) -> None:
-    with connect(migrated_db) as conn:
-        conn.execute(
-            "INSERT INTO threads (schema_type, source_kind, thread_key, message_count) "
-            "VALUES ('Conversation', 'claude-code', 'test-thread-001', 0)"
-        )
-        row = conn.execute(
-            "SELECT metadata, cwd FROM threads WHERE thread_key='test-thread-001'"
-        ).fetchone()
-    assert row[0] is None and row[1] is None
 
 
 # ── Round-trip write of AI session data ──────────────────────────────────────
@@ -170,7 +139,7 @@ def test_write_and_read_ai_session_message(migrated_db: Path) -> None:
         )
         src_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.execute(
-            "INSERT INTO messages "
+            "INSERT INTO conversations_messages "
             "(schema_type, body_text, date_sent, kind, role, parent_uuid, model, payload, "
             " source_file_id, raw_hash, is_bulk) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -179,7 +148,7 @@ def test_write_and_read_ai_session_message(migrated_db: Path) -> None:
              json.dumps(payload), src_id, "hash-001", 0),
         )
         row = conn.execute(
-            "SELECT kind, role, model, payload FROM messages WHERE raw_hash='hash-001'"
+            "SELECT kind, role, model, payload FROM conversations_messages WHERE raw_hash='hash-001'"
         ).fetchone()
 
     assert row[0] == "message"
@@ -196,7 +165,7 @@ def test_write_and_read_tool_chain(migrated_db: Path) -> None:
         )
         src_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.executemany(
-            "INSERT INTO messages "
+            "INSERT INTO conversations_messages "
             "(schema_type, body_text, date_sent, kind, role, tool_name, tool_use_id, "
             " source_file_id, raw_hash, is_bulk) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -208,35 +177,14 @@ def test_write_and_read_tool_chain(migrated_db: Path) -> None:
             ],
         )
         use_row = conn.execute(
-            "SELECT kind, tool_name, tool_use_id FROM messages WHERE raw_hash='hash-tu'"
+            "SELECT kind, tool_name, tool_use_id FROM conversations_messages WHERE raw_hash='hash-tu'"
         ).fetchone()
         result_row = conn.execute(
-            "SELECT kind, tool_name, tool_use_id FROM messages WHERE raw_hash='hash-tr'"
+            "SELECT kind, tool_name, tool_use_id FROM conversations_messages WHERE raw_hash='hash-tr'"
         ).fetchone()
 
     assert use_row[0] == "tool_use" and use_row[1] == "Bash" and use_row[2] == "tuid-xyz"
     assert result_row[0] == "tool_result" and result_row[2] == "tuid-xyz"
-
-
-def test_write_and_read_thread_metadata(migrated_db: Path) -> None:
-    import json
-
-    meta = {"gitBranch": "main", "cwd": "/Users/rob/Obsidian", "version": "1.2.3"}
-
-    with connect(migrated_db) as conn:
-        conn.execute(
-            "INSERT INTO threads "
-            "(schema_type, source_kind, thread_key, message_count, metadata, cwd) "
-            "VALUES (?,?,?,?,?,?)",
-            ("Conversation", "claude-code", "session-uuid-001", 0,
-             json.dumps(meta), "/Users/rob/Obsidian"),
-        )
-        row = conn.execute(
-            "SELECT metadata, cwd FROM threads WHERE thread_key='session-uuid-001'"
-        ).fetchone()
-
-    assert json.loads(row[0])["gitBranch"] == "main"
-    assert row[1] == "/Users/rob/Obsidian"
 
 
 # ── migration_id recorded ────────────────────────────────────────────────────
@@ -254,20 +202,17 @@ def test_migration_id_recorded(migrated_db: Path) -> None:
 def test_explain_kind_index_used(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
         plan = conn.execute(
-            "EXPLAIN QUERY PLAN SELECT id FROM messages WHERE kind='message'"
+            "EXPLAIN QUERY PLAN SELECT id FROM conversations_messages WHERE kind='message'"
         ).fetchall()
     plan_text = " ".join(" ".join(str(c) for c in tuple(r)) for r in plan).lower()
-    assert "idx_messages_kind" in plan_text
+    assert "idx_conversations_messages_kind" in plan_text
 
 
-def test_explain_cwd_index_used(migrated_db: Path) -> None:
+# ── messages table is gone after 0022 ────────────────────────────────────────
+
+def test_messages_table_dropped(migrated_db: Path) -> None:
     with connect(migrated_db) as conn:
-        conn.execute(
-            "INSERT INTO threads (schema_type, source_kind, thread_key, message_count, cwd) "
-            "VALUES ('Conversation', 'claude-code', 'cwd-test-thread', 0, '/some/path')"
-        )
-        plan = conn.execute(
-            "EXPLAIN QUERY PLAN SELECT id FROM threads WHERE cwd='/some/path'"
-        ).fetchall()
-    plan_text = " ".join(" ".join(str(c) for c in tuple(r)) for r in plan).lower()
-    assert "idx_threads_cwd" in plan_text
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+    assert "messages" not in tables

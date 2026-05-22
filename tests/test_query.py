@@ -28,7 +28,7 @@ from phdb.query import (
 def query_db(tmp_path: Path) -> sqlite3.Connection:
     """A migrated DB seeded with synthetic data for query tests."""
     db_path = tmp_path / "query_test.db"
-    with connect(db_path, load_vec=True) as conn:
+    with connect(db_path, create=True, load_vec=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
         ensure_vec_table(conn)
@@ -62,24 +62,65 @@ def _seed(conn: sqlite3.Connection) -> None:
     ]
     for m in msgs:
         conn.execute(
-            "INSERT INTO messages (id, schema_type, rfc822_message_id, gmail_thread_id,"
+            "INSERT INTO emails (id, schema_type, rfc822_message_id, gmail_thread_id,"
             " subject, sender_address, sender_name, sender_domain, direction,"
             " date_sent, body_text, is_bulk, source_file_id, attachment_count)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", m
         )
 
-    recips = [
-        (1, "test@example.com", "Test User", "to"),
-        (2, "test@example.com", "Test User", "to"),
-        (2, "carol@example.com", "Carol", "cc"),
-        (4, "test@example.com", "Test User", "to"),
-        (5, "erica@example.com", "Erica", "to"),
+    # Insert sentTo triples (replaces legacy recipients table).
+    # Get the sentTo predicate id from the seeded predicates table.
+    sent_to_id = conn.execute(
+        "SELECT id FROM predicates WHERE name = 'sentTo'"
+    ).fetchone()[0]
+
+    # Create record nodes for emails that have recipients
+    record_nodes = [
+        (1, "emails:1", "emails:1", "record", "emails", 1),
+        (2, "emails:2", "emails:2", "record", "emails", 2),
+        (4, "emails:4", "emails:4", "record", "emails", 4),
+        (5, "emails:5", "emails:5", "record", "emails", 5),
     ]
-    for msg_id, addr, name, rtype in recips:
+    for n in record_nodes:
         conn.execute(
-            "INSERT INTO recipients (message_id, address, name, rtype)"
-            " VALUES (?,?,?,?)",
-            (msg_id, addr, name, rtype),
+            "INSERT INTO nodes (id, label, normalized_label, kind, source_table, source_id)"
+            " VALUES (?,?,?,?,?,?)", n
+        )
+    # Create thread nodes (for list_sources thread count)
+    thread_nodes = [
+        (201, "gmail:thread-A", "gmail:thread-a", "thread"),
+        (202, "gmail:thread-B", "gmail:thread-b", "thread"),
+        (203, "gmail:thread-C", "gmail:thread-c", "thread"),
+    ]
+    for n in thread_nodes:
+        conn.execute(
+            "INSERT INTO nodes (id, label, normalized_label, kind)"
+            " VALUES (?,?,?,?)", n
+        )
+    # Create contact nodes for recipient addresses
+    contact_nodes = [
+        (101, "test@example.com", "test@example.com", "contact"),
+        (102, "carol@example.com", "carol@example.com", "contact"),
+        (103, "erica@example.com", "erica@example.com", "contact"),
+    ]
+    for n in contact_nodes:
+        conn.execute(
+            "INSERT INTO nodes (id, label, normalized_label, kind)"
+            " VALUES (?,?,?,?)", n
+        )
+    # Create sentTo triples: record → contact
+    sent_to_triples = [
+        (1, sent_to_id, 101, "derived", None),   # email 1 → test@example.com
+        (2, sent_to_id, 101, "derived", None),   # email 2 → test@example.com
+        (2, sent_to_id, 102, "derived", None),   # email 2 → carol@example.com
+        (4, sent_to_id, 101, "derived", None),   # email 4 → test@example.com
+        (5, sent_to_id, 103, "derived", None),   # email 5 → erica@example.com
+    ]
+    for subj_node, pred, obj_node, prov, src in sent_to_triples:
+        conn.execute(
+            "INSERT INTO triples (subject_node_id, predicate_id, object_node_id, provenance, source_ref)"
+            " VALUES (?,?,?,?,?)",
+            (subj_node, pred, obj_node, prov, src),
         )
 
     conn.execute(
@@ -87,42 +128,28 @@ def _seed(conn: sqlite3.Connection) -> None:
         " VALUES (2, 'arch.pdf', 'application/pdf', 204800)"
     )
 
-    threads = [
-        (1, "Conversation", "thread-A", None, None, "project kickoff", 2,
-         "2024-03-15T10:00:00Z", "2024-03-15T11:00:00Z",
-         '["alice@example.com", "bob@example.com", "test@example.com"]'),
-        (2, "Conversation", None, "gmail", "gmail:thread-B", "weekly standup notes", 1,
-         "2024-06-01T09:00:00Z", "2024-06-01T09:00:00Z",
-         '["noreply@lists.example.com"]'),
-        (3, "Conversation", "thread-C", None, None, "wgu coursework feedback", 1,
-         "2024-01-10T14:00:00Z", "2024-01-10T14:00:00Z",
-         '["test@example.com", "erica@example.com"]'),
-    ]
-    for t in threads:
-        conn.execute(
-            "INSERT INTO threads (id, schema_type, gmail_thread_id, source_kind,"
-            " thread_key, subject_canonical, message_count,"
-            " date_first, date_last, participants)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)", t
-        )
-
     docs = [
-        (1, "EmailMessage", "messages", 1, 0, "message_body_512tok",
-         "Project kickoff", "Let's start the project planning phase"),
-        (2, "EmailMessage", "messages", 2, 0, "message_body_512tok",
-         "Re: Project kickoff", "Sounds good, I'll prepare the architecture docs"),
-        (3, "EmailMessage", "messages", 3, 0, "message_body_512tok",
-         "Weekly standup notes", "Here are the standup notes for this week"),
-        (4, "EmailMessage", "messages", 4, 0, "message_body_512tok",
-         "Dinner plans with Erica", "Hey are we still on for dinner Friday?"),
-        (5, "EmailMessage", "messages", 5, 0, "message_body_512tok",
-         "WGU coursework feedback", "My WGU learning experience has been great"),
+        (1, "EmailMessage", "emails", 1, 0, "message_body_512tok",
+         "Project kickoff", "Let's start the project planning phase",
+         '{"sender":"alice@example.com","date_sent":"2024-03-15T10:00:00Z"}'),
+        (2, "EmailMessage", "emails", 2, 0, "message_body_512tok",
+         "Re: Project kickoff", "Sounds good, I'll prepare the architecture docs",
+         '{"sender":"bob@example.com","date_sent":"2024-03-15T11:00:00Z"}'),
+        (3, "EmailMessage", "emails", 3, 0, "message_body_512tok",
+         "Weekly standup notes", "Here are the standup notes for this week",
+         '{"sender":"noreply@lists.example.com","date_sent":"2024-06-01T09:00:00Z"}'),
+        (4, "EmailMessage", "emails", 4, 0, "message_body_512tok",
+         "Dinner plans with Erica", "Hey are we still on for dinner Friday?",
+         '{"sender":"erica@example.com","date_sent":"2023-11-20T18:30:00Z"}'),
+        (5, "EmailMessage", "emails", 5, 0, "message_body_512tok",
+         "WGU coursework feedback", "My WGU learning experience has been great",
+         '{"sender":"test@example.com","date_sent":"2024-01-10T14:00:00Z"}'),
     ]
     for d in docs:
         conn.execute(
             "INSERT INTO chunks (id, schema_type, source_table, source_id,"
-            " chunk_index, chunk_strategy, title, content)"
-            " VALUES (?,?,?,?,?,?,?,?)", d
+            " chunk_index, chunk_strategy, title, content, metadata_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?)", d
         )
 
 
@@ -270,7 +297,7 @@ class TestGetChunk:
     def test_returns_chunk(self, query_db: sqlite3.Connection) -> None:
         result = get_chunk(query_db, 1)
         assert result["id"] == 1
-        assert result["source_table"] == "messages"
+        assert result["source_table"] == "emails"
         assert "content" in result
 
     def test_not_found(self, query_db: sqlite3.Connection) -> None:
@@ -377,17 +404,16 @@ class TestFindThreadsBySubject:
     def test_finds_thread(self, query_db: sqlite3.Connection) -> None:
         result = find_threads_by_subject(query_db, "kickoff")
         assert result["match_count"] >= 1
-        assert result["threads"][0]["subject"] == "project kickoff"
+        assert "kickoff" in result["threads"][0]["subject"].lower()
 
     def test_since_filter(self, query_db: sqlite3.Connection) -> None:
         result = find_threads_by_subject(query_db, "kickoff", since="2025")
         assert result["match_count"] == 0
 
-    def test_parses_participants(self, query_db: sqlite3.Connection) -> None:
+    def test_participants_none(self, query_db: sqlite3.Connection) -> None:
+        """Participants are no longer available from the threads table."""
         result = find_threads_by_subject(query_db, "kickoff")
-        participants = result["threads"][0]["participants"]
-        assert isinstance(participants, list)
-        assert "alice@example.com" in participants
+        assert result["threads"][0]["participants"] is None
 
 
 # ===================================================================
@@ -428,40 +454,39 @@ def _seed_ai_session(conn: sqlite3.Connection) -> None:
         " VALUES (2, '/test/session.jsonl', 'claude-code', 'jsonl', 3)"
     )
     ai_msgs = [
-        (10, "Conversation", None, None, None,
-         None, None, None, "self",
-         "2026-04-16T10:00:00Z", "What is the capital of France?", 0, 2, 0,
+        (10, "Conversation", "self",
+         "2026-04-16T10:00:00Z", "What is the capital of France?", 0, 2,
          "message", "user"),
-        (11, "Conversation", None, None, None,
-         None, None, None, "self",
-         "2026-04-16T10:00:01Z", "Paris is the capital of France.", 0, 2, 0,
+        (11, "Conversation", "self",
+         "2026-04-16T10:00:01Z", "Paris is the capital of France.", 0, 2,
          "message", "assistant"),
-        (12, "Conversation", None, None, None,
-         None, None, None, "self",
-         "2026-04-16T10:00:02Z", "thinking about capital cities", 1, 2, 0,
+        (12, "Conversation", "self",
+         "2026-04-16T10:00:02Z", "thinking about capital cities", 1, 2,
          "sidechain", "assistant"),
     ]
     for m in ai_msgs:
         conn.execute(
-            "INSERT INTO messages (id, schema_type, rfc822_message_id, gmail_thread_id,"
-            " subject, sender_address, sender_name, sender_domain, direction,"
-            " date_sent, body_text, is_bulk, source_file_id, attachment_count,"
+            "INSERT INTO conversations_messages (id, schema_type, direction,"
+            " date_sent, body_text, is_bulk, source_file_id,"
             " kind, role)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", m
+            " VALUES (?,?,?,?,?,?,?,?,?)", m
         )
     ai_docs = [
-        (10, "Conversation", "messages", 10, 0, "message_body_512tok",
-         None, "What is the capital of France?"),
-        (11, "Conversation", "messages", 11, 0, "message_body_512tok",
-         None, "Paris is the capital of France."),
-        (12, "Conversation", "messages", 12, 0, "message_body_512tok",
-         None, "thinking about capital cities"),
+        (10, "Conversation", "conversations_messages", 10, 0, "message_body_512tok",
+         None, "What is the capital of France?",
+         '{"sender":null,"date_sent":"2026-04-16T10:00:00Z"}'),
+        (11, "Conversation", "conversations_messages", 11, 0, "message_body_512tok",
+         None, "Paris is the capital of France.",
+         '{"sender":null,"date_sent":"2026-04-16T10:00:01Z"}'),
+        (12, "Conversation", "conversations_messages", 12, 0, "message_body_512tok",
+         None, "thinking about capital cities",
+         '{"sender":null,"date_sent":"2026-04-16T10:00:02Z"}'),
     ]
     for d in ai_docs:
         conn.execute(
             "INSERT INTO chunks (id, schema_type, source_table, source_id,"
-            " chunk_index, chunk_strategy, title, content)"
-            " VALUES (?,?,?,?,?,?,?,?)", d
+            " chunk_index, chunk_strategy, title, content, metadata_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?)", d
         )
 
 
@@ -469,7 +494,7 @@ def _seed_ai_session(conn: sqlite3.Connection) -> None:
 def ai_session_db(tmp_path: Path) -> sqlite3.Connection:
     """DB with both email messages and AI session rows with different kinds."""
     db_path = tmp_path / "ai_session_test.db"
-    with connect(db_path, load_vec=True) as conn:
+    with connect(db_path, create=True, load_vec=True) as conn:
         runner = MigrationRunner(conn)
         runner.apply_pending()
         ensure_vec_table(conn)

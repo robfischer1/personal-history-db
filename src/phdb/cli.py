@@ -196,7 +196,9 @@ def stats(ctx: click.Context) -> None:
 
     with connect(settings.db_path, readonly=True) as conn:
         tables = [
-            ("messages", None),
+            ("observations", None),
+            ("chat_messages", None),
+            ("emails", None),
             ("source_files", None),
             ("documents", None),
             ("threads", None),
@@ -511,7 +513,15 @@ def coverage_map_cmd(ctx: click.Context, fmt: str, config: str | None, vault_pat
 
     if check_threshold:
         with connect(settings.db_path, readonly=True) as conn:
-            total = conn.execute("SELECT count(*) FROM messages").fetchone()[0]
+            total = conn.execute(
+                "SELECT SUM(c) FROM ("
+                "SELECT count(*) c FROM observations UNION ALL "
+                "SELECT count(*) FROM chat_messages UNION ALL "
+                "SELECT count(*) FROM emails UNION ALL "
+                "SELECT count(*) FROM exercise_actions UNION ALL "
+                "SELECT count(*) FROM actions"
+                ")"
+            ).fetchone()[0] or 0
         if should_rerun(state_path, total):
             click.echo("Coverage map re-run recommended (threshold exceeded).")
             raise SystemExit(0)
@@ -530,7 +540,7 @@ def coverage_map_cmd(ctx: click.Context, fmt: str, config: str | None, vault_pat
         click.echo(f"JSON written to: {json_path}")
 
     if fmt in ("vault", "all"):
-        vp = P(vault_path) if vault_path else P(r"C:\Users\robfi\Obsidian\Obsidian\Atlas\State\Substrate Coverage Map.md")
+        vp = P(vault_path) if vault_path else P("Substrate Coverage Map.md")
         write_vault_note(data, vp)
         click.echo(f"Vault note written to: {vp}")
 

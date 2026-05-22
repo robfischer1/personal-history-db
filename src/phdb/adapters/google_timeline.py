@@ -43,7 +43,7 @@ GEO_TRACES_TABLE = SidecarTableDef(
         SidecarColumn("extra_json", "TEXT"),
     ),
     parent_fk_column="parent_message_id",
-    parent_table="messages",
+    parent_table="travel_actions",
 )
 
 _TRACE_TYPE_TO_SCHEMA: dict[str, tuple[str, str]] = {

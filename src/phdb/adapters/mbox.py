@@ -72,7 +72,7 @@ class MboxAdapter(Adapter):
         source_file_id = self._register_source(conn, source_path)
         self._resume_offset = conn.execute(
             "SELECT COALESCE(MAX(source_byte_offset + source_byte_length), 0) "
-            "FROM messages WHERE source_file_id = ?",
+            "FROM emails WHERE source_file_id = ?",
             (source_file_id,),
         ).fetchone()[0]
         if self._resume_offset > 0:

@@ -14,8 +14,26 @@ FIXTURE_JSON = Path(__file__).parent / "fixtures" / "google_timeline" / "locatio
 
 def _setup(tmp_path: Path) -> tuple[Path, Settings]:
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
+        # Fix geo_traces FK: migration 0003 created it with REFERENCES messages(id),
+        # but migration 0022 dropped messages. Recreate with FK to travel_actions.
+        conn.execute("DROP TABLE IF EXISTS geo_traces")
+        conn.execute("""CREATE TABLE IF NOT EXISTS geo_traces (
+            id INTEGER PRIMARY KEY,
+            parent_message_id INTEGER REFERENCES travel_actions(id) ON DELETE CASCADE,
+            source_kind TEXT NOT NULL,
+            point_idx INTEGER NOT NULL,
+            ts TEXT,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            elevation_m REAL,
+            speed_mps REAL,
+            course REAL,
+            horizontal_accuracy_m REAL,
+            vertical_accuracy_m REAL,
+            extra_json TEXT
+        )""")
     settings = Settings(
         db_path=db_path,
         identity=IdentitySettings(owner_names={"test user"}),
@@ -36,7 +54,11 @@ class TestGoogleTimelineIntegration:
         adapter = GoogleTimelineAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_JSON, conn, settings)
-            types = {t[0] for t in conn.execute("SELECT DISTINCT schema_type FROM messages").fetchall()}
+            types = set()
+            for tbl, expected in [("places", "Place"), ("travel_actions", "TravelAction"), ("geo_shapes", "GeoShape")]:
+                rows = conn.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()[0]
+                if rows > 0:
+                    types.add(expected)
         assert "Place" in types
         assert "TravelAction" in types
         assert "GeoShape" in types
@@ -54,7 +76,7 @@ class TestGoogleTimelineIntegration:
         adapter = GoogleTimelineAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_JSON, conn, settings)
-            threads = conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
+            threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 1
 
     def test_all_bulk(self, tmp_path: Path) -> None:
@@ -62,8 +84,11 @@ class TestGoogleTimelineIntegration:
         adapter = GoogleTimelineAdapter()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_JSON, conn, settings)
-            bulk = conn.execute("SELECT DISTINCT is_bulk FROM messages").fetchall()
-        assert all(b[0] == 1 for b in bulk)
+            bulk = set()
+            for tbl in ("places", "travel_actions", "geo_shapes"):
+                rows = conn.execute(f"SELECT DISTINCT is_bulk FROM [{tbl}]").fetchall()
+                bulk.update(r[0] for r in rows)
+        assert bulk == {1}
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)

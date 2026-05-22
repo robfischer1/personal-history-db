@@ -196,6 +196,7 @@ class AppleDbsAdapter(Adapter):
 
         t_start = time.time()
         touched_threads: set[int] = set()
+        thread_dates: dict[int, tuple[str, str]] = {}
 
         for handler_name in todo:
             if self.max_seconds and (time.time() - t_start) > self.max_seconds:
@@ -230,6 +231,12 @@ class AppleDbsAdapter(Adapter):
                         if created:
                             report.threads_created += 1
                         touched_threads.add(thread_id)
+                        rd = row.date_sent
+                        if rd and thread_id in thread_dates:
+                            lo, hi = thread_dates[thread_id]
+                            thread_dates[thread_id] = (min(lo, rd), max(hi, rd))
+                        elif rd:
+                            thread_dates[thread_id] = (rd, rd)
 
                 self._mark_handler_done(conn, source_file_id, handler_name)
                 conn.commit()
@@ -243,15 +250,16 @@ class AppleDbsAdapter(Adapter):
                 report.errors.append(handler_name)
 
         for tid in touched_threads:
-            self._update_thread_aggregates(conn, tid)
+            dates = thread_dates.get(tid)
+            self._update_thread_aggregates(
+                conn, tid,
+                dates[0] if dates else None,
+                dates[1] if dates else None,
+            )
 
-        actual = conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE source_file_id = ?",
-            (source_file_id,),
-        ).fetchone()[0]
         conn.execute(
             "UPDATE source_files SET message_count = ? WHERE id = ?",
-            (actual, source_file_id),
+            (report.rows_inserted, source_file_id),
         )
         conn.commit()
 

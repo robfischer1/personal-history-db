@@ -136,7 +136,7 @@ class ExtAdapter(Adapter):
     )
 
     db_path = tmp_path / "test.db"
-    with connect(db_path) as conn:
+    with connect(db_path, create=True) as conn:
         MigrationRunner(conn).apply_pending()
 
     registry = discover_adapters([tmp_path])
@@ -153,5 +153,5 @@ class ExtAdapter(Adapter):
     assert report.rows_inserted == 3
 
     with connect(db_path) as conn:
-        count = conn.execute("SELECT count(*) FROM messages").fetchone()[0]
+        count = conn.execute("SELECT count(*) FROM chat_messages").fetchone()[0]
     assert count == 3
