@@ -612,22 +612,8 @@ _TYPED_TABLE_MAP: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
         ("raw_hash", "raw_hash"),
         ("source_file_id", _SFID),
     )),
-    "WebPage": ("web_pages", (
-        ("schema_type", "schema_type"),
-        ("page_key", "rfc822_message_id"),
-        ("subject", "subject"),
-        ("sender_address", "sender_address"),
-        ("sender_name", "sender_name"),
-        ("direction", "direction"),
-        ("date_recorded", "date_sent"),
-        ("body_text", "body_text"),
-        ("body_text_source", "body_text_source"),
-        ("body_text_hash", "body_text_hash"),
-        ("is_bulk", "is_bulk"),
-        ("bulk_signal", "bulk_signal"),
-        ("raw_hash", "raw_hash"),
-        ("source_file_id", _SFID),
-    )),
+    # WebPage removed — web_pages is now a URL-entity table (migration 0023).
+    # Writes go through upsert_web_page() in adapters/raindrop.py.
     "JoinAction": ("join_actions", (
         ("schema_type", "schema_type"),
         ("join_key", "rfc822_message_id"),
