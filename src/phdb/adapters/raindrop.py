@@ -20,12 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
-from phdb.formats.raindrop import (
-    is_junk,
-    normalize_url,
-    parse,
-    should_skip,
-)
+from phdb.formats.raindrop import parse
+from phdb.formats.url import extract_domain, is_junk
 from phdb.log import get_logger
 from phdb.records import BookmarkEvent
 
@@ -33,6 +29,52 @@ if TYPE_CHECKING:
     from phdb.settings import Settings
 
 log = get_logger("phdb.adapters.raindrop")
+
+
+# ---------------------------------------------------------------------------
+# WebPage entity upsert
+# ---------------------------------------------------------------------------
+
+def upsert_web_page(
+    conn: sqlite3.Connection,
+    url: str,
+    normalized_url: str,
+    *,
+    title: str | None = None,
+    excerpt: str | None = None,
+    cover_url: str | None = None,
+    sighted: str | None = None,
+    source_file_id: int | None = None,
+) -> int:
+    """Create or update a WebPage URL-entity row. Returns web_page.id."""
+    domain = extract_domain(normalized_url)
+    cur = conn.execute(
+        """INSERT INTO web_pages
+           (url, normalized_url, title, excerpt, cover_url, domain,
+            first_seen, last_seen, source_file_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(normalized_url) DO UPDATE SET
+               title    = COALESCE(NULLIF(excluded.title, ''),    web_pages.title),
+               excerpt  = COALESCE(NULLIF(excluded.excerpt, ''),  web_pages.excerpt),
+               cover_url= COALESCE(NULLIF(excluded.cover_url, ''),web_pages.cover_url),
+               first_seen = CASE
+                   WHEN excluded.first_seen IS NULL THEN web_pages.first_seen
+                   WHEN web_pages.first_seen IS NULL THEN excluded.first_seen
+                   WHEN excluded.first_seen < web_pages.first_seen THEN excluded.first_seen
+                   ELSE web_pages.first_seen
+               END,
+               last_seen = CASE
+                   WHEN excluded.last_seen IS NULL THEN web_pages.last_seen
+                   WHEN web_pages.last_seen IS NULL THEN excluded.last_seen
+                   WHEN excluded.last_seen > web_pages.last_seen THEN excluded.last_seen
+                   ELSE web_pages.last_seen
+               END,
+               source_file_id = COALESCE(excluded.source_file_id, web_pages.source_file_id)
+           RETURNING id""",
+        (url, normalized_url, title, excerpt, cover_url, domain,
+         sighted, sighted, source_file_id),
+    )
+    return int(cur.fetchone()[0])
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +96,8 @@ def upsert_bookmark(
     conn: sqlite3.Connection,
     source_file_id: int,
     event: BookmarkEvent,
+    *,
+    web_page_id: int,
 ) -> int:
     """Insert or increment-on-conflict a bookmark row."""
     url = event.url
@@ -70,11 +114,13 @@ def upsert_bookmark(
            (schema_type, instrument, raindrop_id, url, normalized_url,
             title, note, excerpt, cover_url, folder, tags, favorite, highlights,
             first_seen_in_instrument, last_seen_in_instrument, raindrop_created,
-            appearance_count, excluded, excluded_reason, source_file_id, raw_hash)
+            appearance_count, excluded, excluded_reason, source_file_id, raw_hash,
+            web_page_id)
            VALUES ('BookmarkAction', ?, ?, ?, ?,
                    ?, ?, ?, ?, ?, ?, ?, ?,
                    ?, ?, ?,
-                   1, ?, ?, ?, ?)
+                   1, ?, ?, ?, ?,
+                   ?)
            ON CONFLICT(normalized_url, instrument) DO UPDATE SET
                raindrop_id  = COALESCE(excluded.raindrop_id, bookmarks.raindrop_id),
                title        = COALESCE(NULLIF(excluded.title,''),    bookmarks.title),
@@ -99,14 +145,16 @@ def upsert_bookmark(
                END,
                raindrop_created = COALESCE(excluded.raindrop_created, bookmarks.raindrop_created),
                appearance_count = bookmarks.appearance_count + 1,
-               source_file_id   = excluded.source_file_id
+               source_file_id   = excluded.source_file_id,
+               web_page_id      = excluded.web_page_id
            RETURNING id""",
         (instrument, event.raindrop_id, url, norm,
          event.title, event.note, event.excerpt,
          event.cover_url, event.folder, tags_json,
          1 if event.favorite else 0, event.highlights,
          sighted, sighted, raindrop_created,
-         1 if junk else 0, junk, source_file_id, rh),
+         1 if junk else 0, junk, source_file_id, rh,
+         web_page_id),
     )
     return int(cur.fetchone()[0])
 
@@ -148,7 +196,14 @@ class RaindropAdapter(Adapter):
         for event in parse(source_path):
             report.rows_yielded += 1
 
-            upsert_bookmark(conn, source_file_id, event)
+            sighted = event.date_added or None
+            wp_id = upsert_web_page(
+                conn, event.url, event.normalized_url,
+                title=event.title, excerpt=event.excerpt,
+                cover_url=event.cover_url, sighted=sighted,
+                source_file_id=source_file_id,
+            )
+            upsert_bookmark(conn, source_file_id, event, web_page_id=wp_id)
             report.rows_inserted += 1
 
             batch_count += 1
