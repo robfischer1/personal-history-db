@@ -211,3 +211,166 @@ class TestRaindropIntegration:
             ).fetchone()
         assert sf is not None
         assert sf[1] == "raindrop"
+
+
+class TestWebPageEntity:
+    """Phase 4 — WebPage entity factoring tests."""
+
+    def test_web_pages_populated(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            count = conn.execute("SELECT COUNT(*) FROM web_pages").fetchone()[0]
+        # 5 rows, but row 100+103 share normalized_url → 4 distinct web_pages
+        assert count == 4
+
+    def test_fk_integrity(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            orphans = conn.execute(
+                """SELECT b.id FROM bookmarks b
+                   LEFT JOIN web_pages wp ON b.web_page_id = wp.id
+                   WHERE b.web_page_id IS NULL OR wp.id IS NULL"""
+            ).fetchall()
+        assert orphans == []
+
+    def test_web_page_id_not_null(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            nulls = conn.execute(
+                "SELECT COUNT(*) FROM bookmarks WHERE web_page_id IS NULL"
+            ).fetchone()[0]
+        assert nulls == 0
+
+    def test_cross_instrument_dedup(self, tmp_path: Path) -> None:
+        """Same URL from two instruments → one web_page, two bookmarks."""
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            # Simulate a second instrument by directly inserting a safari bookmark
+            # for an existing URL
+            wp = conn.execute(
+                "SELECT id, normalized_url FROM web_pages WHERE normalized_url LIKE '%github.com%'"
+            ).fetchone()
+            assert wp is not None
+            wp_id = wp[0]
+            conn.execute(
+                """INSERT INTO bookmarks
+                   (schema_type, instrument, url, normalized_url, title,
+                    appearance_count, excluded, source_file_id, web_page_id)
+                   VALUES ('BookmarkAction', 'safari', 'https://github.com/user/repo',
+                           ?, 'GitHub Repo', 1, 0, 1, ?)""",
+                (wp[1], wp_id),
+            )
+            conn.commit()
+            # Still one web_page for that URL
+            wp_count = conn.execute(
+                "SELECT COUNT(*) FROM web_pages WHERE normalized_url LIKE '%github.com%'"
+            ).fetchone()[0]
+            assert wp_count == 1
+            # But two bookmarks (raindrop + safari)
+            bm_count = conn.execute(
+                "SELECT COUNT(*) FROM bookmarks WHERE normalized_url LIKE '%github.com%'"
+            ).fetchone()[0]
+            assert bm_count == 2
+
+    def test_coalesce_title_update(self, tmp_path: Path) -> None:
+        """Second ingest with better title updates web_page."""
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            # Gmail Root web_page should have the title from the bookmark
+            row = conn.execute(
+                "SELECT title FROM web_pages WHERE normalized_url LIKE '%gmail.com%'"
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "Gmail Root"
+
+    def test_coalesce_preserves_existing_title(self, tmp_path: Path) -> None:
+        """Empty title in second ingest doesn't overwrite existing."""
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            # Set a title, then upsert with empty title
+            from phdb.adapters.raindrop import upsert_web_page
+            upsert_web_page(
+                conn, "https://new.example.com", "https://new.example.com",
+                title="Original Title",
+            )
+            conn.commit()
+            upsert_web_page(
+                conn, "https://new.example.com", "https://new.example.com",
+                title="",
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT title FROM web_pages WHERE normalized_url = 'https://new.example.com'"
+            ).fetchone()
+            assert row[0] == "Original Title"
+
+    def test_domain_extraction(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            domains = dict(conn.execute(
+                "SELECT normalized_url, domain FROM web_pages ORDER BY id"
+            ).fetchall())
+        for norm_url, domain in domains.items():
+            assert domain is not None, f"domain NULL for {norm_url}"
+            assert "://" not in domain, f"domain contains scheme: {domain}"
+            assert "/" not in domain, f"domain contains path: {domain}"
+
+    def test_domain_values(self, tmp_path: Path) -> None:
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            domains = set(
+                r[0] for r in conn.execute("SELECT DISTINCT domain FROM web_pages").fetchall()
+            )
+        assert "example.com" in domains
+        assert "github.com" in domains
+        assert "www.gmail.com" in domains
+        assert "blog.example.com" in domains
+
+    def test_excluded_bookmark_still_creates_web_page(self, tmp_path: Path) -> None:
+        """Junk/excluded bookmarks still get a web_page entity."""
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            # Gmail Root is excluded (junk) but should still have a web_page
+            row = conn.execute(
+                """SELECT wp.id, b.excluded
+                   FROM bookmarks b
+                   JOIN web_pages wp ON b.web_page_id = wp.id
+                   WHERE b.title = 'Gmail Root'"""
+            ).fetchone()
+            assert row is not None
+            assert row[1] == 1  # excluded
+            assert row[0] is not None  # but has a web_page
+
+    def test_temporal_window(self, tmp_path: Path) -> None:
+        """web_page first_seen/last_seen tracks the bookmark dates."""
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            row = conn.execute(
+                """SELECT first_seen, last_seen FROM web_pages
+                   WHERE normalized_url LIKE '%example.com/article%'"""
+            ).fetchone()
+            assert row is not None
+            # Row 100 is 2024-06-15, row 103 is 2024-06-18 — same web_page
+            assert "2024-06-15" in row[0]
+            assert "2024-06-18" in row[1]
+
+    def test_web_page_normalized_url_unique(self, tmp_path: Path) -> None:
+        """Verify no duplicate normalized_urls in web_pages."""
+        db_path, settings = _setup(tmp_path)
+        with connect(db_path) as conn:
+            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            total = conn.execute("SELECT COUNT(*) FROM web_pages").fetchone()[0]
+            distinct = conn.execute(
+                "SELECT COUNT(DISTINCT normalized_url) FROM web_pages"
+            ).fetchone()[0]
+        assert total == distinct
