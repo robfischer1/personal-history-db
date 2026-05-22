@@ -117,7 +117,7 @@ def migrate(ctx: click.Context, instance_migrations: str | None) -> None:
     settings = ctx.obj["settings"]
     inst_mig_dir = Path(instance_migrations) if instance_migrations else None
 
-    with connect(settings.db_path, load_vec=True) as conn:
+    with connect(settings.db_path, load_vec=True, create=True) as conn:
         runner = MigrationRunner(conn, instance_dir=inst_mig_dir)
         applied = runner.apply_pending()
         if applied:
@@ -137,12 +137,17 @@ def migrate(ctx: click.Context, instance_migrations: str | None) -> None:
 @click.argument("source", type=click.Path(exists=True))
 @click.option("--adapter", "-a", required=True, help="Adapter name to use.")
 @click.option("--dry-run", is_flag=True, help="Parse and report without writing to DB.")
+@click.option("--upsert", is_flag=True, help="Update metadata for existing rows (preserves IDs + predicates).")
+@click.option("--truncate", is_flag=True, help="Wipe target rows + related predicates before reimporting.")
 @click.pass_context
-def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool) -> None:
+def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool, upsert: bool, truncate: bool) -> None:
     """Ingest a source file using the named adapter."""
     from phdb.adapters.loader import discover_adapters
     from phdb.db import connect
     from phdb.writelock import WriteLockError, write_lock
+
+    if upsert and truncate:
+        raise click.ClickException("Cannot use --upsert and --truncate together.")
 
     settings = ctx.obj["settings"]
     builtin_dir = Path(__file__).parent / "adapters"
@@ -156,6 +161,11 @@ def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool) -> None
     adapter_cls = adapters[adapter]
     adapter_instance = adapter_cls()
 
+    if upsert and hasattr(adapter_instance, "_upsert_mode"):
+        adapter_instance._upsert_mode = True
+    if truncate and hasattr(adapter_instance, "_truncate_mode"):
+        adapter_instance._truncate_mode = True
+
     if dry_run:
         count = 0
         for _ in adapter_instance.iter_rows(Path(source)):
@@ -166,8 +176,9 @@ def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool) -> None
     try:
         with write_lock(settings.db_path), connect(settings.db_path) as conn:
             report = adapter_instance.run(Path(source), conn, settings)
+            mode = " (upsert)" if upsert else " (truncate+reimport)" if truncate else ""
             click.echo(
-                f"Ingested: {report.rows_inserted} inserted, "
+                f"Ingested{mode}: {report.rows_inserted} inserted, "
                 f"{report.rows_skipped} skipped, "
                 f"{report.rows_yielded} total from '{adapter}'"
             )
@@ -467,3 +478,61 @@ def decay_stats(ctx: click.Context) -> None:
         ).fetchone()[0]
         if last_recompute:
             click.echo(f"  Last recompute: {last_recompute[:19]}")
+
+
+@cli.command(name="coverage-map")
+@click.option("--format", "fmt", type=click.Choice(["terminal", "json", "vault", "all"]), default="terminal", help="Output format.")
+@click.option("--config", type=click.Path(exists=True), default=None, help="Path to coverage_domains.toml.")
+@click.option("--vault-path", type=click.Path(), default=None, help="Override vault note output path.")
+@click.option("--check-threshold", is_flag=True, help="Check if re-run is needed based on row growth, then exit.")
+@click.pass_context
+def coverage_map_cmd(ctx: click.Context, fmt: str, config: str | None, vault_path: str | None, check_threshold: bool) -> None:
+    """Generate the substrate coverage map (year x life-domain density)."""
+    from pathlib import Path as P
+
+    from phdb.db import connect
+    from phdb.tools.coverage_map import (
+        generate_coverage_map,
+        load_config,
+        render_terminal,
+        should_rerun,
+        write_json,
+        write_state,
+        write_vault_note,
+    )
+
+    settings = ctx.obj["settings"]
+    config_path = P(config) if config else None
+    cfg = load_config(config_path)
+
+    instance_dir = P(settings.instance_dir) if settings.instance_dir else P(settings.db_path).parent
+    json_path = instance_dir / "coverage_map.json"
+    state_path = instance_dir / "coverage_state.json"
+
+    if check_threshold:
+        with connect(settings.db_path, readonly=True) as conn:
+            total = conn.execute("SELECT count(*) FROM messages").fetchone()[0]
+        if should_rerun(state_path, total):
+            click.echo("Coverage map re-run recommended (threshold exceeded).")
+            raise SystemExit(0)
+        else:
+            click.echo("Coverage map is current (below threshold).")
+            raise SystemExit(1)
+
+    with connect(settings.db_path, readonly=True) as conn:
+        data = generate_coverage_map(conn, config=cfg)
+
+    if fmt in ("terminal", "all"):
+        click.echo(render_terminal(data))
+
+    if fmt in ("json", "all"):
+        write_json(data, json_path)
+        click.echo(f"JSON written to: {json_path}")
+
+    if fmt in ("vault", "all"):
+        vp = P(vault_path) if vault_path else P(r"C:\Users\robfi\Obsidian\Obsidian\Atlas\State\Substrate Coverage Map.md")
+        write_vault_note(data, vp)
+        click.echo(f"Vault note written to: {vp}")
+
+    write_state(data, state_path)
+    click.echo(f"State written to: {state_path}")

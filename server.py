@@ -51,6 +51,7 @@ from phdb.query import (  # noqa: E402
     writing_stats as _writing_stats,
 )
 from phdb.scoring import record_engagement  # noqa: E402
+from phdb.tools.coverage_map import generate_coverage_map, load_config as _load_coverage_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +455,44 @@ def writing_stats(
         note_path=note_path,
         top_n=top_n,
     )
+
+
+@mcp.tool()
+def coverage_map(domain: str | None = None, year: int | None = None) -> dict[str, Any]:
+    """Substrate coverage heat-map — year x life-domain density matrix.
+
+    Shows how dense or thin the corpus is across time periods and life domains
+    (career, fitness, health, hobbies, home, money, personal, programming, social).
+    Each cell includes a sparsity_factor (0.0 = densest in domain, 1.0 = empty).
+
+    Optional filters: ``domain`` narrows to one domain's yearly series;
+    ``year`` narrows to one year's domain breakdown.
+    Returns full matrix when no filters given.
+    """
+    cfg = _load_coverage_config()
+    data = generate_coverage_map(_get_conn(), config=cfg)
+
+    if domain or year:
+        filtered = [
+            c for c in data["cells"]
+            if (domain is None or c["domain"] == domain)
+            and (year is None or c["year"] == year)
+        ]
+        return {
+            "total_rows": data["total_rows"],
+            "unclassified_pct": data["unclassified_pct"],
+            "filter": {"domain": domain, "year": year},
+            "cells": filtered,
+        }
+
+    return {
+        "total_rows": data["total_rows"],
+        "unclassified_pct": data["unclassified_pct"],
+        "domains": data["domains"],
+        "years": data["years"],
+        "thinnest_cells": data["thinnest_cells"],
+        "cells": data["cells"],
+    }
 
 
 def main() -> None:

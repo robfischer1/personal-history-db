@@ -1,0 +1,186 @@
+# Coverage Map — Domain Taxonomy & Classification Rules
+# 9 domains derived from Rob's Responsibilities/ vault pillar.
+# Priority ladder (highest to lowest): source_kind > schema_type > sender_domain > participants
+# "topic/content-type signals outrank sender metadata" (D3)
+
+[domains]
+names = [
+    "career",
+    "fitness",
+    "health",
+    "hobbies",
+    "home",
+    "money",
+    "personal",
+    "programming",
+    "social",
+]
+
+# --- Layer 1: source_kind → domain (strongest signal) ---
+# Each source_kind maps to exactly one domain. Unlisted source_kinds fall through to Layer 2.
+
+[rules.source_kind]
+# Career
+amazon = "career"            # Amazon order history (career-adjacent — work purchase patterns)
+google-drive = "career"      # work docs
+
+# Fitness
+strong = "fitness"           # workout tracker
+google-fit = "fitness"       # fitness data
+iphone-waterminder = "fitness"  # hydration tracking
+
+# Health
+apple-health = "health"
+apple-health-backup = "health"
+
+# Hobbies
+spotify = "hobbies"          # music listening
+discord = "hobbies"          # gaming communities
+goodreads = "hobbies"        # reading
+titaniumbackup-twitter = "hobbies"  # social media as hobby consumption
+vault-clippings = "hobbies"  # saved content / reading
+
+# Home
+google-timeline = "home"     # location traces (daily movement)
+phone-camera = "home"        # photos (default; could be any domain but most are daily life)
+
+# Money
+# (no source_kind maps here by default — financial signal is thin)
+
+# Personal
+gemini-scribe = "personal"   # AI journaling / reflection
+gemini-web = "personal"      # AI conversations (personal exploration)
+claude-chat = "personal"     # AI conversations
+iphone-notes = "personal"    # personal notes
+iphone-voicemail = "personal"
+
+# Programming
+claude-code = "programming"  # coding sessions
+vault-articles = "programming"  # technical references (mostly)
+session_buddy_csv = "programming"  # browser sessions (dev-heavy)
+session_buddy_json = "programming"
+
+# Social
+facebook = "social"
+facebook-posts = "social"
+facebook-residuals = "social"
+fb-katana-tarball = "social"
+imessage = "social"
+phone-sms = "social"
+sms-xml = "social"
+calls-xml = "social"
+google-voice = "social"
+gmail-sms-backfill = "social"
+iphone-callhistory = "social"
+iphone-addressbook = "social"
+google-contacts = "social"
+
+# --- Ambiguous source_kinds (fall through to schema_type layer) ---
+# gmail — could be career, social, money, personal depending on content
+# chat-logs — could be social or hobbies depending on era/platform
+# calendar — could be career, social, personal
+# staged-md — varies by content
+# onedrive — varies by content
+# digikam — photos (default home, but varies)
+# raindrop_csv — bookmarks (varies)
+# netscape_html — bookmarks (varies)
+# google-activity — varies
+# titaniumbackup-android-browser — varies
+# iphone-safari-bookmarks — varies
+# iphone-safari-history — varies
+
+# --- Layer 2: schema_type → domain (for source_kinds not in Layer 1) ---
+# Used when source_kind has no Layer 1 mapping.
+
+[rules.schema_type]
+ExerciseAction = "fitness"
+Observation = "health"       # health observations (when source_kind doesn't resolve)
+MedicalRecord = "health"
+ListenAction = "hobbies"
+WatchAction = "hobbies"
+SearchAction = "hobbies"     # browsing/curiosity
+Book = "hobbies"
+Review = "hobbies"
+LikeAction = "hobbies"
+OrderAction = "money"        # purchases
+Product = "money"
+TravelAction = "home"        # daily travel patterns
+GeoShape = "home"
+Place = "home"
+Photograph = "home"          # default for unresolved photos
+Person = "social"
+Conversation = "social"
+SocialMediaPosting = "social"
+InviteAction = "social"
+JoinAction = "social"
+Message = "social"           # generic messages default to social
+EmailMessage = "social"      # default; sender_domain can override
+Event = "personal"           # calendar events default to personal
+CreativeWork = "personal"    # journals, notes
+DigitalDocument = "personal"
+Comment = "social"
+WebPage = "hobbies"          # saved web pages
+Action = "personal"          # generic catch-all
+Thing = "personal"           # generic catch-all
+
+# --- Layer 3: sender_domain overrides (for EmailMessage specifically) ---
+# When schema_type is EmailMessage, check sender_domain against these patterns.
+# These override the Layer 2 "social" default for email.
+
+[rules.sender_domain]
+# Career (employer domains — no Amazon work email available)
+"starbucks.com" = "career"
+"equinox.com" = "career"
+"linkedin.com" = "career"
+"indeed.com" = "career"
+"wgu.edu" = "career"
+
+# Money (financial institutions, shopping)
+"chase.com" = "money"
+"bankofamerica.com" = "money"
+"paypal.com" = "money"
+"venmo.com" = "money"
+"mint.com" = "money"
+"amazon.com" = "money"       # Amazon purchase emails → money (not career)
+"ebay.com" = "money"
+"etsy.com" = "money"
+
+# Health
+"myfitnesspal.com" = "health"
+"zocdoc.com" = "health"
+
+# Hobbies / Entertainment
+"steampowered.com" = "hobbies"
+"twitch.tv" = "hobbies"
+"youtube.com" = "hobbies"
+"netflix.com" = "hobbies"
+"hulu.com" = "hobbies"
+"spotify.com" = "hobbies"
+
+# Programming / Tech
+"github.com" = "programming"
+"stackoverflow.com" = "programming"
+"gitlab.com" = "programming"
+"heroku.com" = "programming"
+"digitalocean.com" = "programming"
+"aws.amazon.com" = "programming"
+
+# Home / Utilities
+"verizon.com" = "home"
+"spectrum.com" = "home"
+"pseg.com" = "home"
+
+# --- Layer 4: participant heuristics ---
+# Thread participants that signal a domain override.
+# These are checked last and only apply when no higher layer resolved the domain.
+# Format: participant display name or address fragment → domain
+
+[rules.participants]
+# Family members → social (already default for messages, but explicit)
+# (populated during Phase 1 validation with actual participant names from the DB)
+
+# --- Rendering ---
+
+[rendering]
+health_separate_scale = true
+density_thresholds = { zero = 0, thin = 10, moderate = 100, dense = 1000, very_dense = 10000 }
