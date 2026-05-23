@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "phone_photos"
+version = "0.4.0"
+description = "Phone-camera directory walk — EXIF + GPS metadata extraction for photos and videos"
+kind = "source"
+entry_point = "phdb.plugins.phone_photos:PhonePhotosPlugin"
+
+[source]
+emits = ["Photograph"]
+entity_refs = []
+formats_used = ["phone_photos_dir"]
+records_required = ["Photograph"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Place", "Time", "Person"]

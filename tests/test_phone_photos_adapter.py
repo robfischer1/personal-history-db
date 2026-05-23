@@ -1,12 +1,17 @@
-"""Tests for the phone photos adapter."""
+"""Tests for the phone_photos plugin (Phase 7 brief 031 port).
+
+Pre-port the module under test was ``phdb.adapters.phone_photos``;
+those tests now exercise ``phdb.plugins.phone_photos.PhonePhotosPlugin``
+with the same assertions verbatim.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.phone_photos import PhonePhotosAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.phone_photos import PhonePhotosPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "phone_photos"
@@ -26,7 +31,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 class TestPhonePhotosIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
         assert report.rows_inserted == 3
@@ -34,7 +39,7 @@ class TestPhonePhotosIntegration:
 
     def test_schema_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM photographs").fetchall()
@@ -42,7 +47,7 @@ class TestPhonePhotosIntegration:
 
     def test_direction_self(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             count = conn.execute("SELECT COUNT(*) FROM photographs").fetchone()[0]
@@ -50,7 +55,7 @@ class TestPhonePhotosIntegration:
 
     def test_photographs_have_format(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             formats = conn.execute("SELECT format FROM photographs WHERE format IS NOT NULL").fetchall()
@@ -58,7 +63,7 @@ class TestPhonePhotosIntegration:
 
     def test_filename_date_parsing(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             rows = conn.execute(
@@ -71,7 +76,7 @@ class TestPhonePhotosIntegration:
 
     def test_captured_at_by_year(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             dates = conn.execute("SELECT captured_at FROM photographs WHERE captured_at IS NOT NULL").fetchall()
@@ -81,24 +86,24 @@ class TestPhonePhotosIntegration:
 
     def test_skips_non_media(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
         assert report.rows_inserted == 3
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
         with connect(db_path) as conn:
-            r2 = PhonePhotosAdapter().run(FIXTURE_DIR, conn, settings)
+            r2 = PhonePhotosPlugin().run(FIXTURE_DIR, conn, settings)
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
 
     def test_photograph_count_matches_report(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
             count = conn.execute("SELECT COUNT(*) FROM photographs").fetchone()[0]
@@ -106,7 +111,7 @@ class TestPhonePhotosIntegration:
 
     def test_bucket_label(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter(bucket_label="test-bucket")
+        adapter = PhonePhotosPlugin(bucket_label="test-bucket")
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             roots = conn.execute("SELECT DISTINCT album_root FROM photographs").fetchall()
@@ -114,7 +119,7 @@ class TestPhonePhotosIntegration:
 
     def test_video_content_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = PhonePhotosAdapter()
+        adapter = PhonePhotosPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             mp4 = conn.execute(
