@@ -1,0 +1,13 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "topics"
+version = "0.4.0-skeleton"
+description = "Topics facet — topic clustering over embedded chunks"
+kind = "facet"
+entry_point = "phdb.facets.topics:TopicsFacetPlugin"
+
+[facet]
+consumes = "Topic"
+node_table = "topic_clusters"

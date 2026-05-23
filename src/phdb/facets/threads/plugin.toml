@@ -1,0 +1,13 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "threads"
+version = "0.4.0-skeleton"
+description = "Threads facet — cross-source thread model (Gmail / iMessage / Discord)"
+kind = "facet"
+entry_point = "phdb.facets.threads:ThreadsFacetPlugin"
+
+[facet]
+consumes = "Thread"
+node_table = "threads"

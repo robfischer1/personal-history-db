@@ -18,6 +18,7 @@ surface from here for backward compatibility with the Phase 1 scaffold.
 
 from __future__ import annotations
 
+from phdb.core.plugin.bus import EmissionBus, FacetEmission
 from phdb.core.plugin.contract import (
     PhdbFacetPlugin,
     PhdbPlugin,
@@ -44,7 +45,9 @@ MANIFEST_VERSION = 1
 
 __all__ = [
     "ENTRY_POINT_GROUP",
+    "EmissionBus",
     "FACET_ENTRY_POINT_GROUP",
+    "FacetEmission",
     "FacetManifestExtras",
     "MANIFEST_VERSION",
     "PhdbFacetPlugin",

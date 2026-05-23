@@ -1,0 +1,13 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "places"
+version = "0.4.0-skeleton"
+description = "Places facet — geographic place coalescence over the places entity table"
+kind = "facet"
+entry_point = "phdb.facets.places:PlacesFacetPlugin"
+
+[facet]
+consumes = "Place"
+node_table = "places"

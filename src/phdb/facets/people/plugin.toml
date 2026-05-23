@@ -1,0 +1,14 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "people"
+version = "0.4.0-skeleton"
+description = "People facet — Person identity coalescence over the persons entity table"
+kind = "facet"
+entry_point = "phdb.facets.people:PeopleFacetPlugin"
+
+[facet]
+consumes = "Person"
+node_table = "persons"
+coalescence_rules_path = "identity_rules.toml"

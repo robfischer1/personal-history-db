@@ -1,0 +1,13 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "time"
+version = "0.4.0-skeleton"
+description = "Time facet — temporal index over all source plugins' date columns"
+kind = "facet"
+entry_point = "phdb.facets.time:TimeFacetPlugin"
+
+[facet]
+consumes = "Time"
+node_table = "time_buckets"
