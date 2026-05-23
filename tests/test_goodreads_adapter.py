@@ -1,4 +1,14 @@
-"""Tests for the goodreads adapter."""
+"""Tests for the goodreads plugin (Phase 7 brief 021 port).
+
+Phase 7 of the phdb Plugin Architecture plan refactored goodreads from
+the legacy ``phdb.adapters.goodreads`` module into a self-contained
+``phdb.plugins.goodreads`` plugin under the new contract. Per Phase 0
+Q14 (no shim), the legacy import path is broken; all callers use the
+plugin's ``run()`` method now.
+
+Test file kept under the old name (``test_goodreads_adapter.py``) for
+git-history continuity; the contents target the new plugin.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +16,21 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.goodreads import GoodreadsAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.goodreads import GoodreadsPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_CSV = Path(__file__).parent / "fixtures" / "goodreads" / "goodreads_library.csv"
+
+
+def _new_plugin() -> GoodreadsPlugin:
+    """Build a GoodreadsPlugin with the in-tree manifest."""
+    from phdb.core.plugin.manifest import load_manifest
+
+    manifest_path = Path("src/phdb/plugins/goodreads/plugin.toml").resolve()
+    manifest = load_manifest(manifest_path)
+    return GoodreadsPlugin(manifest)
 
 
 @pytest.fixture
@@ -34,7 +53,7 @@ def gr_db(tmp_path: Path) -> Path:
 class TestGoodreadsIntegration:
     def test_basic_ingest(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             report = adapter.run(FIXTURE_CSV, conn, gr_settings)
         assert report.rows_inserted == 4
@@ -42,7 +61,7 @@ class TestGoodreadsIntegration:
 
     def test_empty_title_skipped(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             titles = conn.execute("SELECT subject FROM books").fetchall()
@@ -52,7 +71,7 @@ class TestGoodreadsIntegration:
 
     def test_schema_type_book(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM books").fetchall()
@@ -60,7 +79,7 @@ class TestGoodreadsIntegration:
 
     def test_single_thread(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
@@ -68,7 +87,7 @@ class TestGoodreadsIntegration:
 
     def test_thread_key(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             label = conn.execute(
@@ -78,7 +97,7 @@ class TestGoodreadsIntegration:
 
     def test_isbn_as_sender_address(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             addrs = conn.execute(
@@ -88,7 +107,7 @@ class TestGoodreadsIntegration:
 
     def test_missing_isbn(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             row = conn.execute(
@@ -99,11 +118,11 @@ class TestGoodreadsIntegration:
 
     def test_idempotent_rerun(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
 
-        adapter2 = GoodreadsAdapter()
+        adapter2 = _new_plugin()
         with connect(gr_db) as conn:
             r2 = adapter2.run(FIXTURE_CSV, conn, gr_settings)
         assert r2.rows_inserted == 0
@@ -111,7 +130,7 @@ class TestGoodreadsIntegration:
 
     def test_bom_handling(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             row = conn.execute(
@@ -122,7 +141,7 @@ class TestGoodreadsIntegration:
 
     def test_message_thread_bridge(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
-        adapter = GoodreadsAdapter()
+        adapter = _new_plugin()
         with connect(gr_db) as conn:
             report = adapter.run(FIXTURE_CSV, conn, gr_settings)
             bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]

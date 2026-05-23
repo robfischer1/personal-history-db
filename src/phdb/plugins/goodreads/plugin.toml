@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "goodreads"
+version = "0.4.0"
+description = "Goodreads CSV library export — books + reviews"
+kind = "source"
+entry_point = "phdb.plugins.goodreads:GoodreadsPlugin"
+
+[source]
+emits = ["Book", "Review"]
+entity_refs = []
+formats_used = ["goodreads_csv"]
+records_required = ["ConsumedItem"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time"]
