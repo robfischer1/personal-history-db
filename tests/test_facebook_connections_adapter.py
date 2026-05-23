@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from phdb.adapters.facebook_connections import (
-    FacebookConnectionsAdapter,
-    make_dedupe_key,
+from phdb.formats.facebook_connections_html import (
     normalize_name,
 )
+from phdb.plugins.facebook_connections.ingest import make_dedupe_key
+from phdb.plugins.facebook_connections import FacebookConnectionsPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
@@ -31,6 +31,15 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
         identity=IdentitySettings(owner_names={"test user"}),
     )
     return db_path, settings
+
+
+def _new_plugin() -> FacebookConnectionsPlugin:
+    """Build a FacebookConnectionsPlugin with the in-tree manifest."""
+    from phdb.core.plugin.manifest import load_manifest
+
+    manifest_path = Path("src/phdb/plugins/facebook_connections/plugin.toml").resolve()
+    manifest = load_manifest(manifest_path)
+    return FacebookConnectionsPlugin(manifest)
 
 
 class TestNameNormalization:
@@ -62,18 +71,18 @@ class TestFacebookConnectionsIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         """Count check: 3 friends + 1 removed + 1 sent request = 5 total."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
+            report = plugin.run(FIXTURE_ZIP, conn, settings)
         assert report.rows_yielded == 5
         assert report.rows_inserted == 5
 
     def test_connection_statuses(self, tmp_path: Path) -> None:
         """Active, inactive, and pending_outbound statuses all present."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             statuses = {
                 r[0]
                 for r in conn.execute(
@@ -87,9 +96,9 @@ class TestFacebookConnectionsIntegration:
     def test_instrument(self, tmp_path: Path) -> None:
         """All rows have instrument='facebook'."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             instruments = conn.execute(
                 "SELECT DISTINCT instrument FROM connections"
             ).fetchall()
@@ -99,9 +108,9 @@ class TestFacebookConnectionsIntegration:
     def test_name_normalization(self, tmp_path: Path) -> None:
         """name_normalized is lowercased and stripped."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
                 "SELECT name_normalized FROM connections WHERE display_name='Alice Johnson'"
             ).fetchone()
@@ -111,9 +120,9 @@ class TestFacebookConnectionsIntegration:
     def test_friends_since(self, tmp_path: Path) -> None:
         """Date parsed from HTML for active friends."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
                 "SELECT friends_since FROM connections WHERE display_name='Alice Johnson'"
             ).fetchone()
@@ -124,9 +133,9 @@ class TestFacebookConnectionsIntegration:
     def test_dedupe_key(self, tmp_path: Path) -> None:
         """Name-based dedupe key format."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
                 "SELECT dedupe_key FROM connections WHERE display_name='Bob Smith'"
             ).fetchone()
@@ -136,11 +145,11 @@ class TestFacebookConnectionsIntegration:
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         """Second run doesn't duplicate rows."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            FacebookConnectionsAdapter().run(FIXTURE_ZIP, conn, settings)
+            _new_plugin().run(FIXTURE_ZIP, conn, settings)
             count = conn.execute("SELECT COUNT(*) FROM connections").fetchone()[0]
         # Still 5 rows, not 10
         assert count == 5
@@ -148,9 +157,9 @@ class TestFacebookConnectionsIntegration:
     def test_source_file_registered(self, tmp_path: Path) -> None:
         """source_files table has an entry for the zip."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
+            report = plugin.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
                 "SELECT id, source_kind FROM source_files WHERE id=?",
                 (report.source_file_id,),
@@ -161,11 +170,11 @@ class TestFacebookConnectionsIntegration:
     def test_appearance_count_on_rerun(self, tmp_path: Path) -> None:
         """appearance_count incremented on rerun."""
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            FacebookConnectionsAdapter().run(FIXTURE_ZIP, conn, settings)
+            _new_plugin().run(FIXTURE_ZIP, conn, settings)
             counts = conn.execute(
                 "SELECT appearance_count FROM connections ORDER BY id"
             ).fetchall()
@@ -173,9 +182,9 @@ class TestFacebookConnectionsIntegration:
 
     def test_inactive_reason(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
                 "SELECT inactive_reason FROM connections WHERE display_name='Dave Wilson'"
             ).fetchone()
@@ -184,11 +193,11 @@ class TestFacebookConnectionsIntegration:
 
     def test_appearances_json_tracks_history(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            FacebookConnectionsAdapter().run(FIXTURE_ZIP, conn, settings)
+            _new_plugin().run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
                 "SELECT appearances_json FROM connections WHERE display_name='Alice Johnson'"
             ).fetchone()
@@ -198,8 +207,8 @@ class TestFacebookConnectionsIntegration:
 
     def test_connection_count(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = FacebookConnectionsAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             count = conn.execute("SELECT COUNT(*) FROM connections").fetchone()[0]
         assert count == 5

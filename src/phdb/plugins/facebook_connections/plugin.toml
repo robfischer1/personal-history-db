@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "facebook_connections"
+version = "0.5.0"
+description = "Facebook connections (friends, removed, pending, rejected)"
+kind = "source"
+entry_point = "phdb.plugins.facebook_connections:FacebookConnectionsPlugin"
+
+[source]
+emits = ["BefriendAction"]
+entity_refs = []
+formats_used = ["facebook_connections_html"]
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []
