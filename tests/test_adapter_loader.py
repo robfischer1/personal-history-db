@@ -8,13 +8,13 @@ from phdb.adapters.base import Adapter
 from phdb.adapters.loader import discover_adapters
 
 
-def test_discovers_calendar_adapter() -> None:
-    """The built-in calendar adapter should be discoverable from the adapters package."""
-    import phdb.adapters.calendar  # noqa: F401
+def test_discovers_writing_deltas_adapter() -> None:
+    """The built-in writing_deltas adapter should be discoverable from the adapters package."""
+    import phdb.adapters.writing_deltas  # noqa: F401
 
-    adapters_dir = Path(phdb.adapters.calendar.__file__).parent
+    adapters_dir = Path(phdb.adapters.writing_deltas.__file__).parent
     registry = discover_adapters([adapters_dir])
-    assert "calendar" in registry
+    assert "writing_deltas" in registry
 
 
 def test_discovers_external_adapter(tmp_path: Path) -> None:
