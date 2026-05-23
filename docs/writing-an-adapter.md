@@ -202,11 +202,11 @@ Rarely needs overriding — the default checks sender/recipients against `Identi
 
 ### `_register_source(conn, source_path) -> int`
 
-Override to populate additional `source_files` columns (e.g., `source_org`, `file_size`). See the mbox adapter for an example.
+Override to populate additional `source_files` columns (e.g., `source_org`, `file_size`). See the mbox plugin for an example.
 
 ### `run(source_path, conn, settings) -> IngestReport`
 
-Override for features like resume support or time budgets. Call `super().run()` for the standard pipeline. See the mbox adapter for the resume pattern.
+Override for features like resume support or time budgets. Call `super().run()` for the standard pipeline. See the mbox plugin for the resume pattern.
 
 ## Adapter discovery
 
@@ -251,7 +251,7 @@ The framework discovers adapters through two mechanisms:
 
 ## Reference implementation
 
-The [mbox adapter](../src/phdb/adapters/mbox.py) is the reference implementation. It demonstrates:
+The [raindrop plugin](../src/phdb/plugins/raindrop/) and [mbox plugin](../src/phdb/plugins/mbox/) are the reference implementations for the new plugin architecture. They demonstrate:
 
 - Custom streaming parser for performance
 - Bulk detection inside `iter_rows()` (needs raw message headers)

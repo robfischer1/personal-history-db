@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.mbox import MboxAdapter
+from phdb.plugins.mbox import MboxPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
@@ -126,7 +126,7 @@ def db_path(tmp_path: Path) -> Path:
 class TestBasicIngest:
     def test_single_message_inserts(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -138,7 +138,7 @@ class TestBasicIngest:
 
     def test_message_fields_populated(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -161,7 +161,7 @@ class TestBasicIngest:
 
     def test_multiple_messages(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG, HTML_ONLY_MSG, GMAIL_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -180,7 +180,7 @@ class TestDedup:
         the same mbox are caught by the resume-offset logic.
         """
         mbox = _write_mbox(tmp_path, [BASIC_MSG, BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -192,7 +192,7 @@ class TestDedup:
 
     def test_null_message_id_always_inserts(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [NO_MSGID, NO_MSGID])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -204,7 +204,7 @@ class TestDedup:
 class TestBulkDetection:
     def test_list_unsubscribe_detected(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BULK_MSG_LIST_UNSUB])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -216,7 +216,7 @@ class TestBulkDetection:
 
     def test_bulk_body_truncated_to_snippet(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BULK_MSG_LIST_UNSUB])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -237,7 +237,7 @@ Date: Mon, 15 Jan 2024 10:00:00 +0000
 Automated notification content here.
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -259,7 +259,7 @@ Precedence: bulk
 Mailing list message.
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -273,7 +273,7 @@ Mailing list message.
 class TestBodyExtraction:
     def test_plain_text_body(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -285,7 +285,7 @@ class TestBodyExtraction:
 
     def test_html_only_converted(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [HTML_ONLY_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -310,7 +310,7 @@ Date: Mon, 15 Jan 2024 10:00:00 +0000
 {long_body}
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -338,7 +338,7 @@ dGVzdA==
 --BNDRY--
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -352,7 +352,7 @@ dGVzdA==
 class TestMultipart:
     def test_multipart_flags(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [MULTIPART_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -367,7 +367,7 @@ class TestMultipart:
 
     def test_attachment_metadata_extracted(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [MULTIPART_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -384,7 +384,7 @@ class TestMultipart:
 class TestRecipients:
     def test_to_cc_bcc_extracted(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [MSG_WITH_CC_BCC])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -409,7 +409,7 @@ class TestRecipients:
 class TestGmailHeaders:
     def test_gmail_thread_id_extracted(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [GMAIL_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -435,7 +435,7 @@ Date: Mon, 15 Jan 2024 10:00:00 +0000
 Outbound message.
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
         settings.identity = IdentitySettings(owner_emails={"owner@example.com"})
 
@@ -456,7 +456,7 @@ Date: Mon, 15 Jan 2024 10:00:00 +0000
 Inbound message.
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
         settings.identity = IdentitySettings(owner_emails={"owner@example.com"})
 
@@ -477,7 +477,7 @@ Date: Mon, 15 Jan 2024 10:00:00 +0000
 Message to self.
 """
         mbox = _write_mbox(tmp_path, [msg])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
         settings.identity = IdentitySettings(owner_emails={"owner@example.com"})
 
@@ -489,7 +489,7 @@ Message to self.
 
     def test_unknown_when_no_identity(self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         monkeypatch.delenv("PHDB_INSTANCE_DIR", raising=False)
         monkeypatch.setattr("phdb.settings._discover_instance_dir", lambda: None)
         settings = Settings.load(db_path=db_path)
@@ -504,7 +504,7 @@ Message to self.
 class TestSourceRegistration:
     def test_source_file_registered(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -523,7 +523,7 @@ class TestSourceRegistration:
 
     def test_custom_source_kind(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter(source_kind="thunderbird", source_org="Mozilla Thunderbird")
+        adapter = MboxPlugin(source_kind="thunderbird", source_org="Mozilla Thunderbird")
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -540,7 +540,7 @@ class TestSourceRegistration:
 class TestResume:
     def test_rerun_skips_existing(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG, HTML_ONLY_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -548,7 +548,7 @@ class TestResume:
 
         assert report1.rows_inserted == 2
 
-        adapter2 = MboxAdapter()
+        adapter2 = MboxPlugin()
         with connect(db_path) as conn:
             report2 = adapter2.run(mbox, conn, settings)
 
@@ -558,7 +558,7 @@ class TestResume:
 class TestByteOffsets:
     def test_byte_offsets_recorded(self, tmp_path: Path, db_path: Path) -> None:
         mbox = _write_mbox(tmp_path, [BASIC_MSG])
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:
@@ -590,7 +590,7 @@ class TestErrorResilience:
             b"\n"
             b"Good message.\n"
         )
-        adapter = MboxAdapter()
+        adapter = MboxPlugin()
         settings = Settings.load(db_path=db_path)
 
         with connect(db_path) as conn:

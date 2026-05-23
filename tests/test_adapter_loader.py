@@ -8,13 +8,13 @@ from phdb.adapters.base import Adapter
 from phdb.adapters.loader import discover_adapters
 
 
-def test_discovers_mbox_adapter() -> None:
-    """The built-in mbox adapter should be discoverable from the adapters package."""
-    import phdb.adapters.mbox  # noqa: F401
+def test_discovers_amazon_adapter() -> None:
+    """The built-in amazon adapter should be discoverable from the adapters package."""
+    import phdb.adapters.amazon  # noqa: F401
 
-    adapters_dir = Path(phdb.adapters.mbox.__file__).parent
+    adapters_dir = Path(phdb.adapters.amazon.__file__).parent
     registry = discover_adapters([adapters_dir])
-    assert "mbox" in registry
+    assert "amazon" in registry
 
 
 def test_discovers_external_adapter(tmp_path: Path) -> None:

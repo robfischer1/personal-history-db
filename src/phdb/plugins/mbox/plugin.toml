@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "mbox"
+version = "0.5.0"
+description = "RFC 5322 mbox archives (Gmail Takeout / Thunderbird / Apple Mail)"
+kind = "source"
+entry_point = "phdb.plugins.mbox:MboxPlugin"
+
+[source]
+emits = ["EmailMessage"]
+entity_refs = []
+formats_used = ["mbox"]
+records_required = ["EmailMessage", "Attachment", "Recipient"]
+sidecars = ["attachments"]
+embeddable_tables = []
+facets_projected = ["Person", "Time", "Thread"]
