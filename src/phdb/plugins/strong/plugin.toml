@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "strong"
+version = "0.1.0"
+description = "Strong workout SQLite exports"
+kind = "source"
+entry_point = "phdb.plugins.strong:StrongPlugin"
+
+[source]
+emits = ["ExerciseAction"]
+entity_refs = []
+formats_used = ["strong_sqlite"]
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []
