@@ -603,6 +603,56 @@ def plugin_ingest(ctx: click.Context, name: str, source: str, no_schema_regen: b
         _run_schema_regen_hook(settings)
 
 
+@plugin.command(name="scaffold")
+@click.argument("name")
+@click.option("--description", default="", help="One-line plugin description.")
+@click.option("--emits", default="", help="Comma-separated Schema.org @type strings the plugin emits.")
+@click.option("--entity-refs", default="", help="Comma-separated entity table names this plugin's actions FK to.")
+@click.option("--formats-used", default="", help="Comma-separated phdb.formats module names this plugin imports.")
+@click.option("--facets-projected", default="", help="Comma-separated facet types this plugin projects into.")
+@click.option("--force", is_flag=True, help="Overwrite an existing plugin directory.")
+def plugin_scaffold(
+    name: str,
+    description: str,
+    emits: str,
+    entity_refs: str,
+    formats_used: str,
+    facets_projected: str,
+    force: bool,
+) -> None:
+    """Scaffold a new plugin skeleton at src/phdb/plugins/<name>/."""
+    from phdb.core.plugin.scaffold import (
+        ScaffoldError,
+        _split_csv,
+        scaffold_plugin,
+    )
+
+    try:
+        result = scaffold_plugin(
+            name,
+            description=description,
+            emits=_split_csv(emits),
+            entity_refs=_split_csv(entity_refs),
+            formats_used=_split_csv(formats_used),
+            facets_projected=_split_csv(facets_projected),
+            force=force,
+        )
+    except ScaffoldError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
+
+    click.echo(f"Scaffolded plugin {name!r}:")
+    for path in result.all_paths():
+        click.echo(f"  Created {path}")
+    click.echo(
+        "\nNext steps:\n"
+        "  1. Edit plugin.py to implement discover/parse/ingest_row.\n"
+        f"  2. Add tests at tests/test_{name}_plugin.py.\n"
+        "  3. Run `phdb plugin describe " + name + "` to verify the manifest.\n"
+    )
+    click.echo(f"Manifest: {result.manifest_path}")
+
+
 def _run_schema_regen_hook(settings) -> None:  # type: ignore[no-untyped-def]
     """Post-ingest hook — regenerate DB_SCHEMA.md unless suppressed.
 

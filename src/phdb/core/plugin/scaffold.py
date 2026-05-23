@@ -1,0 +1,417 @@
+"""Plugin scaffolder — generate a skeleton plugin at src/phdb/plugins/<name>/.
+
+Phase 9 of the phdb Plugin Architecture plan. Replaces the legacy
+``scripts/scaffold_adapter.py`` (which emitted dead-code adapter
+scaffolds against the removed Adapter ABC).
+
+The scaffolder produces four files keyed to the new plugin contract
+(PhdbSourcePlugin from ``phdb.core.plugin.contract``):
+
+- ``plugin.toml`` — manifest with the user-supplied fields populated.
+- ``plugin.py`` — skeleton ``<Name>Plugin(PhdbSourcePlugin)`` with stub
+  ``discover``/``parse``/``ingest_row``/``register_cli``/``register_tools``
+  (each raising ``NotImplementedError`` with a helpful message) +
+  ``run()`` returning an ``IngestSummary`` dataclass.
+- ``ingest.py`` — empty module with a docstring noting where the
+  COALESCE last-write-wins helpers go.
+- ``__init__.py`` — re-exports ``<Name>Plugin``.
+
+The generated plugin survives ``phdb plugin describe <name>`` with zero
+validation issues — the manifest's ``emits`` list is validated against
+``phdb.schemas.default_schema_registry()`` at scaffold time so a clean
+plugin lands on disk.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+
+from phdb.core.plugin.manifest import load_manifest
+
+_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class ScaffoldError(Exception):
+    """Raised when scaffold inputs fail validation."""
+
+
+@dataclass(frozen=True)
+class ScaffoldResult:
+    """Paths produced by one scaffold call."""
+
+    plugin_dir: Path
+    manifest_path: Path
+    plugin_py: Path
+    ingest_py: Path
+    init_py: Path
+
+    def all_paths(self) -> list[Path]:
+        return [self.manifest_path, self.plugin_py, self.ingest_py, self.init_py]
+
+
+def to_class_name(name: str) -> str:
+    """Convert snake_case plugin name to PascalCase class name + ``Plugin`` suffix."""
+    return "".join(word.capitalize() for word in name.split("_")) + "Plugin"
+
+
+def default_plugins_root() -> Path:
+    """Return the in-tree plugins root: ``src/phdb/plugins/``.
+
+    Discovered via ``phdb.plugins.__path__`` so a checkout or editable
+    install resolves to the same folder the loader scans.
+    """
+    import phdb.plugins  # noqa: PLC0415
+
+    paths = list(phdb.plugins.__path__)
+    if not paths:
+        raise ScaffoldError(
+            "could not resolve phdb.plugins package path; "
+            "ensure the package is importable",
+        )
+    return Path(paths[0])
+
+
+def validate_name(name: str) -> None:
+    """Raise ScaffoldError if ``name`` is not a valid plugin slug."""
+    if not _NAME_RE.match(name):
+        raise ScaffoldError(
+            f"invalid plugin name {name!r}: must match {_NAME_RE.pattern} "
+            "(lowercase, start with letter, underscore-allowed, no spaces)",
+        )
+
+
+def validate_emits(emits: list[str]) -> list[str]:
+    """Return a list of @types in ``emits`` not present in the schemas registry."""
+    from phdb.schemas.registry import default_schema_registry  # noqa: PLC0415
+
+    reg = default_schema_registry()
+    return [e for e in emits if reg.get_by_type(e) is None]
+
+
+def known_schema_types() -> list[str]:
+    """Return the sorted list of @type strings known to the schemas registry."""
+    from phdb.schemas.registry import default_schema_registry  # noqa: PLC0415
+
+    reg = default_schema_registry()
+    return sorted(reg.by_type.keys())
+
+
+def _split_csv(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _render_manifest_toml(
+    *,
+    name: str,
+    description: str,
+    emits: list[str],
+    entity_refs: list[str],
+    formats_used: list[str],
+    facets_projected: list[str],
+) -> str:
+    """Render the plugin.toml content."""
+
+    def toml_list(items: list[str]) -> str:
+        if not items:
+            return "[]"
+        quoted = ", ".join(f'"{item}"' for item in items)
+        return f"[{quoted}]"
+
+    class_name = to_class_name(name)
+    return (
+        "[phdb]\n"
+        "manifest_version = 1\n"
+        "\n"
+        "[plugin]\n"
+        f'name = "{name}"\n'
+        'version = "0.1.0"\n'
+        f'description = "{description}"\n'
+        'kind = "source"\n'
+        f'entry_point = "phdb.plugins.{name}:{class_name}"\n'
+        "\n"
+        "[source]\n"
+        f"emits = {toml_list(emits)}\n"
+        f"entity_refs = {toml_list(entity_refs)}\n"
+        f"formats_used = {toml_list(formats_used)}\n"
+        "records_required = []\n"
+        "sidecars = []\n"
+        "embeddable_tables = []\n"
+        f"facets_projected = {toml_list(facets_projected)}\n"
+    )
+
+
+def _render_plugin_py(*, name: str, description: str) -> str:
+    """Render the plugin.py skeleton."""
+    class_name = to_class_name(name)
+    title = name.replace("_", " ").title()
+    desc = description or f"{title} source plugin."
+    return (
+        f'"""{class_name} — scaffold-generated skeleton.\n'
+        "\n"
+        f"{desc}\n"
+        "\n"
+        "Generated by ``phdb plugin scaffold``. Fill in ``discover`` /\n"
+        "``parse`` / ``ingest_row`` to make this plugin do real work; the\n"
+        "stubs below raise ``NotImplementedError`` until you port the\n"
+        f"logic from the source brief or legacy adapter for ``{name}``.\n"
+        "\n"
+        "See ``src/phdb/plugins/raindrop/plugin.py`` for the canonical\n"
+        "exemplar — entity upsert + action upsert + triple emission +\n"
+        "source_files registration.\n"
+        '"""\n'
+        "\n"
+        "from __future__ import annotations\n"
+        "\n"
+        "import sqlite3\n"
+        "from collections.abc import Iterator\n"
+        "from dataclasses import dataclass, field\n"
+        "from pathlib import Path\n"
+        "from typing import TYPE_CHECKING, Any\n"
+        "\n"
+        "from phdb.core.plugin import PhdbSourcePlugin\n"
+        "from phdb.log import get_logger\n"
+        "\n"
+        "if TYPE_CHECKING:\n"
+        "    from phdb.core.plugin.manifest import PluginManifest\n"
+        "    from phdb.settings import Settings\n"
+        "\n"
+        f'log = get_logger("phdb.plugins.{name}")\n'
+        "\n"
+        "\n"
+        "@dataclass\n"
+        "class IngestSummary:\n"
+        '    """Result of one ``run()`` call — mirrors the canonical plugin shape."""\n'
+        "\n"
+        "    source_path: str\n"
+        "    source_file_id: int = 0\n"
+        "    rows_yielded: int = 0\n"
+        "    rows_inserted: int = 0\n"
+        "    rows_skipped: int = 0\n"
+        "    errors: list[str] = field(default_factory=list)\n"
+        "\n"
+        "\n"
+        f"class {class_name}(PhdbSourcePlugin):\n"
+        f'    """{desc}"""\n'
+        "\n"
+        f'    SOURCE_KIND = "{name}"\n'
+        '    FILE_KIND = ""  # TODO: set the source file extension (e.g. "csv", "json")\n'
+        "    BATCH_SIZE = 500\n"
+        "\n"
+        "    def __init__(self, manifest: PluginManifest | None = None) -> None:\n"
+        "        super().__init__(manifest)  # type: ignore[arg-type]\n"
+        "\n"
+        "    # ----------------------- PhdbSourcePlugin contract ---------------------\n"
+        "\n"
+        "    def discover(self, root: Path) -> Iterator[tuple[Path, str]]:\n"
+        '        """Walk a directory; yield ``(path, source_kind)`` tuples for\n'
+        "        every file this plugin can ingest.\n"
+        "\n"
+        "        Port the discovery logic from the source brief or the legacy\n"
+        "        adapter. The raindrop plugin's ``discover`` is a good\n"
+        "        starting point for filesystem-walk plugins.\n"
+        '        """\n'
+        "        raise NotImplementedError(\n"
+        f'            "{class_name}.discover not implemented — port from the source brief "\n'
+        f'            "or legacy adapter for {name}."\n'
+        "        )\n"
+        "\n"
+        "    def parse(self, path: Path) -> Iterator[Any]:\n"
+        '        """Yield typed records from one source file.\n'
+        "\n"
+        "        Wire this through a ``phdb.formats.<format>`` parser; the\n"
+        "        manifest's ``formats_used`` declaration documents the\n"
+        "        dependency.\n"
+        '        """\n'
+        "        raise NotImplementedError(\n"
+        f'            "{class_name}.parse not implemented — port from the source brief "\n'
+        f'            "or legacy adapter for {name}."\n'
+        "        )\n"
+        "\n"
+        "    def ingest_row(\n"
+        "        self,\n"
+        "        conn: sqlite3.Connection,\n"
+        "        record: Any,\n"
+        "        *,\n"
+        "        source_file_id: int | None = None,\n"
+        "    ) -> int:\n"
+        '        """Persist one record to its typed table; return the row id.\n'
+        "\n"
+        "        Upsert the entity (if any) then the action row with the\n"
+        "        entity FK; emit any relationship triples. See raindrop for\n"
+        "        the canonical WebPage-entity-FK pattern.\n"
+        '        """\n'
+        "        raise NotImplementedError(\n"
+        f'            "{class_name}.ingest_row not implemented — port from the source brief "\n'
+        f'            "or legacy adapter for {name}."\n'
+        "        )\n"
+        "\n"
+        "    def register_cli(self, parser: Any) -> None:\n"
+        '        """Register plugin-specific CLI subcommands.\n'
+        "\n"
+        "        Generic ``phdb plugin ingest <name> <path>`` already works\n"
+        "        without per-plugin CLI registration — leave this as a no-op\n"
+        "        unless the plugin needs custom flags.\n"
+        '        """\n'
+        "        raise NotImplementedError(\n"
+        f'            "{class_name}.register_cli not implemented — either implement plugin-specific "\n'
+        '            "subcommands or replace this body with ``return None`` to opt out."\n'
+        "        )\n"
+        "\n"
+        "    def register_tools(self, server: Any) -> None:\n"
+        '        """Register MCP tools owned by this plugin.\n'
+        "\n"
+        "        Leave as ``return None`` if the plugin has no MCP tools.\n"
+        '        """\n'
+        "        raise NotImplementedError(\n"
+        f'            "{class_name}.register_tools not implemented — either register plugin-specific "\n'
+        '            "MCP tools or replace this body with ``return None`` to opt out."\n'
+        "        )\n"
+        "\n"
+        "    # ------------------------- Convenience runner --------------------------\n"
+        "\n"
+        "    def run(\n"
+        "        self,\n"
+        "        source_path: Path,\n"
+        "        conn: sqlite3.Connection,\n"
+        "        settings: Settings | None = None,\n"
+        "    ) -> IngestSummary:\n"
+        '        """End-to-end ingest of one source file.\n'
+        "\n"
+        "        Wire ``discover`` → ``parse`` → ``ingest_row`` together once\n"
+        "        the contract methods are filled in. See\n"
+        "        ``src/phdb/plugins/raindrop/plugin.py`` for the canonical\n"
+        "        batched-commit pattern.\n"
+        '        """\n'
+        "        raise NotImplementedError(\n"
+        f'            "{class_name}.run not implemented — wire discover/parse/ingest_row together "\n'
+        '            "once the contract stubs are filled in."\n'
+        "        )\n"
+    )
+
+
+def _render_ingest_py(*, name: str) -> str:
+    return (
+        f'"""{name} ingest helpers — add upsert helpers here when the plugin needs them.\n'
+        "\n"
+        "Mirror ``phdb.formats.bookmark_upserts`` (raindrop / apple_dbs) or\n"
+        "``phdb.formats.email_upserts`` (gmail / mbox plugins) for the\n"
+        "COALESCE last-write-wins pattern used across the existing plugins.\n"
+        '"""\n'
+        "\n"
+        "from __future__ import annotations\n"
+    )
+
+
+def _render_init_py(*, name: str) -> str:
+    class_name = to_class_name(name)
+    return (
+        f'"""phdb.plugins.{name} — scaffold-generated source plugin.\n'
+        "\n"
+        "Generated by ``phdb plugin scaffold``. Fill in ``plugin.py`` to\n"
+        "make this plugin do real work.\n"
+        '"""\n'
+        "\n"
+        "from __future__ import annotations\n"
+        "\n"
+        f"from phdb.plugins.{name}.plugin import {class_name}\n"
+        "\n"
+        f'__all__ = ["{class_name}"]\n'
+    )
+
+
+def scaffold_plugin(
+    name: str,
+    *,
+    description: str = "",
+    emits: list[str] | None = None,
+    entity_refs: list[str] | None = None,
+    formats_used: list[str] | None = None,
+    facets_projected: list[str] | None = None,
+    force: bool = False,
+    plugins_root: Path | None = None,
+) -> ScaffoldResult:
+    """Generate a skeleton plugin under ``plugins_root/<name>/``.
+
+    Returns a ScaffoldResult with the four created paths. Raises
+    ``ScaffoldError`` on invalid name, unknown emit @type (unless
+    ``force=True``), or existing target dir (unless ``force=True``).
+    """
+    validate_name(name)
+
+    emits = list(emits or [])
+    entity_refs = list(entity_refs or [])
+    formats_used = list(formats_used or [])
+    facets_projected = list(facets_projected or [])
+
+    if emits and not force:
+        unknown = validate_emits(emits)
+        if unknown:
+            known = ", ".join(known_schema_types())
+            raise ScaffoldError(
+                f"unknown @type(s) in --emits: {unknown}. "
+                f"Pass --force to scaffold anyway. Known @types: {known}",
+            )
+
+    root = plugins_root if plugins_root is not None else default_plugins_root()
+    plugin_dir = root / name
+
+    if plugin_dir.exists():
+        if not force:
+            raise ScaffoldError(
+                f"plugin directory already exists: {plugin_dir}. "
+                "Pass --force to overwrite.",
+            )
+        shutil.rmtree(plugin_dir)
+
+    plugin_dir.mkdir(parents=True, exist_ok=False)
+
+    manifest_path = plugin_dir / "plugin.toml"
+    plugin_py = plugin_dir / "plugin.py"
+    ingest_py = plugin_dir / "ingest.py"
+    init_py = plugin_dir / "__init__.py"
+
+    manifest_path.write_text(
+        _render_manifest_toml(
+            name=name,
+            description=description,
+            emits=emits,
+            entity_refs=entity_refs,
+            formats_used=formats_used,
+            facets_projected=facets_projected,
+        ),
+        encoding="utf-8",
+    )
+    plugin_py.write_text(
+        _render_plugin_py(name=name, description=description),
+        encoding="utf-8",
+    )
+    ingest_py.write_text(_render_ingest_py(name=name), encoding="utf-8")
+    init_py.write_text(_render_init_py(name=name), encoding="utf-8")
+
+    # Validate the manifest parses cleanly — surface any TOML round-trip
+    # surprise immediately rather than at ``phdb plugin describe`` time.
+    load_manifest(manifest_path)
+
+    return ScaffoldResult(
+        plugin_dir=plugin_dir,
+        manifest_path=manifest_path,
+        plugin_py=plugin_py,
+        ingest_py=ingest_py,
+        init_py=init_py,
+    )
+
+
+__all__ = [
+    "ScaffoldError",
+    "ScaffoldResult",
+    "default_plugins_root",
+    "known_schema_types",
+    "scaffold_plugin",
+    "to_class_name",
+    "validate_emits",
+    "validate_name",
+    "_split_csv",
+]
