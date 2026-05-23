@@ -546,3 +546,70 @@ def coverage_map_cmd(ctx: click.Context, fmt: str, config: str | None, vault_pat
 
     write_state(data, state_path)
     click.echo(f"State written to: {state_path}")
+
+
+# ---------------------------------------------------------------------------
+# Plugin management — Phase 3 of the phdb Plugin Architecture plan
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def plugin() -> None:
+    """Plugin discovery + introspection."""
+
+
+@plugin.command(name="list")
+@click.option("--include-facets/--no-facets", default=True, help="Include facet plugins.")
+def plugin_list(include_facets: bool) -> None:
+    """List installed plugins (source + facet)."""
+    from phdb.core.plugin import discover_facets, discover_plugins
+
+    source = discover_plugins()
+    facets = discover_facets() if include_facets else []
+    if not source and not facets:
+        click.echo("No plugins installed.")
+        return
+    if source:
+        click.echo("Source plugins:")
+        for d in source:
+            issue_marker = f"  [!] {len(d.issues)} issue(s)" if d.issues else ""
+            click.echo(f"  {d.name:30s} v{d.manifest.version:8s}  {d.source}{issue_marker}")
+    if facets:
+        click.echo("\nFacet plugins:")
+        for d in facets:
+            issue_marker = f"  [!] {len(d.issues)} issue(s)" if d.issues else ""
+            click.echo(f"  {d.name:30s} v{d.manifest.version:8s}  {d.source}{issue_marker}")
+
+
+@plugin.command(name="describe")
+@click.argument("name")
+def plugin_describe(name: str) -> None:
+    """Show full manifest for a named plugin."""
+    from phdb.core.plugin import discover_facets, discover_plugins
+
+    found = next(
+        (d for d in discover_plugins() + discover_facets() if d.name == name),
+        None,
+    )
+    if found is None:
+        click.echo(f"No plugin named {name!r}. Run `phdb plugin list` to see installed plugins.")
+        raise SystemExit(1)
+    m = found.manifest
+    click.echo(f"Plugin: {m.name}")
+    click.echo(f"  Version:     {m.version}")
+    click.echo(f"  Kind:        {m.kind}")
+    click.echo(f"  Entry point: {m.entry_point}")
+    click.echo(f"  Description: {m.description}")
+    click.echo(f"  Source:      {found.source} (distribution: {found.distribution or '(in-tree)'})")
+    if m.source is not None:
+        click.echo("  emits:        " + (", ".join(m.source.emits) or "(none)"))
+        click.echo("  entity_refs:  " + (", ".join(m.source.entity_refs) or "(none)"))
+        click.echo("  formats_used: " + (", ".join(m.source.formats_used) or "(none)"))
+        click.echo("  sidecars:     " + (", ".join(m.source.sidecars) or "(none)"))
+    if m.facet is not None:
+        click.echo(f"  consumes:    {m.facet.consumes}")
+        click.echo(f"  node_table:  {m.facet.node_table}")
+    if found.issues:
+        click.echo("\nValidation issues:")
+        for issue in found.issues:
+            click.echo(f"  - {issue}")
