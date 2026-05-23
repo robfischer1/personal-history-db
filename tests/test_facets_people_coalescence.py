@@ -177,9 +177,9 @@ class TestExactFieldPredicate:
             "shape": "exact_field", "field": "phone",
             "normalize": "e164",
         })
-        a = _emit(phone="(973) 768-4297")
-        b = _emit(phone="+19737684297")
-        c = _emit(phone="973-768-4297")
+        a = _emit(phone="(555) 768-4297")
+        b = _emit(phone="+15557684297")
+        c = _emit(phone="555-768-4297")
         assert pred(a, b) is True
         assert pred(a, c) is True
         assert pred(b, c) is True

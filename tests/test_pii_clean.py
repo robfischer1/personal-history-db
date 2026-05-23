@@ -40,6 +40,7 @@ HARD_PATTERNS = [
     re.compile(r"\bHammer\b"),
     re.compile(r"\bDiuniverse\b"),
     re.compile(r"00008120-000668491105A01E", re.IGNORECASE),
+    re.compile(r"f2b31b65-33e0-433e-af65-18058840b49e", re.IGNORECASE),
 ]
 
 # Allowed only inside github.com URLs (the maintainer's repo URL)
@@ -47,7 +48,7 @@ GH_HANDLE = re.compile(r"\brobfischer1\b", re.IGNORECASE)
 GH_URL_CONTEXT = "github.com/robfischer1"
 
 SCAN_DIRS = [ROOT / "src", ROOT / "docs", ROOT / "tests"]
-SCAN_EXTENSIONS = {".py", ".sql", ".md", ".toml"}
+SCAN_EXTENSIONS = {".py", ".sql", ".md", ".toml", ".json", ".xml", ".html", ".csv", ".vcf", ".ics"}
 
 # This file necessarily contains the banned patterns as regex literals
 EXCLUDED = {Path(__file__).resolve()}
