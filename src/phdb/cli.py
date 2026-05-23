@@ -134,63 +134,6 @@ def migrate(ctx: click.Context, instance_migrations: str | None) -> None:
 
 
 @cli.command()
-@click.argument("source", type=click.Path(exists=True))
-@click.option("--adapter", "-a", required=True, help="Adapter name to use.")
-@click.option("--dry-run", is_flag=True, help="Parse and report without writing to DB.")
-@click.option("--upsert", is_flag=True, help="Update metadata for existing rows (preserves IDs + predicates).")
-@click.option("--truncate", is_flag=True, help="Wipe target rows + related predicates before reimporting.")
-@click.option("--no-schema-regen", is_flag=True, help="Skip the post-ingest DB_SCHEMA.md regen hook.")
-@click.pass_context
-def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool, upsert: bool, truncate: bool, no_schema_regen: bool) -> None:
-    """Ingest a source file using the named adapter."""
-    from phdb.adapters.loader import discover_adapters
-    from phdb.db import connect
-    from phdb.writelock import WriteLockError, write_lock
-
-    if upsert and truncate:
-        raise click.ClickException("Cannot use --upsert and --truncate together.")
-
-    settings = ctx.obj["settings"]
-    builtin_dir = Path(__file__).parent / "adapters"
-    search_paths = [builtin_dir, *settings.adapter_paths]
-    adapters = discover_adapters(search_paths)
-
-    if adapter not in adapters:
-        available = ", ".join(sorted(adapters)) or "(none)"
-        raise click.ClickException(f"Unknown adapter '{adapter}'. Available: {available}")
-
-    adapter_cls = adapters[adapter]
-    adapter_instance = adapter_cls()
-
-    if upsert and hasattr(adapter_instance, "_upsert_mode"):
-        adapter_instance._upsert_mode = True
-    if truncate and hasattr(adapter_instance, "_truncate_mode"):
-        adapter_instance._truncate_mode = True
-
-    if dry_run:
-        count = 0
-        for _ in adapter_instance.iter_rows(Path(source)):
-            count += 1
-        click.echo(f"Dry run: {count} rows parsed by adapter '{adapter}'")
-        return
-
-    try:
-        with write_lock(settings.db_path), connect(settings.db_path) as conn:
-            report = adapter_instance.run(Path(source), conn, settings)
-            mode = " (upsert)" if upsert else " (truncate+reimport)" if truncate else ""
-            click.echo(
-                f"Ingested{mode}: {report.rows_inserted} inserted, "
-                f"{report.rows_skipped} skipped, "
-                f"{report.rows_yielded} total from '{adapter}'"
-            )
-    except WriteLockError as e:
-        raise click.ClickException(str(e)) from e
-
-    if not no_schema_regen:
-        _run_schema_regen_hook(settings)
-
-
-@cli.command()
 @click.pass_context
 def stats(ctx: click.Context) -> None:
     """Show database statistics."""

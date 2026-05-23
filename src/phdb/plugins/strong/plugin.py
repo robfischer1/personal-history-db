@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from phdb.adapters.base import AdapterRow
 from phdb.core.plugin import PhdbSourcePlugin
 from phdb.formats.strong_sqlite import _format_weight, parse_workouts
 from phdb.log import get_logger
@@ -28,6 +27,31 @@ class IngestSummary:
     rows_inserted: int = 0
     rows_skipped: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AdapterRow:
+    """Local row carrier for strong workout records.
+
+    The plugin originally imported AdapterRow from the deprecated
+    ``phdb.adapters.base`` module; inlined here when that module was
+    retired (Phase 7 epilogue). Carries only the fields strong's
+    ``parse`` / ``ingest_row`` actually use. Pre-Phase-10 hardening
+    should replace this with a proper ``phdb.records.WorkoutSession``
+    record type.
+    """
+
+    schema_type: str = "ExerciseAction"
+    rfc822_message_id: str | None = None
+    subject: str | None = None
+    sender_address: str | None = None
+    sender_name: str | None = None
+    direction: str = "unknown"
+    date_sent: str | None = None
+    body_text: str | None = None
+    body_text_hash: str | None = None
+    raw_hash: str | None = None
+    thread_key: str | None = None
 
 
 def _register_source_file(

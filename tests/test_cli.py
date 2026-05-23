@@ -17,7 +17,7 @@ def test_cli_help() -> None:
     assert result.exit_code == 0
     assert "phdb" in result.output
     assert "migrate" in result.output
-    assert "ingest" in result.output
+    assert "plugin" in result.output
     assert "stats" in result.output
     assert "query" in result.output
     assert "embed" in result.output
