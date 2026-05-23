@@ -2,9 +2,12 @@
 
 Phase 4 deliverable. The ``facet_coalescence_log`` audit table records
 every merge proposal a facet plugin makes; ``phdb facet <name>
-unmerge <id>`` (Phase 8) reads from it. The table is created
-opportunistically by ``ensure_audit_log`` on first ingest hook so we
-don't need a migration file at Phase 4.
+unmerge <id>`` (Phase 8) reads from it.
+
+As of Phase 8A (migration ``0029_facet_coalescence_log.sql``) the
+table is created by a formal migration. ``ensure_audit_log`` is
+preserved as a fallback for legacy DBs that haven't run the migration
+yet — both paths emit equivalent DDL (``CREATE TABLE IF NOT EXISTS``).
 """
 
 from __future__ import annotations
@@ -36,7 +39,14 @@ CREATE INDEX IF NOT EXISTS idx_facet_coalescence_log_facet
 
 
 def ensure_audit_log(conn: sqlite3.Connection) -> None:
-    """Idempotent — create facet_coalescence_log if missing."""
+    """Idempotent — create facet_coalescence_log if missing.
+
+    **Fallback path** (Phase 8A onwards). The canonical creation route
+    is migration ``0029_facet_coalescence_log.sql``. This function
+    survives so legacy DBs that haven't migrated still work, and so
+    callers in test-only code paths can spin up the table on
+    ``:memory:`` connections without running the full migration suite.
+    """
     conn.execute(AUDIT_LOG_DDL)
     conn.execute(AUDIT_LOG_INDEX_DDL)
     conn.commit()

@@ -1,0 +1,92 @@
+# identity_rules.toml — coalescence rule pack for the people + places facets.
+#
+# This file is consulted by phdb.facets.people (and phdb.facets.places
+# in Phase 8B) at coalesce-time. If it's missing or this section is
+# empty, the facet falls back to bundled defaults
+# (DEFAULT_PEOPLE_RULES in phdb.facets.people.coalescence).
+#
+# Copy this file into your personal-history-instance/ directory as
+# `identity_rules.toml` and edit the rules to match your data
+# patterns.
+#
+# Rule shapes supported by phdb.facets._coalescence_lib:
+#   - exact_field        — single-field equality after normalization
+#   - two_field          — both named fields must match
+#   - regex              — regex with optional capture group
+#   - geo_radius_meters  — places-only; placeholder in Phase 8A
+#   - named_location     — same name (normalized) = same place
+#
+# Normalization options:
+#   - lowercase          — str.lower() + str.strip()
+#   - e164               — phone-number canonicalization
+#   - strip              — whitespace strip only
+#   - none / unspecified — raw equality
+#
+# Confidence: 0.0–1.0.
+#   - >= 0.90 auto-merges (no human review)
+#   - 0.5–0.89 surfaced to interactive review CLI (Phase 8C)
+#   - require_manual_review=true forces review regardless of confidence
+
+# ────────────────────────────────────────────────────────────────────
+# People rules — copied from phdb.facets.people.coalescence defaults.
+# ────────────────────────────────────────────────────────────────────
+
+[[rules.people]]
+name = "exact_email_local_domain"
+shape = "exact_field"
+field = "email"
+normalize = "lowercase"
+confidence = 0.95
+notes = "Same lowercased email = same person (strongest signal)."
+
+[[rules.people]]
+name = "phone_e164"
+shape = "exact_field"
+field = "phone"
+normalize = "e164"
+confidence = 0.95
+notes = "Same E.164-normalized phone = same person."
+
+[[rules.people]]
+name = "discord_handle"
+shape = "exact_field"
+field = "discord_handle"
+normalize = "lowercase"
+confidence = 0.85
+notes = "Same case-insensitive Discord handle = same person."
+
+[[rules.people]]
+name = "same_full_name_same_email_domain"
+shape = "two_field"
+fields = ["full_name", "email_domain"]
+normalize = "lowercase"
+confidence = 0.75
+notes = "Medium confidence — collides on common names in shared domains."
+
+[[rules.people]]
+name = "same_first_last"
+shape = "two_field"
+fields = ["first_name", "last_name"]
+normalize = "lowercase"
+confidence = 0.40
+require_manual_review = true
+notes = "Lowest confidence; routed to Phase 8C review CLI."
+
+# ────────────────────────────────────────────────────────────────────
+# Places rules — Phase 8B fills these in. Default stub below shows
+# the expected shapes. The geo_radius_meters predicate is a no-op
+# placeholder until the places facet ships the haversine math.
+# ────────────────────────────────────────────────────────────────────
+
+# [[rules.places]]
+# name = "same_coords_within_50m"
+# shape = "geo_radius_meters"
+# radius_meters = 50.0
+# confidence = 0.95
+
+# [[rules.places]]
+# name = "named_location_exact"
+# shape = "named_location"
+# field = "name"
+# normalize = "lowercase"
+# confidence = 0.80
