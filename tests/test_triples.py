@@ -35,7 +35,7 @@ class TestPredicates:
     def test_seed_predicates_exist(self, triple_db: Path):
         with connect(triple_db) as conn:
             preds = list_predicates(conn)
-            assert len(preds) == 35
+            assert len(preds) == 36
             names = {p["name"] for p in preds}
             assert "childOf" in names
             assert "relatesTo" in names

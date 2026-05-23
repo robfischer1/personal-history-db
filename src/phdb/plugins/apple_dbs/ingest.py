@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-from phdb.formats.bookmark_upserts import upsert_bookmark, upsert_web_page, upsert_browse_action
+from phdb.formats.bookmark_upserts import (
+    emit_bookmark_triples,
+    upsert_bookmark,
+    upsert_browse_action,
+    upsert_web_page,
+)
 from phdb.formats.url import normalize_url
 from phdb.records import BookmarkEvent, WebActivity, ChatMessage, CallRecord, DigitalDocument
 
@@ -39,7 +44,16 @@ def ingest_web_activity(
             date_added=sighted or "",
             tags=(),
         )
-        return upsert_bookmark(conn, source_file_id, event, web_page_id=wp_id)
+        bm_id = upsert_bookmark(conn, source_file_id, event, web_page_id=wp_id)
+        # WPEF follow-on brief 100 — emit bookmark-relationship triples.
+        # Safari bookmarks have no folder/tags, so this typically yields
+        # relatesTo + (when the title has text) mentions edges.
+        emit_bookmark_triples(
+            conn,
+            bookmark_id=bm_id, web_page_id=wp_id,
+            event=event, provenance="apple_dbs-emitted",
+        )
+        return bm_id
     
     # visit -> BrowseAction
     return upsert_browse_action(

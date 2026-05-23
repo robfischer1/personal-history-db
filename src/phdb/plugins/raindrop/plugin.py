@@ -29,7 +29,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
-from phdb.formats.bookmark_upserts import upsert_bookmark, upsert_web_page
+from phdb.formats.bookmark_upserts import (
+    emit_bookmark_triples,
+    upsert_bookmark,
+    upsert_web_page,
+)
 from phdb.formats.raindrop import parse as parse_raindrop
 from phdb.log import get_logger
 from phdb.records import BookmarkEvent
@@ -109,7 +113,12 @@ class RaindropPlugin(PhdbSourcePlugin):
         *,
         source_file_id: int | None = None,
     ) -> int:
-        """Upsert the WebPage entity + BookmarkAction row; return bookmark id."""
+        """Upsert the WebPage entity + BookmarkAction row; return bookmark id.
+
+        Also emits the four bookmark-relationship triples
+        (taggedWith / inFolder / mentions / relatesTo) per WPEF
+        follow-on brief 100.
+        """
         sf_id = source_file_id if source_file_id is not None else 0
         wp_id = upsert_web_page(
             conn, record.url, record.normalized_url,
@@ -118,7 +127,13 @@ class RaindropPlugin(PhdbSourcePlugin):
             sighted=record.date_added or None,
             source_file_id=sf_id or None,
         )
-        return upsert_bookmark(conn, sf_id, record, web_page_id=wp_id)
+        bm_id = upsert_bookmark(conn, sf_id, record, web_page_id=wp_id)
+        emit_bookmark_triples(
+            conn,
+            bookmark_id=bm_id, web_page_id=wp_id,
+            event=record, provenance="raindrop-emitted",
+        )
+        return bm_id
 
     def register_cli(self, parser: Any) -> None:
         """Register the ``phdb plugin ingest raindrop`` subcommand."""
