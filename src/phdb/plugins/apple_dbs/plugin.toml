@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "apple_dbs"
+version = "0.1.0"
+description = "Apple iPhone backup SQLite databases ingester"
+kind = "source"
+entry_point = "phdb.plugins.apple_dbs.plugin:AppleDbsPlugin"
+
+[source]
+emits = ["WebPage", "BookmarkAction", "BrowseAction", "Message", "Action", "DigitalDocument"]
+entity_refs = ["web_pages"]
+formats_used = ["url", "apple_dbs_sqlite"]
+records_required = ["WebActivity", "ChatMessage", "CallRecord", "DigitalDocument"]
+facets_projected = ["Person", "Time", "Thread"]

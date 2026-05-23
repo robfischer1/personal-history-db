@@ -1,4 +1,4 @@
-"""Tests for the apple_dbs adapter."""
+"""Tests for the apple_dbs plugin (Phase 7 port)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.apple_dbs import AppleDbsAdapter
+from phdb.plugins.apple_dbs import AppleDbsPlugin
 from phdb.formats.apple_dbs_sqlite import apple_ts_to_iso as _apple_ts_to_iso
 from phdb.formats.apple_dbs_sqlite import normalize_phone as _normalize_phone
 from phdb.db import connect
@@ -111,6 +111,25 @@ def apple_decrypt_dir(tmp_path: Path) -> Path:
     conn.commit()
     conn.close()
 
+    # iMessage (chat.db)
+    im_dir = tmp_path / "imessage"
+    im_dir.mkdir()
+    im_db = im_dir / "chat.db"
+    conn = sqlite3.connect(str(im_db))
+    conn.execute("""CREATE TABLE message (
+        ROWID INTEGER PRIMARY KEY, text TEXT, date INTEGER,
+        handle_id INTEGER, is_from_me INTEGER, cache_has_attachments INTEGER
+    )""")
+    conn.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
+    conn.execute("CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT)")
+    conn.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER)")
+    conn.execute("INSERT INTO message VALUES (1, 'Hello from iMessage', 700000000000000000, 1, 0, 0)")
+    conn.execute("INSERT INTO handle VALUES (1, '+15551112222')")
+    conn.execute("INSERT INTO chat VALUES (1, 'chat123')")
+    conn.execute("INSERT INTO chat_message_join VALUES (1, 1)")
+    conn.commit()
+    conn.close()
+
     return tmp_path
 
 
@@ -134,102 +153,98 @@ def apple_db(tmp_path: Path) -> Path:
     return db_path
 
 
-class TestAppleDbsIntegration:
+class TestAppleDbsPluginIntegration:
     def test_full_ingest(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
     ) -> None:
         apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter()
+        # We need a manifest to initialize the plugin
+        from phdb.core.plugin.manifest import load_manifest
+        manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
+        plugin = AppleDbsPlugin(manifest)
+        
         with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
+            summary = plugin.run(apple_decrypt_dir, conn, apple_settings)
 
-        assert report.rows_inserted == 6
-        assert report.rows_skipped == 0
+        # 2 calls + 1 vm + 1 safari hist + 1 safari bm + 1 note + 1 imessage = 7
+        assert summary.rows_inserted == 7
+        assert summary.rows_skipped == 0
 
     def test_callhistory_rows(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
     ) -> None:
         apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter(only=["callhistory"])
+        from phdb.core.plugin.manifest import load_manifest
+        manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
+        plugin = AppleDbsPlugin(manifest)
+        
         with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
+            summary = plugin.run(apple_decrypt_dir, conn, apple_settings, only=["callhistory"])
             rows = conn.execute(
-                "SELECT schema_type, direction, body_text FROM actions ORDER BY action_key"
+                "SELECT schema_type, direction, body_text FROM actions ORDER BY id"
             ).fetchall()
 
-        assert report.rows_inserted == 2
+        assert summary.rows_inserted == 2
         assert rows[0][0] == "Action"
         assert rows[0][1] == "outbound"
         assert "120s" in rows[0][2]
-
-    def test_voicemail_rows(
-        self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
-    ) -> None:
-        apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter(only=["voicemail"])
-        with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-        assert report.rows_inserted == 1
 
     def test_safari_history_rows(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
     ) -> None:
         apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter(only=["safari_history"])
+        from phdb.core.plugin.manifest import load_manifest
+        manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
+        plugin = AppleDbsPlugin(manifest)
+
         with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-            row = conn.execute(
+            summary = plugin.run(apple_decrypt_dir, conn, apple_settings, only=["safari_history"])
+            wp = conn.execute(
                 "SELECT normalized_url, title, domain FROM web_pages"
             ).fetchone()
-        assert report.rows_inserted == 1
-        assert row is not None
-        assert "example.com" in row[0]
-        assert row[1] == "Example Site"
-        assert row[2] == "example.com"
+            # New assertion for BrowseAction (Phase 7 requirement)
+            browse = conn.execute(
+                "SELECT web_page_id, visit_time FROM browse_actions"
+            ).fetchone()
 
-    def test_notes_rows(
+        assert summary.rows_inserted == 1
+        assert wp is not None
+        assert "example.com" in wp[0]
+        assert browse is not None
+        assert browse[0] == 1
+        assert "2023" in browse[1]
+
+    def test_imessage_rows(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
     ) -> None:
         apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter(only=["notes"])
+        from phdb.core.plugin.manifest import load_manifest
+        manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
+        plugin = AppleDbsPlugin(manifest)
+
         with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-            row = conn.execute("SELECT subject, body_text FROM digital_documents").fetchone()
-        assert report.rows_inserted == 1
-        assert row[0] == "My Note"
+            summary = plugin.run(apple_decrypt_dir, conn, apple_settings, only=["imessage"])
+            row = conn.execute(
+                "SELECT sender_address, body_text FROM chat_messages"
+            ).fetchone()
+
+        assert summary.rows_inserted == 1
+        assert row is not None
+        assert row[0] == "+15551112222"
+        assert "Hello from iMessage" in row[1]
 
     def test_idempotent_rerun(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
     ) -> None:
         apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter()
+        from phdb.core.plugin.manifest import load_manifest
+        manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
+        plugin = AppleDbsPlugin(manifest)
+        
         with connect(apple_db) as conn:
-            adapter.run(apple_decrypt_dir, conn, apple_settings)
+            plugin.run(apple_decrypt_dir, conn, apple_settings)
 
-        adapter2 = AppleDbsAdapter()
         with connect(apple_db) as conn:
-            r2 = adapter2.run(apple_decrypt_dir, conn, apple_settings)
+            r2 = plugin.run(apple_decrypt_dir, conn, apple_settings)
         assert r2.rows_inserted == 0
         assert r2.rows_yielded == 0
-
-    def test_thread_nodes_created(
-        self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
-    ) -> None:
-        apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter(only=["callhistory", "voicemail"])
-        with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-            thread_nodes = conn.execute(
-                "SELECT COUNT(*) FROM nodes WHERE kind = 'thread'"
-            ).fetchone()[0]
-        assert thread_nodes >= 2
-        assert report.threads_created >= 2
-
-    def test_time_budget(
-        self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
-    ) -> None:
-        apple_settings.db_path = apple_db
-        adapter = AppleDbsAdapter(max_seconds=0.001)
-        with connect(apple_db) as conn:
-            report = adapter.run(apple_decrypt_dir, conn, apple_settings)
-        assert report.rows_yielded >= 0

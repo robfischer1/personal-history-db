@@ -18,8 +18,8 @@ from pathlib import Path
 from phdb.db import connect
 from phdb.formats.raindrop import is_junk, normalize_url, should_skip
 from phdb.migrations.runner import MigrationRunner
+from phdb.formats.bookmark_upserts import upsert_web_page
 from phdb.plugins.raindrop import RaindropPlugin
-from phdb.plugins.raindrop.ingest import upsert_web_page
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_CSV = Path(__file__).parent / "fixtures" / "raindrop" / "raindrop_export.csv"

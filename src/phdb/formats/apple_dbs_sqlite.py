@@ -23,15 +23,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Union
 
-from phdb.records import CallRecord, DigitalDocument, Provenance, WebActivity
+from phdb.records import CallRecord, ChatMessage, DigitalDocument, Provenance, WebActivity
 
 APPLE_EPOCH = datetime(2001, 1, 1)
 
 # Union of all record types this parser yields.
-AppleDbsRecord = Union[CallRecord, WebActivity, DigitalDocument]
+AppleDbsRecord = Union[CallRecord, WebActivity, DigitalDocument, ChatMessage]
 
 # Handler name → parse function mapping (populated at module level below).
-HANDLER_NAMES = ("callhistory", "voicemail", "safari_history", "safari_bookmarks", "notes")
+HANDLER_NAMES = (
+    "callhistory", "voicemail", "safari_history", "safari_bookmarks", "notes", "imessage"
+)
 
 
 def apple_ts_to_iso(seconds_since_2001: float | None) -> str | None:
@@ -292,6 +294,68 @@ def _iter_notes(src_dir: Path, source_str: str) -> Iterator[DigitalDocument]:
     src.close()
 
 
+def _iter_imessage(src_dir: Path, source_str: str) -> Iterator[ChatMessage]:
+    """Parse chat.db, yielding ChatMessage per message."""
+    src_db = src_dir / "chat.db"
+    if not src_db.exists():
+        return
+
+    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
+    src.row_factory = sqlite3.Row
+    try:
+        # Standard iMessage query for chat.db
+        rows = list(src.execute("""
+            SELECT
+                m.ROWID,
+                m.text,
+                m.date,
+                h.id AS sender_address,
+                m.is_from_me,
+                c.chat_identifier
+            FROM message m
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            LEFT JOIN chat c ON cmj.chat_id = c.ROWID
+            WHERE m.text IS NOT NULL OR m.cache_has_attachments = 1
+        """))
+    except sqlite3.OperationalError:
+        src.close()
+        return
+
+    for r in rows:
+        raw_date = r["date"]
+        # iMessage date is nanoseconds since 2001 in recent versions
+        if raw_date and raw_date > 1_000_000_000_000:
+            date_iso = apple_ts_to_iso(raw_date / 1_000_000_000)
+        else:
+            date_iso = apple_ts_to_iso(raw_date)
+
+        if not date_iso:
+            continue
+
+        sender_addr = r["sender_address"]
+        if r["is_from_me"]:
+            sender_addr = "self"
+        elif sender_addr:
+            sender_addr = normalize_phone(sender_addr)
+
+        body = r["text"] or ""
+        chat_id = r["chat_identifier"] or sender_addr or "unknown"
+
+        synth_id = f"imessage:{r['ROWID']}"
+        raw_hash = hashlib.sha256(synth_id.encode()).hexdigest()
+
+        yield ChatMessage(
+            provenance=Provenance(source_path=source_str, raw_hash=raw_hash),
+            sender_address=sender_addr or "unknown",
+            date_sent=date_iso,
+            body_text=body or None,
+            thread_key=f"imessage:{chat_id}",
+            platform_id=synth_id,
+        )
+    src.close()
+
+
 # Dispatch table: handler name → (parse function, source_str is passed).
 _HANDLER_FUNCS: dict[str, object] = {
     "callhistory": _iter_callhistory,
@@ -299,6 +363,7 @@ _HANDLER_FUNCS: dict[str, object] = {
     "safari_history": _iter_safari_history,
     "safari_bookmarks": _iter_safari_bookmarks,
     "notes": _iter_notes,
+    "imessage": _iter_imessage,
 }
 
 
