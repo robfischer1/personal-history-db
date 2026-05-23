@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "chat_logs"
+version = "0.1.0"
+description = "Legacy IM chat logs (AIM, MSN, Trillian, Yahoo) ingester"
+kind = "source"
+entry_point = "phdb.plugins.chat_logs:ChatLogsPlugin"
+
+[source]
+emits = ["Message"]
+entity_refs = []
+formats_used = ["chat_logs_text"]
+records_required = ["ChatMessage"]
+sidecars = []
+embeddable_tables = []
+facets_projected = []
