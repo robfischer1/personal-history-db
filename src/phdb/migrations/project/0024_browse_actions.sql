@@ -16,3 +16,6 @@ CREATE TABLE IF NOT EXISTS browse_actions (
 CREATE INDEX IF NOT EXISTS idx_browse_actions_web_page_id ON browse_actions(web_page_id);
 CREATE INDEX IF NOT EXISTS idx_browse_actions_visit_time ON browse_actions(visit_time);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_browse_actions_dedup ON browse_actions(source_file_id, raw_hash);
+
+-- Register migration
+INSERT OR IGNORE INTO schema_migrations(migration_id) VALUES ('0024_browse_actions');

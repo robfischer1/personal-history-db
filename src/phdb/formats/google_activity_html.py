@@ -24,9 +24,11 @@ _TS_RE = re.compile(
 
 _STREAM_ACTIVITY_TYPE: dict[str, str] = {
     "Search": "search",
+    "Google Search": "search",
     "Image Search": "search",
     "Video Search": "search",
     "YouTube Search": "search",
+    "Chrome": "visit",
     "YouTube Watch": "watch",
     "YouTube": "watch",
     "Maps": "visit",
@@ -70,10 +72,10 @@ def _parse_activity_entries(
 ) -> Iterator[dict[str, str | None]]:
     soup = BeautifulSoup(html_content, "lxml")
     for cell in soup.select("div.outer-cell"):
-        stream_name = default_stream
+        header = cell.select_one(".header-cell p")
+        stream_name = header.get_text(" ", strip=True) if header else default_stream
         if not stream_name:
-            header = cell.select_one(".header-cell p")
-            stream_name = header.get_text(" ", strip=True) if header else "Unknown"
+            stream_name = "Unknown"
 
         body_cell = None
         for ccell in cell.select("div.content-cell"):

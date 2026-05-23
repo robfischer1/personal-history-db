@@ -21,9 +21,9 @@ def test_discover_finds_project_migrations() -> None:
     migrations = runner.discover()
     conn.close()
 
-    assert len(migrations) >= 23
+    assert len(migrations) >= 25
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0023_web_pages_entity"
+    assert migrations[-1].migration_id == "0025_google_activity_fk"
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@
 > are overwritten on next ingest. Schema descriptions and column
 > notes live on the dataclass schemas in `phdb.schemas.canonical`.
 
-**Regenerated at:** 2026-05-23T01:04:32Z
+**Regenerated at:** 2026-05-23T02:29:49Z
 
 ## Entity tables
 
@@ -13,7 +13,7 @@ Action rows FK to these via the auto-generated ``<entity>_id`` column.
 
 | Table | @type | Rows | dedup_key | Plugins |
 |:---|:---|---:|:---|:---|
-| `web_pages` | WebPage | 0 | `normalized_url` | — |
+| `web_pages` | WebPage | 0 | `normalized_url` | apple_dbs |
 
 ## Action / document tables
 
@@ -22,17 +22,18 @@ declare ``emits = [<@type>]`` in their manifest.
 
 | Table | @type | Rows | Date column | Plugins |
 |:---|:---|---:|:---|:---|
-| `actions` | Action | 0 | `date_performed` | — |
+| `actions` | Action | 0 | `date_performed` | apple_dbs |
 | `articles` | Article | 0 | `mtime` | — |
-| `bookmarks` | BookmarkAction | 0 | `first_seen_in_instrument` | raindrop |
+| `bookmarks` | BookmarkAction | 0 | `first_seen_in_instrument` | apple_dbs, raindrop |
 | `books` | Book | 0 | `date_recorded` | — |
-| `chat_messages` | Message | 0 | `date_sent` | — |
+| `browse_actions` | BrowseAction | 0 | `visit_time` | apple_dbs |
+| `chat_messages` | Message | 0 | `date_sent` | apple_dbs |
 | `clippings` | Quotation | 0 | `mtime` | — |
 | `comments` | Comment | 0 | `date_posted` | — |
 | `conversations_messages` | Conversation | 0 | `date_sent` | — |
 | `creative_works` | CreativeWork | 0 | `date_created` | — |
-| `digital_documents` | DigitalDocument | 0 | `date_created` | — |
-| `documents` | DigitalDocument | 0 | `mtime` | — |
+| `digital_documents` | DigitalDocument | 0 | `date_created` | apple_dbs |
+| `documents` | DigitalDocument | 0 | `mtime` | apple_dbs |
 | `emails` | EmailMessage | 1 | `date_sent` | — |
 | `events` | Event | 0 | `date_occurred` | — |
 | `exercise_actions` | ExerciseAction | 0 | `date_performed` | — |
@@ -49,11 +50,11 @@ declare ``emits = [<@type>]`` in their manifest.
 | `places` | Place | 0 | `date_recorded` | — |
 | `products` | Product | 0 | `date_recorded` | — |
 | `reviews` | Review | 0 | `date_reviewed` | — |
-| `search_actions` | SearchAction | 0 | `date_performed` | — |
+| `search_actions` | SearchAction | 0 | `date_performed` | google_activity |
 | `social_postings` | SocialMediaPosting | 0 | `date_posted` | — |
 | `things` | Thing | 0 | `date_recorded` | — |
 | `travel_actions` | TravelAction | 0 | `date_traveled` | — |
-| `watch_actions` | WatchAction | 0 | `date_watched` | — |
+| `watch_actions` | WatchAction | 0 | `date_watched` | google_activity |
 
 ## Facet plugins
 
@@ -216,6 +217,24 @@ Indexes:
 
 Indexes:
 - `idx_books_dedup` — UNIQUE (source_file_id, raw_hash)
+
+### `browse_actions` — BrowseAction
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'BrowseAction' |
+| `web_page_id` | INTEGER | yes |  |  |
+| `visit_time` | TEXT | yes |  |  |
+| `source_device` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_browse_actions_web_page_id` — (web_page_id)
+- `idx_browse_actions_visit_time` — (visit_time)
+- `idx_browse_actions_dedup` — UNIQUE (source_file_id, raw_hash)
 
 ### `chat_messages` — Message
 
@@ -871,6 +890,7 @@ Indexes:
 | `subject` | TEXT | yes |  |  |
 | `source_device` | TEXT | yes |  |  |
 | `sender_name` | TEXT | yes |  |  |
+| `web_page_id` | INTEGER | yes |  |  |
 | `direction` | TEXT | no |  | 'self' |
 | `date_performed` | TEXT | yes |  |  |
 | `body_text` | TEXT | yes |  |  |
@@ -887,6 +907,7 @@ Indexes:
 Indexes:
 - `idx_search_actions_dedup` — UNIQUE (source_file_id, raw_hash)
 - `idx_search_actions_date` — (date_performed)
+- `idx_search_actions_web_page_id` — (web_page_id)
 
 ### `social_postings` — SocialMediaPosting
 
@@ -975,6 +996,7 @@ Indexes:
 | `subject` | TEXT | yes |  |  |
 | `platform_name` | TEXT | yes |  |  |
 | `source_device` | TEXT | yes |  |  |
+| `web_page_id` | INTEGER | yes |  |  |
 | `direction` | TEXT | no |  | 'self' |
 | `date_watched` | TEXT | yes |  |  |
 | `body_text` | TEXT | yes |  |  |
@@ -991,3 +1013,4 @@ Indexes:
 Indexes:
 - `idx_watch_actions_dedup` — UNIQUE (source_file_id, raw_hash)
 - `idx_watch_actions_date` — (date_watched)
+- `idx_watch_actions_web_page_id` — (web_page_id)
