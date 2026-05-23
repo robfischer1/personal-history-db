@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "apple_health_backup"
+version = "0.4.0"
+description = "Apple Health Backup (SQLite) ingester"
+kind = "source"
+entry_point = "phdb.plugins.apple_health_backup:AppleHealthBackupPlugin"
+
+[source]
+emits = ["Observation", "ExerciseAction", "MedicalRecord"]
+entity_refs = []
+formats_used = ["apple_health_backup"]
+records_required = ["HealthObservation", "ExerciseSet"]
+sidecars = ["record_metadata", "workout_events", "workout_statistics"]
+embeddable_tables = []
+facets_projected = ["Time"]
