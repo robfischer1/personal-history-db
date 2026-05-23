@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "claude_code"
+version = "0.1.0"
+description = "Claude Code JSONL session ingester"
+kind = "source"
+entry_point = "phdb.plugins.claude_code:ClaudeCodePlugin"
+
+[source]
+emits = ["Conversation"]
+entity_refs = []
+formats_used = ["claude_code_jsonl"]
+records_required = ["AISessionMessage"]
+facets_projected = ["Time", "Topic"]
