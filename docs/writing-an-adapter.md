@@ -180,7 +180,7 @@ The framework:
 
 For complex sidecar patterns (upserts, read-then-write), use `pre_insert()` / `post_insert()` hooks or override `run()` directly. The hooks remain as an escape hatch.
 
-See [apple_health](../src/phdb/adapters/apple_health.py) (5 declared sidecar tables, custom `run()`) and [google_timeline](../src/phdb/adapters/google_timeline.py) (geo_traces via `iter_rows()` + `sidecar_rows`) for reference.
+See [apple_health](../src/phdb/plugins/apple_health/ingest.py) (5 declared sidecar tables) and [google_timeline](../src/phdb/adapters/google_timeline.py) (geo_traces via `iter_rows()` + `sidecar_rows`) for reference.
 
 ## Optional overrides
 

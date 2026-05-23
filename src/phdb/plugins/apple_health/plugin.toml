@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "apple_health"
+version = "0.4.0"
+description = "Apple Health Export zip (streaming XML + GPX) ingester"
+kind = "source"
+entry_point = "phdb.plugins.apple_health:AppleHealthPlugin"
+
+[source]
+emits = ["Observation", "ExerciseAction", "MedicalRecord"]
+entity_refs = []
+formats_used = ["apple_health_xml"]
+records_required = ["HealthObservation", "ExerciseSet"]
+sidecars = ["record_metadata", "hr_samples", "workout_events", "workout_statistics", "geo_traces"]
+embeddable_tables = []
+facets_projected = ["Time"]
