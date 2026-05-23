@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "articles"
+version = "0.1.0"
+description = "Vault Resources/Articles/ markdown — saved web articles into articles typed table"
+kind = "source"
+entry_point = "phdb.plugins.articles:ArticlesPlugin"
+
+[source]
+emits = ["Article"]
+entity_refs = []
+formats_used = ["articles_md"]
+records_required = ["Provenance"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time", "Topic"]
