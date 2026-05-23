@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "clippings"
+version = "0.1.0"
+description = "Vault Resources/Clippings/ + Resources/Reddit Posts/ markdown notes → clippings typed table"
+kind = "source"
+entry_point = "phdb.plugins.clippings:ClippingsPlugin"
+
+[source]
+emits = ["Quotation"]
+entity_refs = []
+formats_used = ["clippings_md"]
+records_required = ["Provenance"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time", "Topic"]
