@@ -139,8 +139,9 @@ def migrate(ctx: click.Context, instance_migrations: str | None) -> None:
 @click.option("--dry-run", is_flag=True, help="Parse and report without writing to DB.")
 @click.option("--upsert", is_flag=True, help="Update metadata for existing rows (preserves IDs + predicates).")
 @click.option("--truncate", is_flag=True, help="Wipe target rows + related predicates before reimporting.")
+@click.option("--no-schema-regen", is_flag=True, help="Skip the post-ingest DB_SCHEMA.md regen hook.")
 @click.pass_context
-def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool, upsert: bool, truncate: bool) -> None:
+def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool, upsert: bool, truncate: bool, no_schema_regen: bool) -> None:
     """Ingest a source file using the named adapter."""
     from phdb.adapters.loader import discover_adapters
     from phdb.db import connect
@@ -184,6 +185,9 @@ def ingest(ctx: click.Context, source: str, adapter: str, dry_run: bool, upsert:
             )
     except WriteLockError as e:
         raise click.ClickException(str(e)) from e
+
+    if not no_schema_regen:
+        _run_schema_regen_hook(settings)
 
 
 @cli.command()
@@ -618,9 +622,10 @@ def plugin_describe(name: str) -> None:
 @plugin.command(name="ingest")
 @click.argument("name")
 @click.argument("source", type=click.Path(exists=True))
+@click.option("--no-schema-regen", is_flag=True, help="Skip the post-ingest DB_SCHEMA.md regen hook.")
 @click.pass_context
-def plugin_ingest(ctx: click.Context, name: str, source: str) -> None:
-    """Ingest a source file via the named plugin (Phase 5 minimum CLI)."""
+def plugin_ingest(ctx: click.Context, name: str, source: str, no_schema_regen: bool) -> None:
+    """Ingest a source file via the named plugin (Phase 5+ CLI)."""
     from pathlib import Path as P
 
     from phdb.core.plugin import discover_facets, discover_plugins, load_plugin
@@ -650,3 +655,93 @@ def plugin_ingest(ctx: click.Context, name: str, source: str) -> None:
     rows_inserted = getattr(report, "rows_inserted", "?")
     rows_yielded = getattr(report, "rows_yielded", "?")
     click.echo(f"[{name}] Done: yielded={rows_yielded} inserted={rows_inserted}")
+
+    if not no_schema_regen:
+        _run_schema_regen_hook(settings)
+
+
+def _run_schema_regen_hook(settings) -> None:  # type: ignore[no-untyped-def]
+    """Post-ingest hook — regenerate DB_SCHEMA.md unless suppressed.
+
+    Failures are logged + swallowed; ingest already succeeded, no need
+    to fail the command.
+    """
+    from pathlib import Path as P
+
+    from phdb.db import connect
+    from phdb.tools.schema_doc import DEFAULT_OUTPUT_PATH, regenerate
+
+    try:
+        if not settings.db_path or not P(settings.db_path).exists():
+            content = regenerate(None)
+        else:
+            with connect(settings.db_path, readonly=True) as conn:
+                content = regenerate(conn)
+        DEFAULT_OUTPUT_PATH.write_text(content, encoding="utf-8")
+        click.echo(f"  schema doc regenerated -> {DEFAULT_OUTPUT_PATH}")
+    except Exception as e:
+        click.echo(f"  schema doc regen skipped: {e}", err=True)
+
+
+# ---------------------------------------------------------------------------
+# Schema regeneration — Phase 6 of the phdb Plugin Architecture plan
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def schema() -> None:
+    """Schema introspection + regeneration."""
+
+
+@schema.command(name="regenerate")
+@click.option("--output", "-o", default=None, help="Output path (default: DB_SCHEMA.md at cwd).")
+@click.option("--dry-run", is_flag=True, help="Print to stdout instead of writing.")
+@click.option("--no-counts", is_flag=True, help="Skip live-DB row counts.")
+@click.pass_context
+def schema_regenerate(ctx: click.Context, output: str | None, dry_run: bool, no_counts: bool) -> None:
+    """Regenerate DB_SCHEMA.md from the phdb.schemas registry + live sqlite_master."""
+    from pathlib import Path as P
+
+    from phdb.db import connect
+    from phdb.tools.schema_doc import DEFAULT_OUTPUT_PATH, regenerate
+
+    settings = ctx.obj["settings"]
+
+    conn = None
+    content: str
+    if no_counts:
+        content = regenerate(None)
+    else:
+        if not settings.db_path or not P(settings.db_path).exists():
+            click.echo(
+                "DB not found — regenerating structure-only output. "
+                "Pass --no-counts to suppress this message."
+            )
+            content = regenerate(None)
+        else:
+            with connect(settings.db_path, readonly=True) as conn:
+                content = regenerate(conn)
+
+    if dry_run:
+        click.echo(content)
+        return
+    target = P(output) if output else DEFAULT_OUTPUT_PATH
+    target.write_text(content, encoding="utf-8")
+    click.echo(f"Wrote {len(content):,} bytes to {target}")
+
+
+@schema.command(name="diff")
+@click.pass_context
+def schema_diff(ctx: click.Context) -> None:
+    """Show drift between phdb.schemas declarations and the live DB."""
+    from phdb.db import connect
+    from phdb.tools.schema_doc import diff_against_live
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        drift = diff_against_live(conn)
+    if not drift:
+        click.echo("Schema is clean — no drift between declarations and live DB.")
+        return
+    for line in drift:
+        click.echo(line)
