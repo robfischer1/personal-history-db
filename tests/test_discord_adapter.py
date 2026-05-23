@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.discord import DiscordAdapter
+from phdb.plugins.discord import DiscordPlugin
 from phdb.formats.discord_json import (
     _content_type_from_filename,
     _derive_other_party,
@@ -20,6 +20,15 @@ from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "discord" / "package.zip"
+
+
+def _new_plugin(**kwargs) -> DiscordPlugin:
+    """Build a DiscordPlugin with the in-tree manifest."""
+    from phdb.core.plugin.manifest import load_manifest
+
+    manifest_path = Path("src/phdb/plugins/discord/plugin.toml").resolve()
+    manifest = load_manifest(manifest_path)
+    return DiscordPlugin(manifest, **kwargs)
 
 
 # ---- Unit tests for helper functions ----
@@ -139,7 +148,7 @@ def discord_db(tmp_path: Path) -> Path:
 class TestDiscordAdapterIntegration:
     def test_basic_ingest(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, discord_settings)
 
@@ -149,7 +158,7 @@ class TestDiscordAdapterIntegration:
 
     def test_all_outbound(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             inbound = conn.execute(
@@ -159,7 +168,7 @@ class TestDiscordAdapterIntegration:
 
     def test_sender_from_identity(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             senders = conn.execute(
@@ -170,7 +179,7 @@ class TestDiscordAdapterIntegration:
 
     def test_synthetic_message_id(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             ids = conn.execute(
@@ -182,7 +191,7 @@ class TestDiscordAdapterIntegration:
 
     def test_threads_created(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             thread_nodes = conn.execute(
@@ -193,7 +202,7 @@ class TestDiscordAdapterIntegration:
 
     def test_attachments_recorded(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             atts = conn.execute("SELECT filename, content_type, on_disk_path FROM attachments").fetchall()
@@ -206,7 +215,7 @@ class TestDiscordAdapterIntegration:
 
     def test_recipients_recorded(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             rcpts = conn.execute("SELECT normalized_label FROM nodes WHERE kind = 'contact' ORDER BY normalized_label").fetchall()
@@ -216,11 +225,11 @@ class TestDiscordAdapterIntegration:
 
     def test_idempotent_rerun(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
 
-        adapter2 = DiscordAdapter()
+        adapter2 = _new_plugin()
         with connect(discord_db) as conn:
             r2 = adapter2.run(FIXTURE_ZIP, conn, discord_settings)
 
@@ -229,7 +238,7 @@ class TestDiscordAdapterIntegration:
 
     def test_since_filter(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter(since="2024-02-01T00:00:00+00:00")
+        adapter = _new_plugin(since="2024-02-01T00:00:00+00:00")
         with connect(discord_db) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, discord_settings)
 
@@ -237,7 +246,7 @@ class TestDiscordAdapterIntegration:
 
     def test_max_channels(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter(max_channels=1)
+        adapter = _new_plugin(max_channels=1)
         with connect(discord_db) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, discord_settings)
 
@@ -245,14 +254,14 @@ class TestDiscordAdapterIntegration:
 
     def test_time_budget(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter(max_seconds=0.001)
+        adapter = _new_plugin(max_seconds=0.001)
         with connect(discord_db) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, discord_settings)
         assert report.rows_yielded >= 0
 
     def test_thread_aggregates(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             # Verify inThread triples exist for the DM channel
@@ -273,7 +282,7 @@ class TestDiscordAdapterIntegration:
 
     def test_guild_channel_thread(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             in_thread_id = conn.execute(
@@ -293,7 +302,7 @@ class TestDiscordAdapterIntegration:
 
     def test_message_thread_bridge(self, discord_db: Path, discord_settings: Settings) -> None:
         discord_settings.db_path = discord_db
-        adapter = DiscordAdapter()
+        adapter = _new_plugin()
         with connect(discord_db) as conn:
             adapter.run(FIXTURE_ZIP, conn, discord_settings)
             bridges = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]

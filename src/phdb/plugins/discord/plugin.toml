@@ -1,0 +1,17 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "discord"
+version = "0.1.0"
+description = "Discord data-export ingester"
+kind = "source"
+entry_point = "phdb.plugins.discord.plugin:DiscordPlugin"
+
+[source]
+emits = ["Message"]
+entity_refs = []
+formats_used = ["discord_json", "chat_upserts"]
+records_required = ["ChatMessage", "Attachment", "Recipient"]
+facets_projected = ["Person", "Time", "Thread"]
+sidecars = ["attachments"]
