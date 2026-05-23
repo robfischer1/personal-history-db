@@ -1,6 +1,8 @@
-"""Writing delta-stream adapter — ingests NDJSON files emitted by the
-`obsidian-delta-stream` Obsidian plugin into the writing_sessions +
-writing_deltas typed tables.
+"""WritingDeltasPlugin — Phase 7 epilogue port.
+
+Ingests NDJSON files emitted by the ``obsidian-delta-stream`` Obsidian
+plugin into the ``writing_sessions`` + ``writing_deltas`` typed tables
+(migration 0015).
 
 Source format: one JSON object per line (NDJSON), one of:
     {"type":"session-start", "ts":…, "sessionId":…, "notePath":…}
@@ -24,6 +26,10 @@ absorbed.
 
 Crash-safety: NDJSON is append-only by construction. The last line may be
 partial after a hard quit; that line is JSON-parse-skipped with a debug log.
+
+Replaces the legacy ``phdb.adapters.writing_deltas`` module deleted in the
+same commit per Phase 0 Q14 (no shim). Reuses ``writing_sessions`` +
+``writing_deltas`` tables from migration 0015; no schema changes.
 """
 
 from __future__ import annotations
@@ -33,16 +39,17 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.core.plugin import PhdbSourcePlugin
 from phdb.log import get_logger
 
 if TYPE_CHECKING:
     from phdb.settings import Settings
 
-log = get_logger("phdb.adapters.writing_deltas")
+log = get_logger("phdb.plugins.writing_deltas")
 
 
 # ---------------------------------------------------------------------------
@@ -77,43 +84,165 @@ class _SessionAccumulator:
 
 
 # ---------------------------------------------------------------------------
-# Adapter
+# Ingest summary — mirrors the legacy IngestReport surface so test
+# assertions for rows_yielded / rows_inserted / rows_skipped /
+# threads_created / errors continue to work verbatim.
 # ---------------------------------------------------------------------------
 
 
-class WritingDeltasAdapter(Adapter):
+@dataclass
+class IngestSummary:
+    """Result of one ``run()`` call."""
+
+    source_path: str
+    source_file_id: int = 0
+    rows_yielded: int = 0
+    rows_inserted: int = 0
+    rows_skipped: int = 0
+    threads_created: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# source_files registrar — equivalent to the legacy
+# Adapter._register_source helper, copied here so the plugin doesn't
+# need to inherit from the deprecated Adapter base. Phase 7+ will lift
+# this into a shared phdb.core.sources helper as more plugins
+# accumulate the same boilerplate.
+# ---------------------------------------------------------------------------
+
+
+def _register_source_file(
+    conn: sqlite3.Connection,
+    source_path: Path,
+    *,
+    source_kind: str = "writing-deltas",
+    file_kind: str = "ndjson",
+) -> int:
+    """Insert (or refresh) a source_files row for the given path."""
+    cur = conn.execute(
+        """INSERT INTO source_files
+           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
+           VALUES (?, ?, ?, ?, NULL,
+                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           ON CONFLICT(source_path) DO UPDATE
+             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           RETURNING id""",
+        (str(source_path), None, file_kind, source_kind),
+    )
+    row = cur.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+# ---------------------------------------------------------------------------
+# Plugin
+# ---------------------------------------------------------------------------
+
+
+class WritingDeltasPlugin(PhdbSourcePlugin):
     """Ingest writing-delta NDJSON files into writing_sessions + writing_deltas."""
 
+    # Class-level identity — kept as lowercase class attrs (shadowing the
+    # inherited ``PhdbPlugin.name`` property) so callers can introspect
+    # ``plugin.name`` / ``plugin.source_kind`` / ``plugin.file_kind``
+    # without constructing a PluginManifest. Mirrors the legacy adapter
+    # attribute surface.
     name = "writing_deltas"
     source_kind = "writing-deltas"
     file_kind = "ndjson"
-    schema_type = "WritingSession"
-    # iter_rows is not used — this adapter overrides run() because it writes
-    # to domain tables, not the messages/documents/articles tables.
-    dedup_strategy = DedupStrategy.CONTENT_HASH
-    batch_size = 500
+    BATCH_SIZE = 500
 
-    def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
+    def __init__(self, manifest: Any = None) -> None:
+        # PhdbPlugin.__init__ just sets self.manifest; tolerate None so
+        # tests can construct the plugin without going through the
+        # discover_plugins/load_plugin path.
+        super().__init__(manifest)
+
+    # ----------------------- PhdbSourcePlugin contract ---------------------
+
+    def discover(self, root: Path) -> Iterator[tuple[Path, str]]:
+        """Walk a directory; yield (path, source_kind) for every .ndjson file."""
+        if root.is_file():
+            yield root, self.source_kind
+            return
+        for path in sorted(root.rglob("*.ndjson")):
+            yield path, self.source_kind
+
+    def parse(self, path: Path) -> Iterator[dict[str, Any]]:
+        """Yield parsed NDJSON event dicts from one source file.
+
+        The per-session aggregation is internal to ``run()``; ``parse``
+        is offered as the minimal contract surface (one raw event per
+        yield, skipping unparseable lines).
+        """
+        with path.open("r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.rstrip("\n")
+                if not line.strip():
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+    def ingest_row(
+        self,
+        conn: sqlite3.Connection,
+        record: dict[str, Any],
+        *,
+        source_file_id: int | None = None,
+    ) -> int:
+        """Single-record ingest is not supported — writing-deltas require
+        per-session aggregation. Use ``run()`` instead."""
         raise NotImplementedError(
-            "WritingDeltasAdapter overrides run() and writes to writing_sessions/writing_deltas directly"
+            "WritingDeltasPlugin requires per-session aggregation; "
+            "call run(source_path, conn, settings) instead of ingest_row()."
         )
+
+    def register_cli(self, parser: Any) -> None:
+        """Phase 5 model: registration goes through the generic
+        ``phdb plugin ingest <name> <path>`` command in cli.py."""
+        return None
+
+    def register_tools(self, server: Any) -> None:
+        """MCP tools (writing_arc/writing_session_detail/writing_stats)
+        currently live in ``phdb.query``; the source-specific layer
+        dissolves in a later phase."""
+        return None
+
+    # ----------------------- Legacy adapter shim ---------------------------
+
+    def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[Any]:
+        """Legacy ``Adapter.iter_rows`` surface — preserved so the
+        ``test_iter_rows_raises_not_implemented`` assertion continues to
+        hold post-port. Writing-deltas never supported per-row iteration
+        through the base-class pipeline; ``run()`` is the entry point."""
+        raise NotImplementedError(
+            "WritingDeltasPlugin overrides run() and writes to "
+            "writing_sessions/writing_deltas directly"
+        )
+
+    # ------------------------- Convenience runner --------------------------
 
     def run(
         self,
         source_path: Path,
         conn: sqlite3.Connection,
-        settings: Settings,
-    ) -> IngestReport:
-        self._settings = settings
-        self.validate_source_path(source_path)
+        settings: Settings | None = None,
+    ) -> IngestSummary:
+        """End-to-end ingest of one NDJSON file.
 
-        report = IngestReport(
-            adapter_name=self.name,
-            source_path=str(source_path),
-            source_file_id=0,
+        Mirrors the legacy ``WritingDeltasAdapter.run`` surface — tests
+        + ``phdb plugin ingest writing_deltas`` CLI both consume this
+        entry point.
+        """
+        report = IngestSummary(source_path=str(source_path))
+
+        source_file_id = _register_source_file(
+            conn, source_path,
+            source_kind=self.source_kind, file_kind=self.file_kind,
         )
-
-        source_file_id = self._register_source(conn, source_path)
         report.source_file_id = source_file_id
         log.info(
             "[%s] Source registered: id=%d path=%s",
@@ -150,7 +279,7 @@ class WritingDeltasAdapter(Adapter):
                 else:
                     report.rows_skipped += 1
                 batch_count += 1
-                if batch_count >= self.batch_size:
+                if batch_count >= self.BATCH_SIZE:
                     conn.commit()
                     batch_count = 0
 
@@ -184,7 +313,7 @@ class WritingDeltasAdapter(Adapter):
     def _parse_ndjson(
         self,
         source_path: Path,
-        report: IngestReport,
+        report: IngestSummary,
     ) -> dict[str, _SessionAccumulator]:
         """First pass — read every line, bucket by session_id."""
         sessions: dict[str, _SessionAccumulator] = defaultdict(

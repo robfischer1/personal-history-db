@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "writing_deltas"
+version = "0.4.0"
+description = "obsidian-delta-stream NDJSON ingester — writes per-session aggregates + per-event deltas to writing_sessions/writing_deltas (migration 0015)"
+kind = "source"
+entry_point = "phdb.plugins.writing_deltas:WritingDeltasPlugin"
+
+[source]
+emits = []
+entity_refs = []
+formats_used = []
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []

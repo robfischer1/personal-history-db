@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.writing_deltas import WritingDeltasAdapter
+from phdb.plugins.writing_deltas import WritingDeltasPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
@@ -30,7 +30,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 class TestBasicIngest:
     def test_one_session_with_full_aggregates(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_BASIC, conn, settings)
 
@@ -93,7 +93,7 @@ class TestBasicIngest:
 
     def test_individual_delta_rows_carry_expected_fields(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_BASIC, conn, settings)
 
@@ -130,7 +130,7 @@ class TestBasicIngest:
 
     def test_note_switch_events_not_materialised(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_BASIC, conn, settings)
 
@@ -148,7 +148,7 @@ class TestBasicIngest:
 class TestReingestIdempotency:
     def test_reingesting_same_file_is_a_noop(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
 
         with connect(db_path) as conn:
             adapter.run(FIXTURE_BASIC, conn, settings)
@@ -180,7 +180,7 @@ class TestReingestIdempotency:
 class TestPartialLineSafety:
     def test_trailing_partial_json_is_skipped_not_fatal(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_PARTIAL, conn, settings)
 
@@ -205,7 +205,7 @@ class TestCrossFileSession:
     def test_session_spanning_two_files_merges_correctly(self, tmp_path: Path) -> None:
         """Day-1 file has session-start + 1 edit; day-2 file has 1 edit + session-end."""
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
 
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DAY1, conn, settings)
@@ -240,7 +240,7 @@ class TestCrossFileSession:
     def test_day_2_alone_uses_ended_at_as_started_at_fallback(self, tmp_path: Path) -> None:
         """If only the session-end file is ingested, started_at = ended_at fallback."""
         db_path, settings = _setup(tmp_path)
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
 
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DAY2, conn, settings)
@@ -269,14 +269,14 @@ class TestCrossFileSession:
 
 class TestAdapterIdentity:
     def test_iter_rows_raises_not_implemented(self, tmp_path: Path) -> None:
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
         import pytest
 
         with pytest.raises(NotImplementedError):
             next(adapter.iter_rows(tmp_path / "nope.ndjson"))
 
     def test_adapter_metadata(self) -> None:
-        adapter = WritingDeltasAdapter()
+        adapter = WritingDeltasPlugin()
         assert adapter.name == "writing_deltas"
         assert adapter.source_kind == "writing-deltas"
         assert adapter.file_kind == "ndjson"

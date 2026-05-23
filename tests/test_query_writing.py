@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.writing_deltas import WritingDeltasAdapter
+from phdb.plugins.writing_deltas import WritingDeltasPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.query import writing_arc, writing_session_detail, writing_stats
@@ -25,7 +25,7 @@ def _setup_and_ingest(tmp_path: Path, *fixtures: Path) -> Path:
         db_path=db_path,
         identity=IdentitySettings(owner_names={"test user"}),
     )
-    adapter = WritingDeltasAdapter()
+    adapter = WritingDeltasPlugin()
     for fixture in fixtures:
         with connect(db_path) as conn:
             adapter.run(fixture, conn, settings)
