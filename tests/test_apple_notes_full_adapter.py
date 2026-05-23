@@ -1,12 +1,12 @@
-"""Tests for the apple_notes_full adapter."""
+"""Tests for the apple_notes_full plugin."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.apple_notes_full import AppleNotesFullAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.apple_notes_full import AppleNotesFullPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "apple_notes_full" / "NoteStore.sqlite"
@@ -26,14 +26,14 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 class TestAppleNotesFullIntegration:
     def test_basic_ingest_inserts(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DB, conn, settings)
         assert report.rows_inserted == 2
 
     def test_schema_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()
@@ -41,7 +41,7 @@ class TestAppleNotesFullIntegration:
 
     def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -49,7 +49,7 @@ class TestAppleNotesFullIntegration:
 
     def test_full_body_preferred(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             row = conn.execute(
@@ -61,7 +61,7 @@ class TestAppleNotesFullIntegration:
 
     def test_snippet_fallback(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
             row = conn.execute(
@@ -83,7 +83,7 @@ class TestAppleNotesFullIntegration:
                 VALUES ('notes:1', 'DigitalDocument', 'Short', 'old', 'h1', 'h2', 1)"""
             )
             conn.commit()
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DB, conn, settings)
             row = conn.execute(
@@ -94,10 +94,10 @@ class TestAppleNotesFullIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleNotesFullAdapter()
+        adapter = AppleNotesFullPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DB, conn, settings)
         with connect(db_path) as conn:
-            r2 = AppleNotesFullAdapter().run(FIXTURE_DB, conn, settings)
+            r2 = AppleNotesFullPlugin().run(FIXTURE_DB, conn, settings)
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
