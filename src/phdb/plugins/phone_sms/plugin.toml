@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "phone_sms"
+version = "0.1.0"
+description = "Android SMS/MMS ingester"
+kind = "source"
+entry_point = "phdb.plugins.phone_sms.plugin:PhoneSmsPlugin"
+
+[source]
+emits = ["Message"]
+formats_used = ["phone_sms_sqlite"]
+records_required = ["ChatMessage", "Attachment", "Recipient"]
+entity_refs = []
+facets_projected = ["Person", "Time", "Thread"]
