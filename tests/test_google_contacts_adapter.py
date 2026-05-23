@@ -6,10 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.google_contacts import (
-    GoogleContactsAdapter,
-    _parse_vcf,
-)
+from phdb.formats.vcard import _parse_vcf
+from phdb.plugins.google_contacts import GoogleContactsPlugin as GoogleContactsAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings

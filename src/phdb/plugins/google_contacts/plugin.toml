@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "google_contacts"
+version = "1.0.0"
+description = "Google Contacts vCard export ingester"
+kind = "source"
+entry_point = "phdb.plugins.google_contacts:GoogleContactsPlugin"
+
+[source]
+emits = ["Person"]
+entity_refs = []
+formats_used = ["vcard"]
+records_required = ["Contact"]
+facets_projected = ["Person"]
