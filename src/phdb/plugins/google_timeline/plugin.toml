@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "google_timeline"
+version = "0.1.0"
+description = "Google Maps Timeline location history JSON — visits, activities, paths"
+kind = "source"
+entry_point = "phdb.plugins.google_timeline:GoogleTimelinePlugin"
+
+[source]
+emits = ["TravelAction", "Place", "GeoShape"]
+entity_refs = []
+formats_used = ["google_timeline_json"]
+records_required = ["GeoTrace"]
+sidecars = ["geo_traces"]
+embeddable_tables = []
+facets_projected = ["Place", "Time"]
