@@ -1,12 +1,22 @@
-"""Tests for the amazon adapter."""
+"""Tests for the amazon plugin (Phase 7 brief 022 port).
+
+Phase 7 of the phdb Plugin Architecture plan refactored amazon from
+the legacy ``phdb.adapters.amazon`` module into a self-contained
+``phdb.plugins.amazon`` plugin under the new contract. Per Phase 0
+Q14 (no shim), the legacy import path is broken; all callers use the
+plugin's ``run()`` method now.
+
+Test file kept under the old name (``test_amazon_adapter.py``) for
+git-history continuity; the contents target the new plugin.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.amazon import AmazonAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.amazon import AmazonPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "amazon" / "amazon_export.zip"
@@ -26,7 +36,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 class TestAmazonIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AmazonAdapter()
+        adapter = AmazonPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
         assert report.rows_inserted == 3
@@ -34,7 +44,7 @@ class TestAmazonIntegration:
 
     def test_all_bulk(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AmazonAdapter()
+        adapter = AmazonPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             bulk = conn.execute(
@@ -46,7 +56,7 @@ class TestAmazonIntegration:
 
     def test_direction_self(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AmazonAdapter()
+        adapter = AmazonPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             dirs = conn.execute(
@@ -58,7 +68,7 @@ class TestAmazonIntegration:
 
     def test_thread_nodes_created(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AmazonAdapter()
+        adapter = AmazonPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             thread_nodes = conn.execute(
@@ -68,17 +78,17 @@ class TestAmazonIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AmazonAdapter()
+        adapter = AmazonPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            r2 = AmazonAdapter().run(FIXTURE_ZIP, conn, settings)
+            r2 = AmazonPlugin().run(FIXTURE_ZIP, conn, settings)
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
 
     def test_inthread_triples_emitted(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AmazonAdapter()
+        adapter = AmazonPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
             in_thread_id = conn.execute(

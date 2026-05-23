@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "amazon"
+version = "0.4.0"
+description = "Amazon Request-My-Data ZIP — orders, product views, watches, reviews"
+kind = "source"
+entry_point = "phdb.plugins.amazon:AmazonPlugin"
+
+[source]
+emits = ["Product", "OrderAction", "Review", "WatchAction"]
+entity_refs = []
+formats_used = ["amazon_zip"]
+records_required = ["Transaction", "ConsumedItem"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time"]
