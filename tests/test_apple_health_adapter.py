@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.apple_health import AppleHealthAdapter
+from phdb.plugins.apple_health import AppleHealthPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings
@@ -27,17 +27,17 @@ class TestAppleHealthIntegration:
     def test_basic_ingest_counts(self, tmp_path: Path) -> None:
         """2 Records + 1 Workout + 1 ClinicalRecord = 4 messages."""
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
+            report = plugin.run(FIXTURE_ZIP, conn, settings)
         assert report.rows_inserted == 4
         assert report.rows_skipped == 0
 
     def test_schema_types(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             types = conn.execute(
                 "SELECT schema_type, COUNT(*) FROM observations GROUP BY schema_type"
                 " UNION ALL SELECT schema_type, COUNT(*) FROM exercise_actions GROUP BY schema_type"
@@ -51,17 +51,17 @@ class TestAppleHealthIntegration:
 
     def test_record_metadata_sidecar(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             meta_count = conn.execute("SELECT COUNT(*) FROM record_metadata").fetchone()[0]
         assert meta_count == 1
 
     def test_hr_samples_sidecar(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             hr_count = conn.execute("SELECT COUNT(*) FROM hr_samples").fetchone()[0]
         assert hr_count == 1
         with connect(db_path) as conn:
@@ -70,9 +70,9 @@ class TestAppleHealthIntegration:
 
     def test_workout_events_sidecar(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             ev_count = conn.execute("SELECT COUNT(*) FROM workout_events").fetchone()[0]
         assert ev_count == 1
         with connect(db_path) as conn:
@@ -81,9 +81,9 @@ class TestAppleHealthIntegration:
 
     def test_workout_statistics_sidecar(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             stat_count = conn.execute("SELECT COUNT(*) FROM workout_statistics").fetchone()[0]
         assert stat_count == 1
         with connect(db_path) as conn:
@@ -99,18 +99,18 @@ class TestAppleHealthIntegration:
     def test_threads_created(self, tmp_path: Path) -> None:
         """Expect: metrics thread + workout thread + clinical thread = 3."""
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
+            report = plugin.run(FIXTURE_ZIP, conn, settings)
             threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
         assert threads == 3
         assert report.threads_created == 3
 
     def test_hk_prefix_stripped_in_subject(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             subjects = conn.execute(
                 "SELECT subject FROM observations ORDER BY date_observed"
             ).fetchall()
@@ -119,9 +119,9 @@ class TestAppleHealthIntegration:
 
     def test_clinical_direction_inbound(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             d = conn.execute(
                 "SELECT direction FROM medical_records"
             ).fetchone()[0]
@@ -129,27 +129,27 @@ class TestAppleHealthIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            r2 = AppleHealthAdapter().run(FIXTURE_ZIP, conn, settings)
+            r2 = AppleHealthPlugin(manifest=None).run(FIXTURE_ZIP, conn, settings) # type: ignore
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
 
     def test_message_thread_bridge(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_ZIP, conn, settings)
+            report = plugin.run(FIXTURE_ZIP, conn, settings)
             bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
         assert bridge == report.rows_inserted
 
     def test_all_bulk(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = AppleHealthAdapter()
+        plugin = AppleHealthPlugin(manifest=None) # type: ignore
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_ZIP, conn, settings)
+            plugin.run(FIXTURE_ZIP, conn, settings)
             non_bulk = conn.execute(
                 "SELECT SUM(c) FROM ("
                 " SELECT COUNT(*) AS c FROM observations WHERE is_bulk != 1"
