@@ -3,11 +3,48 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from phdb.adapters.claude_code import ClaudeCodeAdapter, _derive_kind, _body_text_from_content
+from types import SimpleNamespace
+from phdb.plugins.claude_code import ClaudeCodePlugin
+from phdb.formats.claude_code_jsonl import _derive_kind, _body_text_from_content
+
+
+class ClaudeCodeAdapter:
+    """Shim to maintain test compatibility for the ported claude_code plugin."""
+    def __init__(self):
+        # We don't actually need the manifest for the methods being tested
+        self.plugin = ClaudeCodePlugin(None)
+
+    def iter_rows(self, p: Path) -> Iterator[SimpleNamespace]:
+        for rec in self.plugin.parse(p):
+            yield SimpleNamespace(
+                role=rec.role,
+                kind=rec.kind,
+                body_text=rec.body_text,
+                is_bulk=0 if rec.kind == "message" else 1,
+                tool_name=rec.tool_name,
+                tool_use_id=rec.tool_use_id,
+                model=rec.model,
+                parent_uuid=rec.parent_uuid,
+                raw_hash=rec.provenance.raw_hash,
+                payload=rec.payload,
+                thread_key=rec.thread_key,
+                thread_metadata=json.dumps(rec.thread_metadata) if rec.thread_metadata else None,
+                thread_cwd=rec.thread_metadata.get("cwd") if rec.thread_metadata else None,
+                date_sent=rec.date_sent,
+            )
+
+    def compute_session_uuid(self, p: Path) -> str | None:
+        from phdb.plugins.claude_code.plugin import _UUID_TAIL_RE
+        m = _UUID_TAIL_RE.search(p.name)
+        return m.group(1).lower() if m else None
+
+    def validate_source_path(self, p: Path) -> None:
+        self.plugin._validate_source_path(p)
 
 
 # ── Synthetic JSONL builders ─────────────────────────────────────────────────
