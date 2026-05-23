@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.imessage import IMessageAdapter
+from phdb.plugins.imessage.plugin import IMessagePlugin as IMessageAdapter
 from phdb.formats.imessage_html import (
     is_bulk_sender,
     normalize_addr,
@@ -129,10 +129,19 @@ def imessage_db(tmp_path: Path) -> Path:
     return db_path
 
 
+def _new_plugin(**kwargs) -> IMessageAdapter:
+    """Build an IMessagePlugin with the in-tree manifest."""
+    from phdb.core.plugin.manifest import load_manifest
+
+    manifest_path = Path("src/phdb/plugins/imessage/plugin.toml").resolve()
+    manifest = load_manifest(manifest_path)
+    return IMessageAdapter(manifest, **kwargs)
+
+
 class TestIMessageAdapterIntegration:
     def test_ingest_one_on_one(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             report = adapter.run(FIXTURES, conn, imessage_settings)
 
@@ -152,7 +161,7 @@ class TestIMessageAdapterIntegration:
 
     def test_direction_inference(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             sent = conn.execute(
@@ -168,7 +177,7 @@ class TestIMessageAdapterIntegration:
     def test_contact_name_learning(self, imessage_db: Path, imessage_settings: Settings) -> None:
         """1-on-1 files build a name→phone lookup used in group files."""
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
 
@@ -177,7 +186,7 @@ class TestIMessageAdapterIntegration:
 
     def test_bulk_detection(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             bulk = conn.execute(
@@ -188,11 +197,11 @@ class TestIMessageAdapterIntegration:
 
     def test_idempotent_rerun(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
 
-        adapter2 = IMessageAdapter()
+        adapter2 = _new_plugin()
         with connect(imessage_db) as conn:
             r2 = adapter2.run(FIXTURES, conn, imessage_settings)
 
@@ -202,7 +211,7 @@ class TestIMessageAdapterIntegration:
 
     def test_thread_nodes_and_triples(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             thread_nodes = conn.execute(
@@ -223,7 +232,7 @@ class TestIMessageAdapterIntegration:
 
     def test_attachments_recorded(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             atts = conn.execute("SELECT filename FROM attachments").fetchall()
@@ -233,7 +242,7 @@ class TestIMessageAdapterIntegration:
 
     def test_recipients_recorded(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             rcpts = conn.execute("SELECT normalized_label FROM nodes WHERE kind = 'contact' ORDER BY normalized_label").fetchall()
@@ -243,7 +252,7 @@ class TestIMessageAdapterIntegration:
 
     def test_email_sender_parsed(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             email_msgs = conn.execute(
@@ -257,7 +266,7 @@ class TestIMessageAdapterIntegration:
     def test_group_sender_resolution(self, imessage_db: Path, imessage_settings: Settings) -> None:
         """In group chat, 'Jane Doe' sender should resolve to +15551234567 via lookup."""
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter()
+        adapter = _new_plugin()
         with connect(imessage_db) as conn:
             adapter.run(FIXTURES, conn, imessage_settings)
             jane_in_group = conn.execute(
@@ -271,7 +280,7 @@ class TestIMessageAdapterIntegration:
 
     def test_time_budget(self, imessage_db: Path, imessage_settings: Settings) -> None:
         imessage_settings.db_path = imessage_db
-        adapter = IMessageAdapter(max_seconds=0.001)
+        adapter = _new_plugin(max_seconds=0.001)
         with connect(imessage_db) as conn:
             report = adapter.run(FIXTURES, conn, imessage_settings)
         # Should process at least one file before budget expires
