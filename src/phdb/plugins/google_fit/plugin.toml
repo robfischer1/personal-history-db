@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "google_fit"
+version = "0.1.0"
+description = "Google Fit Takeout JSON exports — per-activity-type aggregated stats."
+kind = "source"
+entry_point = "phdb.plugins.google_fit:GoogleFitPlugin"
+
+[source]
+emits = ["Observation", "ExerciseAction"]
+entity_refs = []
+formats_used = ["google_fit_json"]
+records_required = ["HealthObservation"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time"]
