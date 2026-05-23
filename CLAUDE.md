@@ -49,7 +49,7 @@ Three-tier separation (code / instance / data):
 | `src/phdb/embed_service.py` | Ollama embedding client for semantic search |
 | `src/phdb/adapters/base.py` | `Adapter` ABC + `AdapterRow` dataclass + `DedupStrategy` enum |
 | `src/phdb/adapters/loader.py` | `discover_adapters()` — dynamic import from configured paths |
-| `src/phdb/adapters/mbox.py` | Reference adapter: Gmail mbox streaming parse, bulk detection, resume |
+| `src/phdb/plugins/mbox/` | Reference plugin: mbox streaming parse, bulk detection, resume |
 | `src/phdb/migrations/runner.py` | `MigrationRunner` — project 0001-0999, instance 1000+ |
 
 ### Adapter contract
