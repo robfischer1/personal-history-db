@@ -714,6 +714,28 @@ class BookmarkAction(ActionSchema):
     ]
 
 
+class BrowseAction(ActionSchema):
+    """Safari/Chrome history visits (post-WPEF, migration 0023)."""
+
+    table_name = "browse_actions"
+    schema_type = "BrowseAction"
+    date_column = "visit_time"
+    entity_refs = [EntityFK(entity_table="web_pages", column_name="web_page_id")]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'BrowseAction'"),
+        FieldSpec("web_page_id", "INTEGER", references="web_pages(id)"),
+        FieldSpec("visit_time", "TEXT"),
+        FieldSpec("source_device", "TEXT"),
+        *_provenance_fields(),
+    ]
+    indexes = [
+        IndexSpec(name="idx_browse_actions_web_page_id", columns=["web_page_id"]),
+        IndexSpec(name="idx_browse_actions_visit_time", columns=["visit_time"]),
+        _standard_dedup_index("browse_actions"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Document-shaped schemas — file-like with file_path / mtime / bucket
 # ---------------------------------------------------------------------------
@@ -921,6 +943,7 @@ ACTION_SCHEMAS: list[type[ActionSchema]] = [
     Thing,
     # Entity-FK actions
     BookmarkAction,
+    BrowseAction,
     # Document-shaped
     DigitalDocumentFile,
     Article,
@@ -943,6 +966,7 @@ __all__ = [
     "Article",
     "Book",
     "BookmarkAction",
+    "BrowseAction",
     "Comment",
     "Conversation",
     "CreativeWork",
