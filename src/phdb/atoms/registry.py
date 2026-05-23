@@ -36,7 +36,7 @@ _CANONICAL_TYPES: list[AtomType] = [
     AtomType(
         "BookmarkAction",
         "bookmarks",
-        identity_columns=("normalized_url", "instrument"),
+        identity_columns=("web_page_id", "instrument"),
     ),
     AtomType(
         "BefriendAction",

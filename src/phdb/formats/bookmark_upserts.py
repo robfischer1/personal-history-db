@@ -80,11 +80,16 @@ def upsert_bookmark(
     *,
     web_page_id: int,
 ) -> int:
-    """Insert or increment-on-conflict a BookmarkAction row."""
+    """Insert or increment-on-conflict a BookmarkAction row.
+
+    Post-migration 0028 the bookmarks row holds only action-specific
+    columns; URL identity (url / normalized_url / title / excerpt /
+    cover_url) lives on the `web_pages` entity joinable via
+    `web_page_id`. Dedup key is now `(web_page_id, instrument)`.
+    """
     from phdb.formats.url import is_junk
 
     url = event.url
-    norm = event.normalized_url
     instrument = event.instrument
     junk = is_junk(url)
     rh = hash_canonical_bookmark(event)
@@ -94,22 +99,19 @@ def upsert_bookmark(
 
     cur = conn.execute(
         """INSERT INTO bookmarks
-           (schema_type, instrument, raindrop_id, url, normalized_url,
-            title, note, excerpt, cover_url, folder, tags, favorite, highlights,
+           (schema_type, instrument, raindrop_id,
+            note, folder, tags, favorite, highlights,
             first_seen_in_instrument, last_seen_in_instrument, raindrop_created,
             appearance_count, excluded, excluded_reason, source_file_id, raw_hash,
             web_page_id)
-           VALUES ('BookmarkAction', ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?,
+           VALUES ('BookmarkAction', ?, ?,
+                   ?, ?, ?, ?, ?,
                    ?, ?, ?,
                    1, ?, ?, ?, ?,
                    ?)
-           ON CONFLICT(normalized_url, instrument) DO UPDATE SET
+           ON CONFLICT(web_page_id, instrument) DO UPDATE SET
                raindrop_id  = COALESCE(excluded.raindrop_id, bookmarks.raindrop_id),
-               title        = COALESCE(NULLIF(excluded.title,''),    bookmarks.title),
                note         = COALESCE(NULLIF(excluded.note,''),     bookmarks.note),
-               excerpt      = COALESCE(NULLIF(excluded.excerpt,''),  bookmarks.excerpt),
-               cover_url    = COALESCE(NULLIF(excluded.cover_url,''),bookmarks.cover_url),
                folder       = COALESCE(NULLIF(excluded.folder,''),   bookmarks.folder),
                tags         = excluded.tags,
                favorite     = excluded.favorite,
@@ -128,12 +130,10 @@ def upsert_bookmark(
                END,
                raindrop_created = COALESCE(excluded.raindrop_created, bookmarks.raindrop_created),
                appearance_count = bookmarks.appearance_count + 1,
-               source_file_id   = excluded.source_file_id,
-               web_page_id      = excluded.web_page_id
+               source_file_id   = excluded.source_file_id
            RETURNING id""",
-        (instrument, event.raindrop_id, url, norm,
-         event.title, event.note, event.excerpt,
-         event.cover_url, event.folder, tags_json,
+        (instrument, event.raindrop_id,
+         event.note, event.folder, tags_json,
          1 if event.favorite else 0, event.highlights,
          sighted, sighted, raindrop_created,
          1 if junk else 0, junk, source_file_id, rh,

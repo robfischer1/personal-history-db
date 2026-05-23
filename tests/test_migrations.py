@@ -21,9 +21,9 @@ def test_discover_finds_project_migrations() -> None:
     migrations = runner.discover()
     conn.close()
 
-    assert len(migrations) >= 27
+    assert len(migrations) >= 28
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0027_read_actions"
+    assert migrations[-1].migration_id == "0028_bookmark_column_cleanup"
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:

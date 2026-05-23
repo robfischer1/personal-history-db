@@ -675,7 +675,13 @@ class Thing(ActionSchema):
 
 
 class BookmarkAction(ActionSchema):
-    """Bookmark events FK to web_pages entity (post-WPEF, migration 0023)."""
+    """Bookmark events FK to web_pages entity (post-WPEF, migration 0023).
+
+    Post-migration 0028 the bookmarks row holds only action-specific
+    columns; URL identity (url / normalized_url / title / excerpt /
+    cover_url) lives on the parent `web_pages` entity joinable via
+    `web_page_id`. Dedup key is `(web_page_id, instrument)`.
+    """
 
     table_name = "bookmarks"
     schema_type = "BookmarkAction"
@@ -685,13 +691,8 @@ class BookmarkAction(ActionSchema):
         FieldSpec("id", "INTEGER", primary_key=True),
         FieldSpec("schema_type", "TEXT", nullable=False, default="'BookmarkAction'"),
         FieldSpec("instrument", "TEXT", nullable=False),
-        FieldSpec("url", "TEXT", nullable=False),
-        FieldSpec("normalized_url", "TEXT", nullable=False),
         FieldSpec("raindrop_id", "TEXT"),
-        FieldSpec("title", "TEXT"),
         FieldSpec("note", "TEXT"),
-        FieldSpec("excerpt", "TEXT"),
-        FieldSpec("cover_url", "TEXT"),
         FieldSpec("folder", "TEXT"),
         FieldSpec("tags", "TEXT"),
         FieldSpec("favorite", "INTEGER", nullable=False, default="0"),
@@ -711,10 +712,9 @@ class BookmarkAction(ActionSchema):
         FieldSpec("web_page_id", "INTEGER", references="web_pages(id)"),
     ]
     indexes = [
-        IndexSpec(name="idx_bookmarks_url_instrument",
-                  columns=["normalized_url", "instrument"], unique=True),
+        IndexSpec(name="idx_bookmarks_web_page_instrument",
+                  columns=["web_page_id", "instrument"], unique=True),
         IndexSpec(name="idx_bookmarks_instrument", columns=["instrument"]),
-        IndexSpec(name="idx_bookmarks_normalized_url", columns=["normalized_url"]),
         IndexSpec(name="idx_bookmarks_folder", columns=["folder"]),
         IndexSpec(name="idx_bookmarks_first_seen", columns=["first_seen_in_instrument"]),
         IndexSpec(name="idx_bookmarks_excluded", columns=["excluded"]),

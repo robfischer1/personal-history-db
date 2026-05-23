@@ -21,7 +21,7 @@ def test_registry_get_returns_atom() -> None:
     atom = reg.get("BookmarkAction")
     assert atom is not None
     assert atom.table == "bookmarks"
-    assert atom.identity_columns == ("normalized_url", "instrument")
+    assert atom.identity_columns == ("web_page_id", "instrument")
     assert atom.is_canonical is True
 
 

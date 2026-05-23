@@ -120,7 +120,9 @@ class TestRaindropPluginIngest:
         with connect(db_path) as conn:
             plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
-                "SELECT excluded, excluded_reason FROM bookmarks WHERE title='Gmail Root'"
+                "SELECT b.excluded, b.excluded_reason FROM bookmarks b"
+                " JOIN web_pages wp ON wp.id = b.web_page_id"
+                " WHERE wp.title='Gmail Root'"
             ).fetchone()
         assert row is not None
         assert row[0] == 1
@@ -133,7 +135,9 @@ class TestRaindropPluginIngest:
         with connect(db_path) as conn:
             plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
-                "SELECT normalized_url FROM bookmarks WHERE normalized_url LIKE '%example.com/article%'"
+                "SELECT wp.normalized_url FROM bookmarks b"
+                " JOIN web_pages wp ON wp.id = b.web_page_id"
+                " WHERE wp.normalized_url LIKE '%example.com/article%'"
             ).fetchone()
         assert row is not None
         assert "utm_source" not in row[0]
@@ -160,7 +164,9 @@ class TestRaindropPluginIngest:
         with connect(db_path) as conn:
             plugin.run(FIXTURE_CSV, conn, settings)
             fav_rows = conn.execute(
-                "SELECT title FROM bookmarks WHERE favorite=1 ORDER BY title"
+                "SELECT wp.title FROM bookmarks b"
+                " JOIN web_pages wp ON wp.id = b.web_page_id"
+                " WHERE b.favorite=1 ORDER BY wp.title"
             ).fetchall()
         titles = [r[0] for r in fav_rows]
         assert "GitHub Repo" in titles
@@ -260,11 +266,11 @@ class TestWebPageEntity:
             wp_id = wp[0]
             conn.execute(
                 """INSERT INTO bookmarks
-                   (schema_type, instrument, url, normalized_url, title,
+                   (schema_type, instrument,
                     appearance_count, excluded, source_file_id, web_page_id)
-                   VALUES ('BookmarkAction', 'safari', 'https://github.com/user/repo',
-                           ?, 'GitHub Repo', 1, 0, 1, ?)""",
-                (wp[1], wp_id),
+                   VALUES ('BookmarkAction', 'safari',
+                           1, 0, 1, ?)""",
+                (wp_id,),
             )
             conn.commit()
             wp_count = conn.execute(
@@ -272,7 +278,9 @@ class TestWebPageEntity:
             ).fetchone()[0]
             assert wp_count == 1
             bm_count = conn.execute(
-                "SELECT COUNT(*) FROM bookmarks WHERE normalized_url LIKE '%github.com%'"
+                "SELECT COUNT(*) FROM bookmarks b"
+                " JOIN web_pages wp ON wp.id = b.web_page_id"
+                " WHERE wp.normalized_url LIKE '%github.com%'"
             ).fetchone()[0]
             assert bm_count == 2
 
@@ -342,7 +350,7 @@ class TestWebPageEntity:
                 """SELECT wp.id, b.excluded
                    FROM bookmarks b
                    JOIN web_pages wp ON b.web_page_id = wp.id
-                   WHERE b.title = 'Gmail Root'"""
+                   WHERE wp.title = 'Gmail Root'"""
             ).fetchone()
             assert row is not None
             assert row[1] == 1
@@ -416,8 +424,10 @@ class TestPilotSuccessCriteria:
         with connect(db_path) as conn:
             plugin.run(FIXTURE_CSV, conn, settings)
             bm = conn.execute(
-                "SELECT instrument, normalized_url, title, favorite, excluded, web_page_id"
-                " FROM bookmarks ORDER BY id"
+                "SELECT b.instrument, wp.normalized_url, wp.title,"
+                " b.favorite, b.excluded, b.web_page_id"
+                " FROM bookmarks b JOIN web_pages wp ON wp.id = b.web_page_id"
+                " ORDER BY b.id"
             ).fetchall()
             wp = conn.execute(
                 "SELECT normalized_url, domain FROM web_pages ORDER BY id"

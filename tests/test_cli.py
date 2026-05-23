@@ -35,7 +35,7 @@ def test_cli_migrate(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["--db", str(db_path), "migrate"])
     assert result.exit_code == 0
-    assert "Applied 27 migration(s)" in result.output
+    assert "Applied 28 migration(s)" in result.output
 
 
 def test_cli_migrate_idempotent(tmp_path: Path) -> None:
