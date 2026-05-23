@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from phdb.adapters.sms_xml import (
-    SmsXmlAdapter,
+from phdb.plugins.sms_xml import SmsXmlPlugin
+from phdb.formats.smsbr_xml import (
     _epoch_ms_to_iso,
     _normalize_phone,
 )
@@ -59,6 +59,15 @@ def sms_settings(tmp_path: Path) -> Settings:
     )
 
 
+def _new_plugin() -> SmsXmlPlugin:
+    """Build a SmsXmlPlugin with the in-tree manifest."""
+    from phdb.core.plugin.manifest import load_manifest
+
+    manifest_path = Path("src/phdb/plugins/sms_xml/plugin.toml").resolve()
+    manifest = load_manifest(manifest_path)
+    return SmsXmlPlugin(manifest)
+
+
 @pytest.fixture
 def sms_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
@@ -71,7 +80,7 @@ def sms_db(tmp_path: Path) -> Path:
 class TestSmsXmlIntegration:
     def test_basic_ingest(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             report = adapter.run(FIXTURE_XML, conn, sms_settings)
 
@@ -80,7 +89,7 @@ class TestSmsXmlIntegration:
 
     def test_sms_directions(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             rows = conn.execute(
@@ -94,7 +103,7 @@ class TestSmsXmlIntegration:
 
     def test_null_body_skipped(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             bodies = conn.execute("SELECT body_text FROM chat_messages").fetchall()
@@ -105,7 +114,7 @@ class TestSmsXmlIntegration:
 
     def test_mms_with_attachment(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             mms_rows = conn.execute(
@@ -119,7 +128,7 @@ class TestSmsXmlIntegration:
 
     def test_group_sms_recipients(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             # Find the message row for the group message
@@ -145,7 +154,7 @@ class TestSmsXmlIntegration:
 
     def test_threads_created(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             report = adapter.run(FIXTURE_XML, conn, sms_settings)
             threads = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind = 'thread'").fetchone()[0]
@@ -155,7 +164,7 @@ class TestSmsXmlIntegration:
 
     def test_thread_keys(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             labels = conn.execute(
@@ -168,11 +177,11 @@ class TestSmsXmlIntegration:
 
     def test_idempotent_rerun(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
 
-        adapter2 = SmsXmlAdapter()
+        adapter2 = _new_plugin()
         with connect(sms_db) as conn:
             r2 = adapter2.run(FIXTURE_XML, conn, sms_settings)
         assert r2.rows_inserted == 0
@@ -180,7 +189,7 @@ class TestSmsXmlIntegration:
 
     def test_schema_type(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             adapter.run(FIXTURE_XML, conn, sms_settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM chat_messages").fetchall()
@@ -189,7 +198,7 @@ class TestSmsXmlIntegration:
 
     def test_message_thread_bridge(self, sms_db: Path, sms_settings: Settings) -> None:
         sms_settings.db_path = sms_db
-        adapter = SmsXmlAdapter()
+        adapter = _new_plugin()
         with connect(sms_db) as conn:
             report = adapter.run(FIXTURE_XML, conn, sms_settings)
             bridge = conn.execute("SELECT COUNT(*) FROM triples t JOIN predicates p ON t.predicate_id = p.id WHERE p.name = 'inThread'").fetchone()[0]
