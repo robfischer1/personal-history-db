@@ -1,12 +1,22 @@
-"""Tests for the staged_md adapter."""
+"""Tests for the staged_md plugin (Phase 7 brief 026 port).
+
+Phase 7 of the phdb Plugin Architecture plan refactored staged_md from
+the legacy ``phdb.adapters.staged_md`` module into a self-contained
+``phdb.plugins.staged_md`` plugin under the new contract. Per Phase 0
+Q14 (no shim), the legacy import path is broken; all callers use the
+plugin's ``run()`` method now.
+
+Test file kept under the old name (``test_staged_md_adapter.py``) for
+git-history continuity; the contents target the new plugin.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.staged_md import StagedMdAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.staged_md import StagedMdPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "staged_md" / "test_cluster"
@@ -26,7 +36,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
 class TestStagedMdIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
         assert report.rows_inserted == 2
@@ -34,7 +44,7 @@ class TestStagedMdIntegration:
 
     def test_schema_type_from_frontmatter(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             types = {t[0] for t in conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()}
@@ -43,7 +53,7 @@ class TestStagedMdIntegration:
 
     def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -51,7 +61,7 @@ class TestStagedMdIntegration:
 
     def test_body_extraction(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             body = conn.execute(
@@ -62,17 +72,17 @@ class TestStagedMdIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
         with connect(db_path) as conn:
-            r2 = StagedMdAdapter().run(FIXTURE_DIR, conn, settings)
+            r2 = StagedMdPlugin().run(FIXTURE_DIR, conn, settings)
         assert r2.rows_inserted == 0
         assert r2.rows_skipped == r2.rows_yielded
 
     def test_bucket_is_cluster_name(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             buckets = {b[0] for b in conn.execute("SELECT DISTINCT bucket FROM documents").fetchall()}
@@ -80,7 +90,7 @@ class TestStagedMdIntegration:
 
     def test_file_path_populated(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             paths = conn.execute(
@@ -90,7 +100,7 @@ class TestStagedMdIntegration:
 
     def test_no_threads_created(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = StagedMdAdapter()
+        adapter = StagedMdPlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
         assert report.threads_created == 0

@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "staged_md"
+version = "0.4.0"
+description = "Generic staging-markdown ingester — YAML-frontmatter .md files routed by @type into the documents typed table"
+kind = "source"
+entry_point = "phdb.plugins.staged_md:StagedMdPlugin"
+
+[source]
+emits = ["CreativeWork", "Article", "DigitalDocument", "Message", "SocialMediaPosting", "EmailMessage", "Book", "Observation"]
+entity_refs = []
+formats_used = ["staged_md"]
+records_required = ["DigitalDocument"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time", "Topic"]
