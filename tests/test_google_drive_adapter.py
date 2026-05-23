@@ -1,18 +1,21 @@
-"""Tests for the google_drive adapter."""
+"""Tests for the google_drive plugin (Phase 7 brief 027 port).
+
+Pre-port the module under test was ``phdb.adapters.google_drive``;
+those tests now exercise ``phdb.plugins.google_drive.GoogleDrivePlugin``
+with the same assertions verbatim. Standalone helpers
+(``derive_bucket``, ``extract_*``) are imported from their canonical
+homes in ``phdb.formats.*``.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.google_drive import (
-    GoogleDriveAdapter,
-    derive_bucket,
-    extract_csv,
-    extract_json,
-    extract_txt,
-)
 from phdb.db import connect
+from phdb.formats.document_extract import extract_csv, extract_json, extract_txt
+from phdb.formats.google_drive_zip import derive_bucket
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.google_drive import GoogleDrivePlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "google_drive" / "takeout.zip"
@@ -64,7 +67,7 @@ class TestDeriveBucket:
 class TestGoogleDriveIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
         assert report.rows_inserted == 5
@@ -72,7 +75,7 @@ class TestGoogleDriveIntegration:
 
     def test_schema_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()
@@ -80,7 +83,7 @@ class TestGoogleDriveIntegration:
 
     def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -88,16 +91,16 @@ class TestGoogleDriveIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
         with connect(db_path) as conn:
-            r2 = GoogleDriveAdapter().run(FIXTURE_ZIP, conn, settings)
+            r2 = GoogleDrivePlugin().run(FIXTURE_ZIP, conn, settings)
         assert r2.rows_inserted == 0
 
     def test_not_bulk(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             bulk = conn.execute("SELECT COUNT(*) FROM documents WHERE is_bulk = 1").fetchone()[0]
@@ -105,7 +108,7 @@ class TestGoogleDriveIntegration:
 
     def test_skips_binary_and_trash(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             subjects = [
@@ -118,7 +121,7 @@ class TestGoogleDriveIntegration:
 
     def test_body_content(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             row = conn.execute(
@@ -129,7 +132,7 @@ class TestGoogleDriveIntegration:
 
     def test_bucket_populated(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_ZIP, conn, settings)
             buckets = conn.execute(
@@ -139,7 +142,7 @@ class TestGoogleDriveIntegration:
 
     def test_no_threads_created(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = GoogleDriveAdapter()
+        adapter = GoogleDrivePlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_ZIP, conn, settings)
         assert report.threads_created == 0
