@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "onedrive"
+version = "0.4.0"
+description = "OneDrive local sync directory — per-file body extraction via document_extract; Reference/ allowlist policy"
+kind = "source"
+entry_point = "phdb.plugins.onedrive:OneDrivePlugin"
+
+[source]
+emits = ["DigitalDocument"]
+entity_refs = []
+formats_used = ["onedrive_local"]
+records_required = ["DigitalDocument"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time"]

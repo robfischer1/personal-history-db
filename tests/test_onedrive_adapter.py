@@ -1,16 +1,23 @@
-"""Tests for the onedrive adapter."""
+"""Tests for the onedrive plugin (Phase 7 brief 028 port).
+
+Pre-port the module under test was ``phdb.adapters.onedrive``; those
+tests now exercise ``phdb.plugins.onedrive.OneDrivePlugin`` with the
+same assertions verbatim. Standalone helpers (``_derive_bucket``,
+``_is_reference_body_allowed``) are imported from their canonical
+home in ``phdb.formats.onedrive_local``.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.onedrive import (
-    OneDriveAdapter,
+from phdb.db import connect
+from phdb.formats.onedrive_local import (
     _derive_bucket,
     _is_reference_body_allowed,
 )
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.onedrive import OneDrivePlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "onedrive"
@@ -58,7 +65,7 @@ class TestReferenceBodyAllowlist:
 class TestOneDriveIntegration:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
         # Outputs/Projects/hello.txt, Reference/Mind Tools/data.json, Records/notes.md
@@ -67,7 +74,7 @@ class TestOneDriveIntegration:
 
     def test_schema_type(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             types = conn.execute("SELECT DISTINCT schema_type FROM documents").fetchall()
@@ -75,7 +82,7 @@ class TestOneDriveIntegration:
 
     def test_target_table_is_documents(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -83,7 +90,7 @@ class TestOneDriveIntegration:
 
     def test_reference_is_bulk(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             bulk_rows = conn.execute(
@@ -101,11 +108,11 @@ class TestOneDriveIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
         with connect(db_path) as conn:
-            r2 = OneDriveAdapter().run(FIXTURE_DIR, conn, settings)
+            r2 = OneDrivePlugin().run(FIXTURE_DIR, conn, settings)
         assert r2.rows_inserted == 0
 
     def test_skips_excluded_top_dirs(self, tmp_path: Path) -> None:
@@ -116,7 +123,7 @@ class TestOneDriveIntegration:
         secret.write_text("should not appear")
         try:
             db_path, settings = _setup(tmp_path)
-            adapter = OneDriveAdapter()
+            adapter = OneDrivePlugin()
             with connect(db_path) as conn:
                 adapter.run(FIXTURE_DIR, conn, settings)
                 subjects = [
@@ -130,7 +137,7 @@ class TestOneDriveIntegration:
 
     def test_body_content(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             row = conn.execute(
@@ -141,7 +148,7 @@ class TestOneDriveIntegration:
 
     def test_bucket_populated(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             buckets = {b[0] for b in conn.execute(
@@ -151,7 +158,7 @@ class TestOneDriveIntegration:
 
     def test_file_path_populated(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             paths = conn.execute(
@@ -161,7 +168,7 @@ class TestOneDriveIntegration:
 
     def test_non_allowlisted_reference_metadata_only(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             adapter.run(FIXTURE_DIR, conn, settings)
             row = conn.execute(
@@ -173,7 +180,7 @@ class TestOneDriveIntegration:
 
     def test_no_threads_created(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = OneDriveAdapter()
+        adapter = OneDrivePlugin()
         with connect(db_path) as conn:
             report = adapter.run(FIXTURE_DIR, conn, settings)
         assert report.threads_created == 0
