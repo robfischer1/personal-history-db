@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
+from phdb.adapters.raindrop import upsert_bookmark, upsert_web_page
 from phdb.formats.apple_dbs_sqlite import (
     HANDLER_NAMES,
     AppleDbsRecord,
@@ -36,7 +37,9 @@ from phdb.formats.apple_dbs_sqlite import (
     normalize_phone as _normalize_phone,
     parse,
 )
+from phdb.formats.url import normalize_url
 from phdb.log import get_logger
+from phdb.records import BookmarkEvent
 
 if TYPE_CHECKING:
     from phdb.settings import Settings
@@ -67,33 +70,6 @@ def _record_to_adapter_row(rec: AppleDbsRecord) -> AdapterRow:
                 if rec.call_type.startswith("voicemail")
                 else f"calls:{rec.caller_address}"
             ),
-        )
-
-    if isinstance(rec, WebActivity):
-        if rec.activity_type == "visit":
-            body = f"Visited: {rec.url or ''}"
-            return AdapterRow(
-                schema_type="WebPage",
-                rfc822_message_id=f"safari:{rec.url}:{rec.date_performed}",
-                subject=rec.title,
-                direction="self",
-                date_sent=rec.date_performed or None,
-                body_text=body,
-                body_text_source="safari-visit",
-                raw_hash=prov.raw_hash,
-                body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
-            )
-        # bookmark
-        body = f"Bookmark: {rec.url or ''}"
-        return AdapterRow(
-            schema_type="WebPage",
-            rfc822_message_id=f"safari-bm:{rec.url}",
-            subject=rec.title,
-            direction="self",
-            body_text=body,
-            body_text_source="safari-bookmark",
-            raw_hash=prov.raw_hash,
-            body_text_hash=hashlib.sha256(body.encode()).hexdigest(),
         )
 
     if isinstance(rec, DigitalDocument):
@@ -169,6 +145,38 @@ class AppleDbsAdapter(Adapter):
             (json.dumps(notes), source_file_id),
         )
 
+    def _handle_web_activity(
+        self,
+        conn: sqlite3.Connection,
+        rec: WebActivity,
+        source_file_id: int,
+        report: IngestReport,
+    ) -> None:
+        """Route WebActivity to web_pages entity + bookmarks action."""
+        url = rec.url or ""
+        if not url:
+            report.rows_skipped += 1
+            return
+        norm = normalize_url(url)
+        sighted = rec.date_performed or None
+        wp_id = upsert_web_page(
+            conn, url, norm,
+            title=rec.title, sighted=sighted,
+            source_file_id=source_file_id,
+        )
+        if rec.activity_type == "bookmark":
+            event = BookmarkEvent(
+                provenance=rec.provenance,
+                url=url,
+                normalized_url=norm,
+                title=rec.title,
+                instrument="safari",
+                date_added=sighted or "",
+                tags=(),
+            )
+            upsert_bookmark(conn, source_file_id, event, web_page_id=wp_id)
+        report.rows_inserted += 1
+
     def run(
         self,
         source_path: Path,
@@ -210,6 +218,13 @@ class AppleDbsAdapter(Adapter):
             try:
                 for rec in parse(handler_dir, handler_name):
                     report.rows_yielded += 1
+
+                    if isinstance(rec, WebActivity):
+                        self._handle_web_activity(
+                            conn, rec, source_file_id, report,
+                        )
+                        continue
+
                     row = _record_to_adapter_row(rec)
 
                     if row.body_text and not row.body_text_hash:

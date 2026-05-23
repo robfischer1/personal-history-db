@@ -38,7 +38,7 @@ Tables that hold typed records. Each maps to a Schema.org `@type`.
 | `reviews` | Review | 140 | amazon | Product reviews |
 | `invite_actions` | InviteAction | 51 | facebook | Event invitations |
 | `creative_works` | CreativeWork | 37 | staged-md | Creative works |
-| `web_pages` | WebPage | 30 | iphone-safari-bookmarks | Safari bookmarks |
+| `web_pages` | WebPage | ~12K+ | (derived from bookmarks + safari) | URL-identity entity table; one row per normalized_url; bookmarks FK via web_page_id |
 | `join_actions` | JoinAction | 8 | facebook | Group joins |
 | `digital_documents` | DigitalDocument | 5 | staged-md | Misc documents |
 | `things` | Thing | 1 | staged-md | Misc things |
@@ -46,7 +46,7 @@ Tables that hold typed records. Each maps to a Schema.org `@type`.
 | `articles` | Article | 219 | obsidian-vault | Vault article notes |
 | `clippings` | Clipping | 14 | obsidian-vault | Vault web clippings |
 | `photographs` | Photograph | 9,232 | digikam | Photo metadata from DigiKam + (pending: phone-camera) |
-| `bookmarks` | BookmarkAction | 15,757 | raindrop | Raindrop bookmark exports |
+| `bookmarks` | BookmarkAction | 15,757 | raindrop | Raindrop bookmark exports; FKs to web_pages via web_page_id |
 | `connections` | Person | 744 | facebook-connections | Facebook friend connections |
 
 ## Infrastructure Tables
@@ -167,7 +167,7 @@ Active plan: `Outputs/Plans/Messages Decomposition.md`
 | 23 | Review | 140 | `reviews` | **DONE** |
 | 24 | InviteAction | 51 | `invite_actions` | **DONE** |
 | 25 | CreativeWork | 37 | `creative_works` | **DONE** |
-| 26 | WebPage | 30 | `web_pages` | **DONE** |
+| 26 | WebPage | ~12K+ | `web_pages` | **RESHAPED** (0023) — now URL-identity entity; bookmarks FK via web_page_id |
 | 27 | JoinAction + DigitalDocument + Thing | 14 | `join_actions`, `digital_documents`, `things` | **DONE** |
 | 28 | — | 12.9M | All cross-table triples (threading, recipients, sidecars, chunks, attachments) | **DONE** |
 | 29 | — | — | DROP messages + legacy tables; adapter triple emission; query/scoring rewrite | **DONE** |

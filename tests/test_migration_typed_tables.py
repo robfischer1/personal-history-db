@@ -277,7 +277,7 @@ class TestDocumentsMigrate:
         with connect(pre_reshape_db) as conn:
             runner = MigrationRunner(conn)
             pending = runner.pending()
-            assert len(pending) == 16
+            assert len(pending) == 17
             runner.apply_pending()
 
             doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]

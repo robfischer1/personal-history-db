@@ -179,11 +179,13 @@ class TestAppleDbsIntegration:
         with connect(apple_db) as conn:
             report = adapter.run(apple_decrypt_dir, conn, apple_settings)
             row = conn.execute(
-                "SELECT schema_type, body_text FROM web_pages"
+                "SELECT normalized_url, title, domain FROM web_pages"
             ).fetchone()
         assert report.rows_inserted == 1
-        assert row[0] == "WebPage"
-        assert "example.com" in row[1]
+        assert row is not None
+        assert "example.com" in row[0]
+        assert row[1] == "Example Site"
+        assert row[2] == "example.com"
 
     def test_notes_rows(
         self, apple_db: Path, apple_settings: Settings, apple_decrypt_dir: Path
