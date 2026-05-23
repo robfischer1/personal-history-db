@@ -4,6 +4,31 @@ All notable changes to personal-history-db are documented here.
 
 This project uses [Semantic Versioning](https://semver.org/). During the 0.x series, the API may change between minor versions. A 1.0 release will be tagged once the adapter and schema contracts stabilize.
 
+## [0.4.0] - 2026-05-23
+
+Final release of the plugin-host transition. Promoted from 0.4.0b0
+(tagged earlier the same day) after Phase 8 (identity coalescence
+rules engine) and Phase 10 (audits + polish + migration guide) shipped.
+
+### Added since 0.4.0b0
+
+- **`phdb.facets._coalescence_lib`** — shared TOML-rules coalescence engine; primitives both people + places facets consume. `CoalescenceRule` + `MergeProposal` + `Coalescer` base class + `apply_merge` / `unmerge` DB-write half.
+- **`phdb.facets.people.coalescence` + `phdb.facets.places.coalescence`** — `PeopleCoalescer` + `PlacesCoalescer`. People predicates: exact email, E.164 phone, Discord handle, name+domain, name-only. Places predicates: haversine `geo_radius_meters`, `named_location_exact`. Replaces the Phase 4 skeleton `coalesce()` no-op.
+- **`phdb facet <facet> review/unmerge`** — interactive CLI walks pending merge proposals; `phdb facets stats` summarizes audit log by facet/rule/confidence.
+- **JSONL pending-review queue** at `personal-history-instance/facet_coalescence_pending/<facet>.jsonl`; persists across invocations.
+- **Migration 0029** — formal `facet_coalescence_log` table (was opportunistic via `ensure_audit_log`).
+- **`docs/migration-v0.4.md`** — v0.3 → v0.4 migration guide for downstream users.
+
+### Changed since 0.4.0b0
+
+- `PhdbSourcePlugin.ingest_row` ABC return type loosened from `int` to `int | None` (`None` signals "row skipped, e.g. dedup hit"). Plugins now uniformly conform.
+- `pyproject.toml` Development Status promoted from `4 - Beta` to `5 - Production/Stable`.
+- `pyproject.toml` polished: real `authors`, `[project.urls]`, full classifier list, `mcp` moved to `[server]` optional dependency.
+- `CONTRIBUTING.md` rewritten for the v0.4.0 plugin layout; old adapter-architecture references retired.
+- `requirements.txt` documented as instance-tier lockfile (not the canonical install path).
+- `scripts/migrations-rollback/` carved out for manual-rescue scripts that were previously misplaced under `migrations/`.
+- Lint clean (ruff 0 errors); mypy down to under 30 strict errors.
+
 ## [0.4.0b0] - 2026-05-23
 
 phdb pivots from a monolithic-adapter codebase to a **plugin host** for
