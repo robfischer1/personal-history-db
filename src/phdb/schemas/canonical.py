@@ -973,6 +973,7 @@ __all__ = [
     "ACTION_SCHEMAS",
     "Action",
     "Article",
+    "BefriendAction",
     "Book",
     "BookmarkAction",
     "BrowseAction",
