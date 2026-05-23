@@ -64,10 +64,12 @@ class MboxPlugin(PhdbSourcePlugin):
 
     def __init__(
         self,
+        manifest: Any = None,
         *,
         source_kind: str = "gmail",
         source_org: str = "Google Takeout",
     ) -> None:
+        super().__init__(manifest)
         self.source_kind = source_kind
         self.source_org = source_org
 

@@ -154,10 +154,10 @@ def test_cli_ingest_with_instance_dir(tmp_path: Path) -> None:
     result = runner.invoke(cli, [
         "--db", str(db_path),
         "--instance-dir", str(inst),
-        "ingest", str(mbox_path), "--adapter", "mbox",
+        "plugin", "ingest", "mbox", str(mbox_path),
     ])
     assert result.exit_code == 0, result.output
-    assert "1 inserted" in result.output
+    assert "inserted=1" in result.output
 
     with connect(db_path) as conn:
         direction = conn.execute("SELECT direction FROM emails LIMIT 1").fetchone()[0]

@@ -4,7 +4,7 @@
 > are overwritten on next ingest. Schema descriptions and column
 > notes live on the dataclass schemas in `phdb.schemas.canonical`.
 
-**Regenerated at:** 2026-05-23T02:29:49Z
+**Regenerated at:** 2026-05-23T02:47:53Z
 
 ## Entity tables
 
@@ -27,14 +27,14 @@ declare ``emits = [<@type>]`` in their manifest.
 | `bookmarks` | BookmarkAction | 0 | `first_seen_in_instrument` | apple_dbs, raindrop |
 | `books` | Book | 0 | `date_recorded` | — |
 | `browse_actions` | BrowseAction | 0 | `visit_time` | apple_dbs |
-| `chat_messages` | Message | 0 | `date_sent` | apple_dbs |
+| `chat_messages` | Message | 0 | `date_sent` | apple_dbs, imessage |
 | `clippings` | Quotation | 0 | `mtime` | — |
 | `comments` | Comment | 0 | `date_posted` | — |
 | `conversations_messages` | Conversation | 0 | `date_sent` | — |
 | `creative_works` | CreativeWork | 0 | `date_created` | — |
 | `digital_documents` | DigitalDocument | 0 | `date_created` | apple_dbs |
 | `documents` | DigitalDocument | 0 | `mtime` | apple_dbs |
-| `emails` | EmailMessage | 1 | `date_sent` | — |
+| `emails` | EmailMessage | 1 | `date_sent` | mbox |
 | `events` | Event | 0 | `date_occurred` | — |
 | `exercise_actions` | ExerciseAction | 0 | `date_performed` | — |
 | `geo_shapes` | GeoShape | 0 | `date_recorded` | — |
