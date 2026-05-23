@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
-from phdb.plugins.raindrop.ingest import upsert_bookmark, upsert_web_page
+from phdb.formats.bookmark_upserts import upsert_bookmark, upsert_web_page
 from phdb.formats.apple_dbs_sqlite import (
     HANDLER_NAMES,
     AppleDbsRecord,

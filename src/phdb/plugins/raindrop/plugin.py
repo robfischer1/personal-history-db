@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from phdb.core.plugin import PhdbSourcePlugin
 from phdb.formats.raindrop import parse as parse_raindrop
 from phdb.log import get_logger
-from phdb.plugins.raindrop.ingest import upsert_bookmark, upsert_web_page
+from phdb.formats.bookmark_upserts import upsert_bookmark, upsert_web_page
 from phdb.records import BookmarkEvent
 
 if TYPE_CHECKING:

@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "google_activity"
+version = "0.1.0"
+description = "Google Takeout MyActivity HTML ingester"
+kind = "source"
+entry_point = "phdb.plugins.google_activity:GoogleActivityPlugin"
+
+[source]
+emits = ["SearchAction", "WatchAction"]
+entity_refs = ["web_pages"]
+formats_used = ["url", "google_activity_html"]
+records_required = ["WebActivity"]
+facets_projected = ["Time", "Topic"]

@@ -150,17 +150,23 @@ class SearchAction(ActionSchema):
     table_name = "search_actions"
     schema_type = "SearchAction"
     date_column = "date_performed"
+    entity_refs = [EntityFK(entity_table="web_pages", column_name="web_page_id")]
     fields = _messages_decomp_fields(
         schema_type="SearchAction",
         key_column="action_key",
         date_column="date_performed",
-        extras=[FieldSpec("source_device", "TEXT"), FieldSpec("sender_name", "TEXT")],
+        extras=[
+            FieldSpec("source_device", "TEXT"),
+            FieldSpec("sender_name", "TEXT"),
+            FieldSpec("web_page_id", "INTEGER", references="web_pages(id)"),
+        ],
         include_sender=False,
         is_bulk_default="1",
     )
     indexes = [
         _standard_dedup_index("search_actions"),
         _date_index("search_actions", "date_performed"),
+        IndexSpec(name="idx_search_actions_web_page_id", columns=["web_page_id"]),
     ]
 
 
@@ -376,6 +382,7 @@ class WatchAction(ActionSchema):
     table_name = "watch_actions"
     schema_type = "WatchAction"
     date_column = "date_watched"
+    entity_refs = [EntityFK(entity_table="web_pages", column_name="web_page_id")]
     fields = _messages_decomp_fields(
         schema_type="WatchAction",
         key_column="watch_key",
@@ -383,6 +390,7 @@ class WatchAction(ActionSchema):
         extras=[
             FieldSpec("platform_name", "TEXT"),
             FieldSpec("source_device", "TEXT"),
+            FieldSpec("web_page_id", "INTEGER", references="web_pages(id)"),
         ],
         include_sender=False,
         is_bulk_default="1",
@@ -390,6 +398,7 @@ class WatchAction(ActionSchema):
     indexes = [
         _standard_dedup_index("watch_actions"),
         _date_index("watch_actions", "date_watched"),
+        IndexSpec(name="idx_watch_actions_web_page_id", columns=["web_page_id"]),
     ]
 
 
