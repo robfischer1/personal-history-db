@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "imessage"
+version = "1.0.0"
+description = "iMessage HTML export ingester"
+kind = "source"
+entry_point = "phdb.plugins.imessage:IMessagePlugin"
+
+[source]
+emits = ["Message"]
+entity_refs = []
+formats_used = ["imessage_html"]
+records_required = ["ChatMessage", "Attachment", "Recipient"]
+facets_projected = ["Person", "Time", "Thread"]
