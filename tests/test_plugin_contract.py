@@ -221,13 +221,18 @@ def test_source_plugin_project_facets_is_optional():
 # ---------------------------------------------------------------------------
 
 
-def test_discover_plugins_returns_empty_in_fresh_checkout():
-    """Phase 3 deliverable: phdb plugin list returns [] (no plugins ported)."""
+def test_discover_plugins_finds_raindrop_after_phase_5():
+    """Phase 5 ported raindrop; loader finds it via the in-tree scan."""
     descriptors = discover_plugins()
-    # No in-tree plugins exist yet (raindrop ports in Phase 5)
-    assert descriptors == [], (
-        f"expected no plugins in fresh checkout; got {[d.name for d in descriptors]}"
+    names = {d.name for d in descriptors}
+    assert "raindrop" in names, (
+        f"expected raindrop plugin in discovery; got {names}"
     )
+    raindrop = next(d for d in descriptors if d.name == "raindrop")
+    assert raindrop.manifest.kind == "source"
+    # Phase 5 manifest declares emits = ["BookmarkAction"] — must resolve
+    # against the schemas registry without issues.
+    assert raindrop.issues == []
 
 
 def test_loader_validates_emits_against_schemas_registry(tmp_path: Path):

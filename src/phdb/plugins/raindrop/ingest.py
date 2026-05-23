@@ -1,13 +1,15 @@
-"""Raindrop.io bookmarks adapter — ingests Raindrop CSV + scattered older backups.
+"""Raindrop ingest helpers — WebPage upsert + BookmarkAction upsert.
 
-Writes to the `bookmarks` table (not messages). Custom run() override.
-Supports multiple format parsers: raindrop_csv, netscape_html, session_buddy_csv,
-session_buddy_json, safari_db.
+Moved here from ``phdb.adapters.raindrop`` as part of Phase 5 of the
+phdb Plugin Architecture plan. The shared helpers (upsert_web_page +
+upsert_bookmark + hash_canonical) live in the raindrop plugin now;
+the legacy apple_dbs adapter (still unported as of Phase 5) imports
+them from this new location.
 
-URL normalization: lowercase scheme+host, strip default ports, drop fragment,
-drop tracking params (utm_*, fbclid, etc.), http->https collapse.
-Dedup: UNIQUE(normalized_url, instrument) with ON CONFLICT incrementing
-appearance_count and extending [first_seen, last_seen] window.
+Phase 7 will port apple_dbs to its own plugin, at which point these
+helpers either stay in raindrop and apple_dbs imports cross-plugin,
+or migrate to a shared ``phdb.formats.bookmarks`` module. For now,
+the raindrop plugin is the canonical home.
 """
 
 from __future__ import annotations
@@ -15,25 +17,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterator
-from pathlib import Path
-from typing import TYPE_CHECKING
 
-from phdb.adapters.base import Adapter, AdapterRow, DedupStrategy, IngestReport
-from phdb.formats.raindrop import parse
-from phdb.formats.url import extract_domain, is_junk
-from phdb.log import get_logger
+from phdb.formats.url import extract_domain
 from phdb.records import BookmarkEvent
 
-if TYPE_CHECKING:
-    from phdb.settings import Settings
-
-log = get_logger("phdb.adapters.raindrop")
-
-
-# ---------------------------------------------------------------------------
-# WebPage entity upsert
-# ---------------------------------------------------------------------------
 
 def upsert_web_page(
     conn: sqlite3.Connection,
@@ -46,7 +33,13 @@ def upsert_web_page(
     sighted: str | None = None,
     source_file_id: int | None = None,
 ) -> int:
-    """Create or update a WebPage URL-entity row. Returns web_page.id."""
+    """Create or update a WebPage URL-entity row. Returns ``web_page.id``.
+
+    The COALESCE last-write-wins pattern (NULLIF on empty strings)
+    plus the CASE-based first_seen/last_seen merge is bespoke logic
+    that the generic ``phdb.schemas.upsert.upsert_entity`` can't
+    express directly; keep it inline.
+    """
     domain = extract_domain(normalized_url)
     cur = conn.execute(
         """INSERT INTO web_pages
@@ -77,10 +70,6 @@ def upsert_web_page(
     return int(cur.fetchone()[0])
 
 
-# ---------------------------------------------------------------------------
-# Bookmark upsert
-# ---------------------------------------------------------------------------
-
 def hash_canonical(event: BookmarkEvent) -> str:
     canonical = json.dumps({
         "url": event.url,
@@ -99,7 +88,14 @@ def upsert_bookmark(
     *,
     web_page_id: int,
 ) -> int:
-    """Insert or increment-on-conflict a bookmark row."""
+    """Insert or increment-on-conflict a BookmarkAction row.
+
+    The bookmarks table FKs to web_pages via ``web_page_id``; this
+    function expects the caller to have resolved the entity via
+    ``upsert_web_page`` first.
+    """
+    from phdb.formats.url import is_junk  # lazy — keep import surface small
+
     url = event.url
     norm = event.normalized_url
     instrument = event.instrument
@@ -159,62 +155,4 @@ def upsert_bookmark(
     return int(cur.fetchone()[0])
 
 
-# ---------------------------------------------------------------------------
-# Adapter
-# ---------------------------------------------------------------------------
-
-class RaindropAdapter(Adapter):
-    """Ingest Raindrop.io bookmarks and scattered older bookmark backups."""
-
-    name = "raindrop"
-    source_kind = "raindrop"
-    file_kind = "csv"
-    schema_type = "BookmarkAction"
-    dedup_strategy = DedupStrategy.PLATFORM_SYNTHETIC
-    batch_size = 500
-
-    def iter_rows(self, source_path: Path, **kwargs: object) -> Iterator[AdapterRow]:
-        raise NotImplementedError("Use run() directly — writes to bookmarks table")
-
-    def run(
-        self,
-        source_path: Path,
-        conn: sqlite3.Connection,
-        settings: Settings,
-    ) -> IngestReport:
-        report = IngestReport(
-            adapter_name=self.name,
-            source_path=str(source_path),
-            source_file_id=0,
-        )
-
-        source_file_id = self._register_source(conn, source_path)
-        report.source_file_id = source_file_id
-
-        batch_count = 0
-
-        for event in parse(source_path):
-            report.rows_yielded += 1
-
-            sighted = event.date_added or None
-            wp_id = upsert_web_page(
-                conn, event.url, event.normalized_url,
-                title=event.title, excerpt=event.excerpt,
-                cover_url=event.cover_url, sighted=sighted,
-                source_file_id=source_file_id,
-            )
-            upsert_bookmark(conn, source_file_id, event, web_page_id=wp_id)
-            report.rows_inserted += 1
-
-            batch_count += 1
-            if batch_count >= self.batch_size:
-                conn.commit()
-                batch_count = 0
-
-        conn.commit()
-
-        log.info(
-            "[%s] Done: %d yielded, %d inserted, %d skipped",
-            self.name, report.rows_yielded, report.rows_inserted, report.rows_skipped,
-        )
-        return report
+__all__ = ["hash_canonical", "upsert_bookmark", "upsert_web_page"]

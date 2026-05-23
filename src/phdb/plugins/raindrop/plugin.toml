@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "raindrop"
+version = "0.4.0"
+description = "Raindrop.io bookmarks + scattered older bookmark backups; WebPage entity FK"
+kind = "source"
+entry_point = "phdb.plugins.raindrop:RaindropPlugin"
+
+[source]
+emits = ["BookmarkAction"]
+entity_refs = ["web_pages"]
+formats_used = ["url", "raindrop"]
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []

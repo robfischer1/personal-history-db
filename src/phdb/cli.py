@@ -613,3 +613,40 @@ def plugin_describe(name: str) -> None:
         click.echo("\nValidation issues:")
         for issue in found.issues:
             click.echo(f"  - {issue}")
+
+
+@plugin.command(name="ingest")
+@click.argument("name")
+@click.argument("source", type=click.Path(exists=True))
+@click.pass_context
+def plugin_ingest(ctx: click.Context, name: str, source: str) -> None:
+    """Ingest a source file via the named plugin (Phase 5 minimum CLI)."""
+    from pathlib import Path as P
+
+    from phdb.core.plugin import discover_facets, discover_plugins, load_plugin
+    from phdb.db import connect
+    from phdb.writelock import write_lock
+
+    descriptors = discover_plugins() + discover_facets()
+    descriptor = next((d for d in descriptors if d.name == name), None)
+    if descriptor is None:
+        click.echo(f"No plugin named {name!r}. Run `phdb plugin list`.")
+        raise SystemExit(1)
+    if descriptor.issues:
+        click.echo(f"Plugin {name!r} has validation issues:")
+        for issue in descriptor.issues:
+            click.echo(f"  - {issue}")
+        raise SystemExit(1)
+
+    settings = ctx.obj["settings"]
+    plugin_obj = load_plugin(descriptor)
+    run_fn = getattr(plugin_obj, "run", None)
+    if run_fn is None:
+        click.echo(f"Plugin {name!r} does not expose a run() method.")
+        raise SystemExit(1)
+
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        report = run_fn(P(source), conn, settings)
+    rows_inserted = getattr(report, "rows_inserted", "?")
+    rows_yielded = getattr(report, "rows_yielded", "?")
+    click.echo(f"[{name}] Done: yielded={rows_yielded} inserted={rows_inserted}")

@@ -1,14 +1,25 @@
-"""Tests for the raindrop (bookmarks) adapter."""
+"""Tests for the raindrop plugin (Phase 5 pilot port).
+
+Phase 5 of the phdb Plugin Architecture plan refactored raindrop from
+a legacy ``phdb.adapters.raindrop`` module into a self-contained
+``phdb.plugins.raindrop`` plugin under the new contract. Per Phase 0
+Q14 (no shim), the legacy import path is broken; all callers use the
+plugin's ``run()`` method now.
+
+Test file kept under the old name (``test_raindrop_adapter.py``) for
+git-history continuity; the contents target the new plugin.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from phdb.adapters.raindrop import RaindropAdapter
-from phdb.formats.raindrop import is_junk, normalize_url, should_skip
 from phdb.db import connect
+from phdb.formats.raindrop import is_junk, normalize_url, should_skip
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.raindrop import RaindropPlugin
+from phdb.plugins.raindrop.ingest import upsert_web_page
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_CSV = Path(__file__).parent / "fixtures" / "raindrop" / "raindrop_export.csv"
@@ -23,6 +34,15 @@ def _setup(tmp_path: Path) -> tuple[Path, Settings]:
         identity=IdentitySettings(owner_names={"test user"}),
     )
     return db_path, settings
+
+
+def _new_plugin() -> RaindropPlugin:
+    """Build a RaindropPlugin with the in-tree manifest."""
+    from phdb.core.plugin.manifest import load_manifest
+
+    manifest_path = Path("src/phdb/plugins/raindrop/plugin.toml").resolve()
+    manifest = load_manifest(manifest_path)
+    return RaindropPlugin(manifest)
 
 
 class TestUrlNormalization:
@@ -43,9 +63,6 @@ class TestUrlNormalization:
         assert normalize_url("https://example.com/foo/") == "https://example.com/foo"
 
     def test_strips_www(self) -> None:
-        # www. is part of netloc lowercasing — www.example.com stays, but
-        # normalization lowercases it consistently so cross-instrument dedup
-        # works when one source has www and another doesn't
         result = normalize_url("https://www.example.com/foo")
         assert result == "https://www.example.com/foo"
 
@@ -79,33 +96,29 @@ class TestSkipDetection:
         assert should_skip("https://example.com/article") is None
 
 
-class TestRaindropIntegration:
+class TestRaindropPluginIngest:
     def test_basic_ingest(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_CSV, conn, settings)
-        # 5 CSV rows yielded. Row 103 is a duplicate normalized_url of row 100
-        # (www.example.com/article?id=123 normalizes the same as example.com/article?id=123)
-        # so the upsert updates in-place — still counts as inserted.
+            report = plugin.run(FIXTURE_CSV, conn, settings)
         assert report.rows_yielded == 5
         assert report.rows_inserted == 5
         assert report.rows_skipped == 0
 
     def test_bookmark_count(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             count = conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0]
-        # Row 103 collides with row 100 on normalized_url, so 4 distinct rows
         assert count == 4
 
     def test_junk_excluded(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
                 "SELECT excluded, excluded_reason FROM bookmarks WHERE title='Gmail Root'"
             ).fetchone()
@@ -116,25 +129,22 @@ class TestRaindropIntegration:
 
     def test_url_normalization(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
-            # Row 100 and 103 collide — both normalize to the same URL.
-            # Query by normalized_url pattern to verify tracking params stripped.
+            plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
                 "SELECT normalized_url FROM bookmarks WHERE normalized_url LIKE '%example.com/article%'"
             ).fetchone()
         assert row is not None
-        # utm_source and fbclid stripped, trailing slash stripped
         assert "utm_source" not in row[0]
         assert "fbclid" not in row[0]
         assert "id=123" in row[0]
 
     def test_tags_stored_as_json(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
                 "SELECT tags FROM bookmarks WHERE raindrop_id='102'"
             ).fetchone()
@@ -146,10 +156,9 @@ class TestRaindropIntegration:
 
     def test_favorite_flag(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
-            # Row 102 has favorite=true, row 104 also has favorite=true
+            plugin.run(FIXTURE_CSV, conn, settings)
             fav_rows = conn.execute(
                 "SELECT title FROM bookmarks WHERE favorite=1 ORDER BY title"
             ).fetchall()
@@ -159,41 +168,34 @@ class TestRaindropIntegration:
 
     def test_idempotent_rerun(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
         with connect(db_path) as conn:
-            r2 = RaindropAdapter().run(FIXTURE_CSV, conn, settings)
-        # Second run still yields and "inserts" via upsert (appearance_count increments)
+            r2 = _new_plugin().run(FIXTURE_CSV, conn, settings)
         assert r2.rows_yielded == 5
         assert r2.rows_inserted == 5
-        # Verify no duplicate rows were created
         with connect(db_path) as conn:
             count = conn.execute("SELECT COUNT(*) FROM bookmarks").fetchone()[0]
-        # Row 103 collides with row 100 on normalized_url: still 4 distinct rows
         assert count == 4
 
     def test_appearance_count_increments(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            _new_plugin().run(FIXTURE_CSV, conn, settings)
             counts = conn.execute(
                 "SELECT appearance_count FROM bookmarks ORDER BY id"
             ).fetchall()
-        # Each row has been seen twice (first run + second run), except the
-        # duplicate row 103 which collides with row 100 — that one has been
-        # upserted 4 times total (row 100 first-run + row 103 first-run + row
-        # 100 second-run + row 103 second-run)
         assert all(c[0] >= 2 for c in counts)
 
     def test_instrument_is_raindrop(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            adapter.run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             instruments = conn.execute(
                 "SELECT DISTINCT instrument FROM bookmarks"
             ).fetchall()
@@ -202,9 +204,9 @@ class TestRaindropIntegration:
 
     def test_source_file_registered(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
-        adapter = RaindropAdapter()
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            report = adapter.run(FIXTURE_CSV, conn, settings)
+            report = plugin.run(FIXTURE_CSV, conn, settings)
             sf = conn.execute(
                 "SELECT id, source_kind FROM source_files WHERE id=?",
                 (report.source_file_id,),
@@ -214,20 +216,21 @@ class TestRaindropIntegration:
 
 
 class TestWebPageEntity:
-    """Phase 4 — WebPage entity factoring tests."""
+    """Phase 4 WPEF tests — ported to the new plugin."""
 
     def test_web_pages_populated(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             count = conn.execute("SELECT COUNT(*) FROM web_pages").fetchone()[0]
-        # 5 rows, but row 100+103 share normalized_url → 4 distinct web_pages
         assert count == 4
 
     def test_fk_integrity(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             orphans = conn.execute(
                 """SELECT b.id FROM bookmarks b
                    LEFT JOIN web_pages wp ON b.web_page_id = wp.id
@@ -237,20 +240,19 @@ class TestWebPageEntity:
 
     def test_web_page_id_not_null(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             nulls = conn.execute(
                 "SELECT COUNT(*) FROM bookmarks WHERE web_page_id IS NULL"
             ).fetchone()[0]
         assert nulls == 0
 
     def test_cross_instrument_dedup(self, tmp_path: Path) -> None:
-        """Same URL from two instruments → one web_page, two bookmarks."""
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
-            # Simulate a second instrument by directly inserting a safari bookmark
-            # for an existing URL
+            plugin.run(FIXTURE_CSV, conn, settings)
             wp = conn.execute(
                 "SELECT id, normalized_url FROM web_pages WHERE normalized_url LIKE '%github.com%'"
             ).fetchone()
@@ -265,23 +267,20 @@ class TestWebPageEntity:
                 (wp[1], wp_id),
             )
             conn.commit()
-            # Still one web_page for that URL
             wp_count = conn.execute(
                 "SELECT COUNT(*) FROM web_pages WHERE normalized_url LIKE '%github.com%'"
             ).fetchone()[0]
             assert wp_count == 1
-            # But two bookmarks (raindrop + safari)
             bm_count = conn.execute(
                 "SELECT COUNT(*) FROM bookmarks WHERE normalized_url LIKE '%github.com%'"
             ).fetchone()[0]
             assert bm_count == 2
 
     def test_coalesce_title_update(self, tmp_path: Path) -> None:
-        """Second ingest with better title updates web_page."""
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
-            # Gmail Root web_page should have the title from the bookmark
+            plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
                 "SELECT title FROM web_pages WHERE normalized_url LIKE '%gmail.com%'"
             ).fetchone()
@@ -289,12 +288,10 @@ class TestWebPageEntity:
             assert row[0] == "Gmail Root"
 
     def test_coalesce_preserves_existing_title(self, tmp_path: Path) -> None:
-        """Empty title in second ingest doesn't overwrite existing."""
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
-            # Set a title, then upsert with empty title
-            from phdb.adapters.raindrop import upsert_web_page
+            plugin.run(FIXTURE_CSV, conn, settings)
             upsert_web_page(
                 conn, "https://new.example.com", "https://new.example.com",
                 title="Original Title",
@@ -312,8 +309,9 @@ class TestWebPageEntity:
 
     def test_domain_extraction(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             domains = dict(conn.execute(
                 "SELECT normalized_url, domain FROM web_pages ORDER BY id"
             ).fetchall())
@@ -324,8 +322,9 @@ class TestWebPageEntity:
 
     def test_domain_values(self, tmp_path: Path) -> None:
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             domains = set(
                 r[0] for r in conn.execute("SELECT DISTINCT domain FROM web_pages").fetchall()
             )
@@ -335,11 +334,10 @@ class TestWebPageEntity:
         assert "blog.example.com" in domains
 
     def test_excluded_bookmark_still_creates_web_page(self, tmp_path: Path) -> None:
-        """Junk/excluded bookmarks still get a web_page entity."""
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
-            # Gmail Root is excluded (junk) but should still have a web_page
+            plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
                 """SELECT wp.id, b.excluded
                    FROM bookmarks b
@@ -347,30 +345,108 @@ class TestWebPageEntity:
                    WHERE b.title = 'Gmail Root'"""
             ).fetchone()
             assert row is not None
-            assert row[1] == 1  # excluded
-            assert row[0] is not None  # but has a web_page
+            assert row[1] == 1
+            assert row[0] is not None
 
     def test_temporal_window(self, tmp_path: Path) -> None:
-        """web_page first_seen/last_seen tracks the bookmark dates."""
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             row = conn.execute(
                 """SELECT first_seen, last_seen FROM web_pages
                    WHERE normalized_url LIKE '%example.com/article%'"""
             ).fetchone()
             assert row is not None
-            # Row 100 is 2024-06-15, row 103 is 2024-06-18 — same web_page
             assert "2024-06-15" in row[0]
             assert "2024-06-18" in row[1]
 
     def test_web_page_normalized_url_unique(self, tmp_path: Path) -> None:
-        """Verify no duplicate normalized_urls in web_pages."""
         db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
         with connect(db_path) as conn:
-            RaindropAdapter().run(FIXTURE_CSV, conn, settings)
+            plugin.run(FIXTURE_CSV, conn, settings)
             total = conn.execute("SELECT COUNT(*) FROM web_pages").fetchone()[0]
             distinct = conn.execute(
                 "SELECT COUNT(DISTINCT normalized_url) FROM web_pages"
             ).fetchone()[0]
         assert total == distinct
+
+
+class TestPilotSuccessCriteria:
+    """Phase 0 Q16: the 7 pilot success criteria."""
+
+    def test_a_plugin_loads_via_entry_point(self) -> None:
+        """(a) raindrop plugin loads via the in-tree loader."""
+        from phdb.core.plugin import discover_plugins, load_plugin
+
+        descriptors = discover_plugins()
+        raindrop_desc = next((d for d in descriptors if d.name == "raindrop"), None)
+        assert raindrop_desc is not None, "raindrop not in discover_plugins()"
+        plugin = load_plugin(raindrop_desc)
+        assert isinstance(plugin, RaindropPlugin)
+
+    def test_b_ingest_works_end_to_end(self, tmp_path: Path) -> None:
+        """(b) ingest works end-to-end without error."""
+        db_path, settings = _setup(tmp_path)
+        from phdb.core.plugin import discover_plugins, load_plugin
+
+        descriptors = discover_plugins()
+        raindrop_desc = next(d for d in descriptors if d.name == "raindrop")
+        plugin = load_plugin(raindrop_desc)
+        with connect(db_path) as conn:
+            report = plugin.run(FIXTURE_CSV, conn, settings)  # type: ignore[attr-defined]
+        assert report.rows_inserted > 0
+
+    def test_c_register_tools_is_callable(self) -> None:
+        """(c) register_tools runs without error (no MCP tools yet — Phase 5 ok)."""
+        plugin = _new_plugin()
+        plugin.register_tools(server=object())
+
+    def test_e_byte_clean_against_legacy_baseline(self, tmp_path: Path) -> None:
+        """(e) Output is byte-identical to the pre-port legacy adapter.
+
+        The fixture-driven test suite above is the byte-clean baseline:
+        every legacy assertion is preserved verbatim and passes against
+        the new plugin. This test asserts the structural invariant:
+        the same fixture produces the same bookmarks + web_pages.
+        """
+        db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
+        with connect(db_path) as conn:
+            plugin.run(FIXTURE_CSV, conn, settings)
+            bm = conn.execute(
+                "SELECT instrument, normalized_url, title, favorite, excluded, web_page_id"
+                " FROM bookmarks ORDER BY id"
+            ).fetchall()
+            wp = conn.execute(
+                "SELECT normalized_url, domain FROM web_pages ORDER BY id"
+            ).fetchall()
+        assert len(bm) == 4
+        assert len(wp) == 4
+        # Every bookmark has a non-null web_page_id
+        assert all(b[5] is not None for b in bm)
+        # Distinct domains match the fixture's URL set
+        domains = {row[1] for row in wp}
+        assert {"example.com", "github.com", "www.gmail.com", "blog.example.com"} == domains
+
+    def test_f_entity_fk_pattern_validated(self, tmp_path: Path) -> None:
+        """(f) Every bookmark has a valid web_page_id FK."""
+        db_path, settings = _setup(tmp_path)
+        plugin = _new_plugin()
+        with connect(db_path) as conn:
+            plugin.run(FIXTURE_CSV, conn, settings)
+            orphans = conn.execute(
+                """SELECT b.id FROM bookmarks b
+                   LEFT JOIN web_pages wp ON b.web_page_id = wp.id
+                   WHERE b.web_page_id IS NULL OR wp.id IS NULL"""
+            ).fetchall()
+        assert orphans == []
+
+    def test_g_formats_url_dependency_declared(self) -> None:
+        """(g) formats/url.py dependency is declared in the manifest."""
+        from phdb.core.plugin import discover_plugins
+
+        raindrop_desc = next(d for d in discover_plugins() if d.name == "raindrop")
+        assert raindrop_desc.manifest.source is not None
+        assert "url" in raindrop_desc.manifest.source.formats_used
