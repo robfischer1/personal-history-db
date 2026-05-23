@@ -9,15 +9,23 @@
 # `identity_rules.toml` and edit the rules to match your data
 # patterns.
 #
-# Rule shapes supported by phdb.facets._coalescence_lib:
-#   - exact_field        — single-field equality after normalization
-#   - two_field          — both named fields must match
-#   - regex              — regex with optional capture group
-#   - geo_radius_meters  — places-only; placeholder in Phase 8A
-#   - named_location     — same name (normalized) = same place
+# Rule shapes supported by phdb.facets._coalescence_lib (people + shared):
+#   - exact_field           — single-field equality after normalization
+#   - two_field             — both named fields must match
+#   - regex                 — regex with optional capture group
+#   - named_location        — same name (normalized) = same place
+#
+# Rule shapes added by phdb.facets.places.coalescence (Phase 8B):
+#   - geo_radius_meters     — haversine within radius_m meters
+#                             (config: radius_m, optional lat_field,
+#                             optional lon_field — defaults "lat"/"lon")
+#   - named_location_exact  — same name (lowercase + collapsed
+#                             whitespace) = same place
 #
 # Normalization options:
 #   - lowercase          — str.lower() + str.strip()
+#   - lowercase_strip    — lower + strip + collapse internal whitespace
+#                          (places-only; default for named_location_exact)
 #   - e164               — phone-number canonicalization
 #   - strip              — whitespace strip only
 #   - none / unspecified — raw equality
@@ -73,20 +81,31 @@ require_manual_review = true
 notes = "Lowest confidence; routed to Phase 8C review CLI."
 
 # ────────────────────────────────────────────────────────────────────
-# Places rules — Phase 8B fills these in. Default stub below shows
-# the expected shapes. The geo_radius_meters predicate is a no-op
-# placeholder until the places facet ships the haversine math.
+# Places rules — copied from phdb.facets.places.coalescence defaults.
+# The haversine geo predicate matches when the great-circle distance
+# between two (lat, lon) pairs is <= radius_m meters (inclusive).
+# Emissions missing lat or lon never match a geo rule.
 # ────────────────────────────────────────────────────────────────────
 
-# [[rules.places]]
-# name = "same_coords_within_50m"
-# shape = "geo_radius_meters"
-# radius_meters = 50.0
-# confidence = 0.95
+[[rules.places]]
+name = "geo_within_100m"
+shape = "geo_radius_meters"
+radius_m = 100
+confidence = 0.85
+notes = "Same coords within 100m (haversine) = same place. Tight radius for stationary captures."
 
-# [[rules.places]]
-# name = "named_location_exact"
-# shape = "named_location"
-# field = "name"
-# normalize = "lowercase"
-# confidence = 0.80
+[[rules.places]]
+name = "geo_within_500m"
+shape = "geo_radius_meters"
+radius_m = 500
+confidence = 0.65
+require_manual_review = true
+notes = "Wider radius for degraded GPS lock; routed to Phase 8C review CLI regardless of confidence."
+
+[[rules.places]]
+name = "named_location_exact"
+shape = "named_location_exact"
+field = "name"
+normalize = "lowercase_strip"
+confidence = 0.80
+notes = "Same normalized place name = same place. Useful when GPS is missing but source labeled the place (e.g., Google Timeline visits)."
