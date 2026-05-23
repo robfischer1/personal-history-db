@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.adapters.facebook_unified import FacebookUnifiedAdapter
+from phdb.plugins.facebook_unified import FacebookUnifiedPlugin as FacebookUnifiedAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 from phdb.settings import IdentitySettings, Settings

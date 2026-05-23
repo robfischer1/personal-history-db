@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "facebook_unified"
+version = "0.4.0"
+description = "Unified Facebook adapter — ingests messenger, posts, and residuals"
+kind = "source"
+entry_point = "phdb.plugins.facebook_unified.plugin:FacebookUnifiedPlugin"
+
+[source]
+emits = ["Message", "SocialMediaPosting", "Comment", "LikeAction", "Event", "JoinAction", "InviteAction", "Conversation"]
+entity_refs = []
+formats_used = ["facebook_html"]
+records_required = ["ChatMessage", "SocialPost", "Reaction"]
+facets_projected = ["Person", "Time", "Thread"]
