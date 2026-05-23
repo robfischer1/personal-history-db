@@ -27,6 +27,7 @@ class OllamaEmbedProvider:
     /api/embed endpoint (Ollama, llama.cpp server, etc.).
     """
 
+    # Keep in sync with EmbeddingSettings in phdb.settings
     endpoint: str = "http://localhost:11434"
     model: str = "nomic-embed-text"
     dim: int = 768
@@ -138,9 +139,9 @@ class OllamaEmbedProvider:
         if embedding is None:
             return cls()
         return cls(
-            endpoint=getattr(embedding, "endpoint", "http://localhost:11434"),
-            model=getattr(embedding, "model", "nomic-embed-text"),
-            dim=getattr(embedding, "dim", 768),
+            endpoint=embedding.endpoint,
+            model=embedding.model,
+            dim=embedding.dim,
         )
 
 

@@ -8,16 +8,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tomllib
 from collections import defaultdict
+from datetime import UTC
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from datetime import UTC
 
 from phdb.tools.sparsity import compute_sparsity
 
@@ -167,7 +162,7 @@ def query_coverage(conn: sqlite3.Connection, config: dict[str, Any]) -> list[dic
     counts: dict[tuple[int, str], int] = defaultdict(int)
 
     for _table_name, meta in CONTRIBUTING_TABLES.items():
-        sql = meta["query"]
+        sql = str(meta["query"])
 
         try:
             cursor = conn.execute(sql)
@@ -320,7 +315,7 @@ def render_vault(data: dict[str, Any]) -> str:
     """Render the coverage map as a markdown table for the vault note."""
     domains = data["domains"]
     years = data["years"]
-    cells_by_key: dict[tuple[int, str], dict] = {}
+    cells_by_key: dict[tuple[int, str], dict[str, Any]] = {}
     for c in data["cells"]:
         cells_by_key[(c["year"], c["domain"])] = c
 

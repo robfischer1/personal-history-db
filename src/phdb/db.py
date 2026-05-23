@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from phdb.core.db import (
     VECTOR_DIM,
-    _apply_pragmas,
-    _load_vec_ext,
     connect,
     connect_persistent,
     ensure_vec_table,
@@ -20,8 +18,6 @@ from phdb.core.db import (
 
 __all__ = [
     "VECTOR_DIM",
-    "_apply_pragmas",
-    "_load_vec_ext",
     "connect",
     "connect_persistent",
     "ensure_vec_table",

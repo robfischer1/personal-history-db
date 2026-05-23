@@ -15,7 +15,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-VECTOR_DIM = 768
+from phdb.settings import EmbeddingSettings
+
+# Compile-time default; re-embed required if instance config changes embedding.dim
+VECTOR_DIM = EmbeddingSettings().dim
 
 
 def _apply_pragmas(conn: sqlite3.Connection) -> None:

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from phdb.scoring import TierConfig
+from phdb.core.scoring import TierConfig
 from phdb.skill_graph.readiness import (
     SkillGraphConfig,
     atrophy_alarm,

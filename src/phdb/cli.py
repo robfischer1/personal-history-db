@@ -356,8 +356,8 @@ def populate(ctx: click.Context, config: str | None) -> None:
     """Compute initial scores for all unscored chunks."""
     from pathlib import Path as P
 
+    from phdb.core.scoring import DecayConfig, populate_initial_scores
     from phdb.db import connect
-    from phdb.scoring import DecayConfig, populate_initial_scores
 
     settings = ctx.obj["settings"]
     cfg = DecayConfig.load(P(config)) if config else DecayConfig.load()
@@ -375,8 +375,8 @@ def recompute(ctx: click.Context, config: str | None, tier: str | None) -> None:
     """Recompute scores for all chunks (reads engagement history)."""
     from pathlib import Path as P
 
+    from phdb.core.scoring import DecayConfig, batch_recompute
     from phdb.db import connect
-    from phdb.scoring import DecayConfig, batch_recompute
 
     settings = ctx.obj["settings"]
     cfg = DecayConfig.load(P(config)) if config else DecayConfig.load()

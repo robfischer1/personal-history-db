@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from phdb.scoring import TierConfig, decay_factor
+from phdb.core.scoring import TierConfig, decay_factor
 
 _DEFAULT_CONFIG = Path(__file__).parents[3] / "config" / "skill_graph.toml"
 

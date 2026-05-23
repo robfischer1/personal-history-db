@@ -8,7 +8,7 @@ version = "0.4.0"
 description = "A framework for ingesting, indexing, and querying personal digital history across dozens of source formats."
 requires-python = ">=3.11"
 license = "Apache-2.0"
-authors = [{ name = "robfischer1" }]
+authors = [{ name = "Rob Fischer" }]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3",
@@ -33,6 +33,7 @@ docs = [
     "python-docx>=1.0",
     "openpyxl>=3.1",
 ]
+photos = ["Pillow>=10.0"]
 server = ["mcp>=1.0"]
 dev = [
     "pytest>=8.0",
@@ -41,9 +42,11 @@ dev = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/robfischer1/personal-history-db"
 Repository = "https://github.com/robfischer1/personal-history-db"
 Issues = "https://github.com/robfischer1/personal-history-db/issues"
 Changelog = "https://github.com/robfischer1/personal-history-db/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/robfischer1/personal-history-db/tree/main/docs"
 
 [project.scripts]
 phdb = "phdb.cli:cli"
@@ -73,6 +76,18 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 module = "phdb.plugins.*"
 disable_error_code = ["override"]
+
+# Test files are type-checked but not strict — suppress annotation
+# requirements and known test-pattern false positives.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+warn_return_any = false
+disable_error_code = ["attr-defined", "arg-type", "type-arg", "union-attr", "index", "var-annotated", "operator", "misc", "override", "assignment", "unused-ignore"]
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

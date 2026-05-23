@@ -50,7 +50,7 @@ from phdb.query import (  # noqa: E402
     writing_session_detail as _writing_session_detail,
     writing_stats as _writing_stats,
 )
-from phdb.scoring import record_engagement  # noqa: E402
+from phdb.core.scoring import record_engagement  # noqa: E402
 from phdb.tools.coverage_map import generate_coverage_map, load_config as _load_coverage_config  # noqa: E402
 
 

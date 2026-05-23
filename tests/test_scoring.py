@@ -5,9 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.db import connect
-from phdb.migrations.runner import MigrationRunner
-from phdb.scoring import (
+from phdb.core.scoring import (
     DecayConfig,
     TierConfig,
     batch_recompute,
@@ -16,6 +14,8 @@ from phdb.scoring import (
     populate_initial_scores,
     record_engagement,
 )
+from phdb.db import connect
+from phdb.migrations.runner import MigrationRunner
 
 
 @pytest.fixture

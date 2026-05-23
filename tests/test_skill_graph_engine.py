@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from phdb.core.scoring import TierConfig
 from phdb.db import connect
-from phdb.scoring import TierConfig
 from phdb.skill_graph import engine
 from phdb.skill_graph.engine import update_discipline_readiness
 from phdb.skill_graph.persistence import write_readiness
