@@ -153,7 +153,7 @@ class StrongPlugin(PhdbSourcePlugin):
              record.raw_hash),
         )
         row = cur.fetchone()
-        
+
         # If the row was not inserted (due to conflict), find the existing one
         if row is None:
             cur = conn.execute(
@@ -163,7 +163,7 @@ class StrongPlugin(PhdbSourcePlugin):
             row_id = int(cur.fetchone()[0])
         else:
             row_id = int(row[0])
-            # Only link threads if newly inserted? 
+            # Only link threads if newly inserted?
             # Actually, let's keep it simple for now, link always if present.
             if record.thread_key:
                 thread_id, _ = self._upsert_thread(conn, record.thread_key)
@@ -186,13 +186,13 @@ class StrongPlugin(PhdbSourcePlugin):
 
         from phdb.triples import resolve_node
         node_id = resolve_node(conn, label, "thread")
-        return node_id, True
+        return node_id, True  # type: ignore[return-value]
 
     def _link_message_thread(
         self, conn: sqlite3.Connection, message_id: int, thread_node_id: int,
         *, row: AdapterRow,
     ) -> None:
-        from phdb.triples import resolve_node, get_predicate
+        from phdb.triples import get_predicate, resolve_node
         in_thread_id = get_predicate(conn, "inThread")["id"]
         source_table = "exercise_actions"
 
@@ -223,17 +223,17 @@ class StrongPlugin(PhdbSourcePlugin):
         settings: Settings | None = None,
     ) -> IngestSummary:
         report = IngestSummary(source_path=str(source_path))
-        
+
         # Check if already registered
         cur = conn.execute("SELECT id FROM source_files WHERE source_path = ?", (str(source_path),))
         row = cur.fetchone()
-        
+
         source_file_id = _register_source_file(
             conn, source_path,
             source_kind=self.SOURCE_KIND, file_kind=self.FILE_KIND,
         )
         report.source_file_id = source_file_id
-        
+
         if row:
             # Already registered, count rows in the existing source
             cur = conn.execute("SELECT count(*) FROM exercise_actions WHERE source_file_id = ?", (row[0],))
@@ -243,7 +243,7 @@ class StrongPlugin(PhdbSourcePlugin):
         batch_count = 0
         for record in self.parse(source_path):
             report.rows_yielded += 1
-            
+
             self.ingest_row(conn, record, source_file_id=source_file_id)
             report.rows_inserted += 1
 

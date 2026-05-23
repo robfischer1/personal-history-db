@@ -30,7 +30,6 @@ from phdb.facets.threads import ThreadsFacetPlugin
 from phdb.facets.time import TimeFacetPlugin
 from phdb.facets.topics import TopicsFacetPlugin
 
-
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------

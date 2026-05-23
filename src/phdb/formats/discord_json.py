@@ -19,6 +19,7 @@ import zipfile
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 from phdb.records import Attachment, ChatMessage, Provenance, Recipient
@@ -125,7 +126,7 @@ def _derive_other_party(
 def parse_channel(
     zf: zipfile.ZipFile,
     channel_id: str,
-    channel_meta: dict,
+    channel_meta: dict[str, Any],
     index_label: str | None,
     my_user_id: str | None,
 ) -> Iterator[ChatMessage]:
@@ -161,7 +162,7 @@ def parse_channel(
     )
     thread_key = channel_id
 
-    for msg_idx, msg in enumerate(msgs):
+    for _msg_idx, msg in enumerate(msgs):
         snowflake = str(msg.get("ID", ""))
         if not snowflake:
             continue
@@ -233,7 +234,7 @@ def parse_channel(
 
 def parse_export(
     source_path: Path,
-) -> Iterator[tuple[str, dict, ChatMessage]]:
+) -> Iterator[tuple[str, dict[str, Any], ChatMessage]]:
     """Yield ``(channel_id, channel_meta, record)`` for every message in the export.
 
     Opens the zip, reads the index + user metadata, and delegates to

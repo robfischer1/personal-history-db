@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 from typing import TYPE_CHECKING
 
 from phdb.log import get_logger
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 if TYPE_CHECKING:
     from phdb.records import AISessionMessage
@@ -34,7 +33,7 @@ def upsert_conversation_message(
 
     # Claude Code JSONL messages are outbound from user or inbound from assistant
     # but we follow the role from the record.
-    
+
     cur = conn.execute(
         """INSERT INTO conversations_messages (
             schema_type, conversation_key, date_sent, body_text,

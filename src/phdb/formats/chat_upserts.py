@@ -7,10 +7,10 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from phdb.log import get_logger
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 if TYPE_CHECKING:
-    from phdb.records import ChatMessage, Attachment
+    from phdb.records import Attachment, ChatMessage
 
 log = get_logger("phdb.formats.chat_upserts")
 

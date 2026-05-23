@@ -42,20 +42,17 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from phdb.facets._coalescence_lib import (
-    Coalescer,
     CoalescenceRule,
+    Coalescer,
     MergeProposal,
     apply_merge,
     load_rules_from_dicts,
     load_rules_from_toml,
 )
 from phdb.log import get_logger
-
-if TYPE_CHECKING:
-    from phdb.core.plugin.bus import FacetEmission
 
 log = get_logger("phdb.facets.people.coalescence")
 
@@ -168,9 +165,8 @@ def _enrich_emission(emission: Any) -> Any:
         payload = {**emission}
 
     email = payload.get("email")
-    if email and "email_domain" not in payload:
-        if "@" in str(email):
-            payload["email_domain"] = str(email).rsplit("@", 1)[-1].lower()
+    if email and "email_domain" not in payload and "@" in str(email):
+        payload["email_domain"] = str(email).rsplit("@", 1)[-1].lower()
 
     full_name = payload.get("full_name")
     if full_name and ("first_name" not in payload or "last_name" not in payload):
@@ -199,7 +195,7 @@ class PeopleCoalescer(Coalescer):
     / ``last_name`` from raw payloads) and in the default rules pack.
     """
 
-    def evaluate_pair(self, a: Any, b: Any) -> CoalescenceRule | None:  # type: ignore[override]
+    def evaluate_pair(self, a: Any, b: Any) -> CoalescenceRule | None:
         return super().evaluate_pair(_enrich_emission(a), _enrich_emission(b))
 
     def coalesce_batch(

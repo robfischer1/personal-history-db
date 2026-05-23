@@ -206,7 +206,7 @@ class PhonePhotosPlugin(PhdbSourcePlugin):
         cur = conn.execute(_INSERT_PHOTOGRAPH_SQL, params)
         if cur.rowcount == 0:
             return None
-        return int(cur.lastrowid)
+        return int(cur.lastrowid)  # type: ignore[arg-type]
 
     def register_cli(self, parser: Any) -> None:
         """Phase 7: registration via generic ``phdb plugin ingest phone_photos <path>``."""

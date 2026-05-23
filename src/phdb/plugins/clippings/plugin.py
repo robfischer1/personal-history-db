@@ -27,7 +27,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
-from phdb.formats.clippings_md import ClippingRecord, parse as parse_clippings_md
+from phdb.formats.clippings_md import ClippingRecord
+from phdb.formats.clippings_md import parse as parse_clippings_md
 from phdb.log import get_logger
 from phdb.plugins.clippings.ingest import upsert_clipping
 

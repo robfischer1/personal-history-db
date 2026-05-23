@@ -23,6 +23,7 @@ import sqlite3
 from typing import Any
 
 from phdb.core.lookup import get_chunk, list_sources, server_info
+from phdb.core.registry import default_registry
 from phdb.core.search import (  # noqa: F401 — re-exported for legacy callers
     DATE_FILTER_OVERSAMPLE,
     FTS_STOPWORDS,
@@ -42,7 +43,6 @@ from phdb.core.search import (  # noqa: F401 — re-exported for legacy callers
     rrf_fuse,
     search,
 )
-from phdb.core.registry import default_registry
 from phdb.embed_provider import EmbedProvider  # noqa: F401 — legacy re-export
 from phdb.embed_service import EmbedClient  # noqa: F401 — legacy re-export
 

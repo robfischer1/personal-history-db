@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,11 +17,11 @@ from phdb.core.plugin import PhdbSourcePlugin
 from phdb.formats.claude_chat_json import parse as parse_claude_json
 from phdb.log import get_logger
 from phdb.records import AISessionMessage
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 if TYPE_CHECKING:
-    from phdb.settings import Settings
     from phdb.core.plugin.manifest import PluginManifest
+    from phdb.settings import Settings
 
 log = get_logger("phdb.plugins.claude_chat")
 
@@ -79,12 +78,12 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
                (parent == "projects" and root.suffix == ".json"):
                 yield root, self.name
             return
-            
+
         for fname in ("conversations.json", "memories.json", "users.json"):
             p = root / fname
             if p.exists():
                 yield p, self.name
-        
+
         projects_dir = root / "projects"
         if projects_dir.exists() and projects_dir.is_dir():
             for p in projects_dir.glob("*.json"):
@@ -106,9 +105,7 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
         """Persist a single AISessionMessage to its typed table."""
         sf_id = source_file_id if source_file_id is not None else 0
         payload: dict[str, Any] = json.loads(record.payload) if record.payload else {}
-        schema_type = payload.get("schema_type", "Conversation")
         kind = record.kind
-        role = record.role
 
         if kind in ("message", "tool_use", "tool_result"):
             return self._ingest_conversation_message(conn, record, payload, sf_id, owner_addr, owner_name)
@@ -120,7 +117,7 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
             return self._ingest_creative_work(conn, record, payload, sf_id, owner_addr, owner_name)
         elif kind == "project_doc":
             return self._ingest_digital_document(conn, record, payload, sf_id, owner_addr, owner_name)
-        
+
         log.warning("[%s] unrecognized kind: %s", self.name, kind)
         return None
 
@@ -154,12 +151,12 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
         batch_count = 0
         for record in self.parse(source_path):
             report.rows_yielded += 1
-            
+
             row_id = self.ingest_row(
                 conn, record, source_file_id=sf_id,
                 owner_addr=owner_addr, owner_name=owner_name
             )
-            
+
             if row_id is None:
                 report.rows_skipped += 1
                 continue
@@ -169,12 +166,12 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
             # Handle Threading (only for Conversation, CreativeWork, DigitalDocument)
             if record.thread_key:
                 tid, created = self._upsert_thread(conn, record.thread_key, record.thread_metadata)
-                
+
                 # Determine source table
                 payload = json.loads(record.payload) if record.payload else {}
                 schema_type = payload.get("schema_type", "Conversation")
                 source_table = self._source_table_for_schema(schema_type)
-                
+
                 self._link_message_thread(conn, source_table, row_id, tid)
                 if created:
                     report.threads_created += 1
@@ -185,14 +182,14 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
                 batch_count = 0
 
         conn.commit()
-        
+
         # Finalize message count
         conn.execute(
             "UPDATE source_files SET message_count = ? WHERE id = ?",
             (report.rows_inserted, sf_id),
         )
         conn.commit()
-        
+
         return report
 
     # --------------------------- Ingest Helpers ---------------------------
@@ -214,11 +211,11 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
         sender = payload.get("sender", "")
         direction = payload.get("direction", "self")
         kind = record.kind
-        
+
         sender_address = owner_addr if sender == "human" else f"{_PLATFORM}:claude"
         sender_name = owner_name if sender == "human" else "Claude"
         rfc822_id = payload.get("rfc822_id_suffix")
-        
+
         # Attachments extracted logic
         attachments = payload.get("attachments") or []
 
@@ -249,7 +246,7 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
         row = cur.fetchone()
         if not row:
             return None
-        
+
         message_id = int(row[0])
         self._insert_attachments(conn, message_id, attachments)
         return message_id
@@ -364,8 +361,9 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
         pred = get_predicate(conn, name)
         if pred is None:
             raise ValueError(f"Predicate {name!r} not found")
-        self._predicate_cache[name] = pred["id"]
-        return pred["id"]
+        pid = int(pred["id"])
+        self._predicate_cache[name] = pid
+        return pid
 
     def _upsert_thread(
         self, conn: sqlite3.Connection, thread_key: str, metadata: dict[str, Any] | None = None
@@ -374,7 +372,7 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
         # Actually the legacy code used source_kind:thread_key
         # ClaudeChatAdapter.source_kind was "claude-chat"
         # AISessionMessage already has thread_key like "claude-chat-..."
-        
+
         existing = conn.execute(
             "SELECT id FROM nodes WHERE kind = 'thread' AND normalized_label = ?",
             (label.lower(),),
@@ -383,7 +381,7 @@ class ClaudeChatPlugin(PhdbSourcePlugin):
             return int(existing[0]), False
 
         node_id = resolve_node(conn, label, "thread")
-        return int(node_id), True
+        return int(node_id), True  # type: ignore[arg-type]
 
     def _link_message_thread(
         self, conn: sqlite3.Connection, source_table: str, source_id: int, thread_node_id: int

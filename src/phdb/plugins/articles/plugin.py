@@ -29,7 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
-from phdb.formats.articles_md import ArticleRecord, parse as parse_articles_md
+from phdb.formats.articles_md import ArticleRecord
+from phdb.formats.articles_md import parse as parse_articles_md
 from phdb.log import get_logger
 
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ class ArticlesPlugin(PhdbSourcePlugin):
         )
         if cur.rowcount == 0:
             return None
-        return int(cur.lastrowid)
+        return int(cur.lastrowid)  # type: ignore[arg-type]
 
     def register_cli(self, parser: Any) -> None:
         """Phase 7: registration via generic ``phdb plugin ingest articles <path>``."""

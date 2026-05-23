@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.apple_dbs import AppleDbsPlugin
+from phdb.db import connect
 from phdb.formats.apple_dbs_sqlite import apple_ts_to_iso as _apple_ts_to_iso
 from phdb.formats.apple_dbs_sqlite import normalize_phone as _normalize_phone
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.apple_dbs import AppleDbsPlugin
 from phdb.settings import IdentitySettings, Settings
 
 
@@ -162,7 +162,7 @@ class TestAppleDbsPluginIntegration:
         from phdb.core.plugin.manifest import load_manifest
         manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
         plugin = AppleDbsPlugin(manifest)
-        
+
         with connect(apple_db) as conn:
             summary = plugin.run(apple_decrypt_dir, conn, apple_settings)
 
@@ -177,7 +177,7 @@ class TestAppleDbsPluginIntegration:
         from phdb.core.plugin.manifest import load_manifest
         manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
         plugin = AppleDbsPlugin(manifest)
-        
+
         with connect(apple_db) as conn:
             summary = plugin.run(apple_decrypt_dir, conn, apple_settings, only=["callhistory"])
             rows = conn.execute(
@@ -240,7 +240,7 @@ class TestAppleDbsPluginIntegration:
         from phdb.core.plugin.manifest import load_manifest
         manifest = load_manifest(Path("src/phdb/plugins/apple_dbs/plugin.toml"))
         plugin = AppleDbsPlugin(manifest)
-        
+
         with connect(apple_db) as conn:
             plugin.run(apple_decrypt_dir, conn, apple_settings)
 

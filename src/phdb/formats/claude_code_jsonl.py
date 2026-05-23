@@ -10,6 +10,7 @@ import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from phdb.records import AISessionMessage, Provenance
 
@@ -22,7 +23,7 @@ _UUID_TAIL_RE = re.compile(
 )
 
 
-def _extract_meta(obj: dict) -> dict[str, str | None]:
+def _extract_meta(obj: dict[str, Any]) -> dict[str, str | None]:
     return {
         "sessionId": obj.get("sessionId"),
         "cwd": obj.get("cwd"),
@@ -33,7 +34,7 @@ def _extract_meta(obj: dict) -> dict[str, str | None]:
     }
 
 
-def _body_text_from_content(content: list | str | None) -> str | None:
+def _body_text_from_content(content: list[Any] | str | None) -> str | None:
     if not content:
         return None
     if isinstance(content, str):
@@ -54,7 +55,7 @@ def _body_text_from_content(content: list | str | None) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def _derive_kind(obj: dict) -> tuple[str, str | None, str | None]:
+def _derive_kind(obj: dict[str, Any]) -> tuple[str, str | None, str | None]:
     """Return (kind, tool_name, tool_use_id) for a turn."""
     line_type = obj.get("type", "")
     is_sidechain = bool(obj.get("isSidechain"))

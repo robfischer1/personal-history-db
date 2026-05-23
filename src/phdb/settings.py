@@ -104,10 +104,7 @@ class Settings(BaseSettings):
 
         if inst_dir is None:
             env_inst = os.environ.get("PHDB_INSTANCE_DIR")
-            if env_inst:
-                inst_dir = Path(env_inst)
-            else:
-                inst_dir = _discover_instance_dir()
+            inst_dir = Path(env_inst) if env_inst else _discover_instance_dir()
 
         toml_data = _load_instance_toml(inst_dir)
 

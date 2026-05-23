@@ -30,6 +30,16 @@ from phdb.formats.url import (  # re-export for backward compat
 )
 from phdb.records import BookmarkEvent, Provenance
 
+__all__ = [
+    "JUNK_PATTERNS",
+    "SKIP_URL_PATTERNS",
+    "SOURCE_ORG",
+    "TRACKING_PARAMS",
+    "extract_domain",
+    "is_junk",
+    "normalize_url",
+    "should_skip",
+]
 
 SOURCE_ORG: dict[str, str] = {
     "raindrop_csv": "Raindrop.io",

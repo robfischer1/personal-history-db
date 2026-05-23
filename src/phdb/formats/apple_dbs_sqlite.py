@@ -21,14 +21,13 @@ import sqlite3
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Union
 
 from phdb.records import CallRecord, ChatMessage, DigitalDocument, Provenance, WebActivity
 
 APPLE_EPOCH = datetime(2001, 1, 1)
 
 # Union of all record types this parser yields.
-AppleDbsRecord = Union[CallRecord, WebActivity, DigitalDocument, ChatMessage]
+AppleDbsRecord = CallRecord | WebActivity | DigitalDocument | ChatMessage
 
 # Handler name → parse function mapping (populated at module level below).
 HANDLER_NAMES = (

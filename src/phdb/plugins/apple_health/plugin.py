@@ -13,6 +13,8 @@ from phdb.formats.apple_health_xml import (
     ParsedClinical,
     ParsedRecord,
     ParsedWorkout,
+)
+from phdb.formats.apple_health_xml import (
     parse as parse_apple_health,
 )
 from phdb.log import get_logger
@@ -84,7 +86,7 @@ class AppleHealthPlugin(PhdbSourcePlugin):
                     conn, self.SOURCE_KIND, "observations", msg_id, "metrics"
                 )
             return msg_id
-        
+
         if isinstance(record, ParsedWorkout):
             msg_id = upsert_exercise_action(conn, source_file_id, record)
             if msg_id:
@@ -93,7 +95,7 @@ class AppleHealthPlugin(PhdbSourcePlugin):
                     conn, self.SOURCE_KIND, "exercise_actions", msg_id, thread_key
                 )
             return msg_id
-            
+
         if isinstance(record, ParsedClinical):
             msg_id = upsert_medical_record(conn, source_file_id, record)
             if msg_id and clinical_thread_id:
@@ -101,7 +103,7 @@ class AppleHealthPlugin(PhdbSourcePlugin):
                     conn, self.SOURCE_KIND, "medical_records", msg_id, "clinical"
                 )
             return msg_id
-            
+
         return None
 
     def register_cli(self, parser: Any) -> None:
@@ -120,7 +122,7 @@ class AppleHealthPlugin(PhdbSourcePlugin):
     ) -> IngestSummary:
         """End-to-end ingest of one Apple Health zip."""
         report = IngestSummary(source_path=str(source_path))
-        
+
         ensure_sidecar_tables(conn)
         source_file_id = register_source_file(
             conn, source_path,
@@ -137,7 +139,9 @@ class AppleHealthPlugin(PhdbSourcePlugin):
             if existing:
                 return existing[0], False
             from phdb.triples import resolve_node
-            return resolve_node(conn, label, "thread"), True
+            # resolve_node always returns int for these inputs; the int|None
+            # signature covers query-only callers.
+            return resolve_node(conn, label, "thread"), True  # type: ignore[return-value]
 
         metrics_thread_id, m_new = _get_or_create_thread(conn, f"{self.SOURCE_KIND}:metrics")
         clinical_thread_id, c_new = _get_or_create_thread(conn, f"{self.SOURCE_KIND}:clinical")
@@ -149,7 +153,7 @@ class AppleHealthPlugin(PhdbSourcePlugin):
         processed = 0
         for record in self.parse(source_path):
             report.rows_yielded += 1
-            
+
             # Handle workout thread creation count
             is_new_workout = False
             if isinstance(record, ParsedWorkout):
@@ -157,12 +161,12 @@ class AppleHealthPlugin(PhdbSourcePlugin):
                 _, is_new_workout = _get_or_create_thread(conn, thread_label)
 
             msg_id = self.ingest_row(
-                conn, record, 
+                conn, record,
                 source_file_id=source_file_id,
                 metrics_thread_id=metrics_thread_id,
                 clinical_thread_id=clinical_thread_id
             )
-            
+
             if msg_id:
                 report.rows_inserted += 1
                 if is_new_workout:
@@ -170,7 +174,7 @@ class AppleHealthPlugin(PhdbSourcePlugin):
             else:
                 report.rows_skipped += 1
 
-            processed += 1
+            processed += 1  # noqa: SIM113 — used solely for commit-interval bookkeeping
             if processed % COMMIT_EVERY == 0:
                 conn.commit()
 

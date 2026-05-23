@@ -55,10 +55,10 @@ def _entry_point_descriptors(group: str) -> list[PluginDescriptor]:
     try:
         eps = entry_points(group=group)
     except TypeError:
-        eps = entry_points().get(group, [])  # type: ignore[assignment]
+        eps = entry_points().get(group, [])
     for ep in eps:
         try:
-            dist_name = ep.dist.name if ep.dist else None  # type: ignore[union-attr]
+            dist_name = ep.dist.name if ep.dist else None
         except AttributeError:
             dist_name = None
         # Entry-point-installed plugins ship their plugin.toml in
@@ -217,7 +217,8 @@ def load_plugin(descriptor: PluginDescriptor) -> PhdbPlugin:
     module_path, class_name = descriptor.entry_point_value.split(":", 1)
     module = importlib.import_module(module_path)
     plugin_cls = getattr(module, class_name)
-    return plugin_cls(descriptor.manifest)
+    plugin: PhdbPlugin = plugin_cls(descriptor.manifest)
+    return plugin
 
 
 def validate_plugin(descriptor: PluginDescriptor) -> list[str]:

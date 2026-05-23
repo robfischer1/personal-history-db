@@ -65,7 +65,7 @@ def upsert_clipping(
     )
     if cur.rowcount == 0:
         return None
-    return int(cur.lastrowid)
+    return int(cur.lastrowid)  # type: ignore[arg-type]
 
 
 __all__ = ["upsert_clipping"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 
 def load_sparsity(coverage_json: Path | str) -> dict[tuple[int, str], float]:
@@ -25,8 +26,8 @@ def load_sparsity(coverage_json: Path | str) -> dict[tuple[int, str], float]:
 
 
 def compute_sparsity(
-    cells: list[dict],
-) -> list[dict]:
+    cells: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Compute sparsity_factor for each cell in the coverage matrix.
 
     Input: list of dicts with keys: year, domain, count, scale_group.

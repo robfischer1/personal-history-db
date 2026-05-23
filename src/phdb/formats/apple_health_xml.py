@@ -16,10 +16,10 @@ import hashlib
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Union
+from typing import IO
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -184,7 +184,7 @@ class ParsedClinical:
 
 
 # Union of all parsed types
-ParsedElement = Union[ParsedRecord, ParsedWorkout, ParsedClinical]
+ParsedElement = ParsedRecord | ParsedWorkout | ParsedClinical
 
 
 # ---------------------------------------------------------------------------

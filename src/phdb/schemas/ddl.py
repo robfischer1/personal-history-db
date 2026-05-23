@@ -10,7 +10,7 @@ canonicalize some whitespace; the schema-diff comparator in
 
 from __future__ import annotations
 
-from phdb.schemas.base import IndexSpec, Schema
+from phdb.schemas.base import Schema
 
 
 def generate_create_table(schema: type[Schema], *, if_not_exists: bool = True) -> str:

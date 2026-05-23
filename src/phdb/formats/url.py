@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-
 # ---------------------------------------------------------------------------
 # Tracking params stripped during normalization
 # ---------------------------------------------------------------------------

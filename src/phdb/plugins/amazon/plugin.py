@@ -30,7 +30,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
-from phdb.formats.amazon_zip import AmazonRecord, parse as parse_amazon
+from phdb.formats.amazon_zip import AmazonRecord
+from phdb.formats.amazon_zip import parse as parse_amazon
 from phdb.log import get_logger
 from phdb.plugins.amazon.ingest import emit_thread_triple, ingest_amazon_record
 

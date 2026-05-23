@@ -79,8 +79,21 @@ class PhdbSourcePlugin(PhdbPlugin):
         ...
 
     @abstractmethod
-    def ingest_row(self, conn: sqlite3.Connection, record: Any) -> int:
-        """Persist a single record to its typed table; return the row id."""
+    def ingest_row(
+        self, conn: sqlite3.Connection, record: Any, **kwargs: Any
+    ) -> int | None:
+        """Persist a single record to its typed table.
+
+        Returns the inserted row id on success, or ``None`` when the row was
+        intentionally skipped (e.g., dedup hit, idempotent re-ingest). Plugins
+        that never skip can return only ``int``; the wider return type covers
+        plugins that perform conflict resolution at the row level.
+
+        Plugins may declare additional keyword-only parameters (e.g.,
+        ``source_file_id``, ``settings``); the ``**kwargs`` here keeps the
+        Liskov contract permissive without forcing every override to enumerate
+        the base signature.
+        """
         ...
 
     def project_facets(self, emission_bus: Any, record: Any) -> None:

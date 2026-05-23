@@ -1,1 +1,1 @@
-﻿"""phdb tools — analysis and reporting utilities."""
+"""phdb tools — analysis and reporting utilities."""

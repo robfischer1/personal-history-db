@@ -8,7 +8,15 @@ version = "0.4.0b0"
 description = "A framework for ingesting, indexing, and querying personal digital history across dozens of source formats."
 requires-python = ">=3.11"
 license = "Apache-2.0"
-authors = [{ name = "<owner-name>" }]
+authors = [{ name = "robfischer1" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "beautifulsoup4>=4.12",
     "click>=8.1",
@@ -25,11 +33,17 @@ docs = [
     "python-docx>=1.0",
     "openpyxl>=3.1",
 ]
+server = ["mcp>=1.0"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+
+[project.urls]
+Repository = "https://github.com/robfischer1/personal-history-db"
+Issues = "https://github.com/robfischer1/personal-history-db/issues"
+Changelog = "https://github.com/robfischer1/personal-history-db/blob/main/CHANGELOG.md"
 
 [project.scripts]
 phdb = "phdb.cli:cli"
@@ -50,6 +64,15 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+# Plugin subclasses widen ingest_row with keyword-only args (source_file_id,
+# settings, thread ids, etc.). The ABC signature uses **kwargs to accept the
+# pattern, but mypy strict mode still flags additional keyword-only params
+# in overrides as Liskov violations. The trade-off is intentional: the plugin
+# protocol is structurally "ingest one record" with caller-supplied context.
+[[tool.mypy.overrides]]
+module = "phdb.plugins.*"
+disable_error_code = ["override"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

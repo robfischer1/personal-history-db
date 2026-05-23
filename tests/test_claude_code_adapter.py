@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from types import SimpleNamespace
+from phdb.formats.claude_code_jsonl import _body_text_from_content, _derive_kind
 from phdb.plugins.claude_code import ClaudeCodePlugin
-from phdb.formats.claude_code_jsonl import _derive_kind, _body_text_from_content
 
 
 class ClaudeCodeAdapter:

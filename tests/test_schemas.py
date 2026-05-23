@@ -28,7 +28,6 @@ from phdb.schemas import (
     all_schemas,
     default_schema_registry,
     generate_create_table,
-    generate_indexes,
     upsert_entity,
 )
 from phdb.schemas.base import Schema
@@ -106,7 +105,7 @@ def test_create_table_round_trips_for_representative_schemas(schema: type[Schema
         f" live={set(live_cols)} declared={set(expected_cols)}"
     )
     # Type + nullability match
-    for col, (live_type, live_notnull, live_pk) in live_cols.items():
+    for col, (live_type, _live_notnull, live_pk) in live_cols.items():
         exp_type, exp_notnull, exp_pk = expected_cols[col]
         assert live_type == exp_type, f"{schema.table_name}.{col}: type mismatch ({live_type} vs {exp_type})"
         assert live_pk == exp_pk, f"{schema.table_name}.{col}: pk mismatch"

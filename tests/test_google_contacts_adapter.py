@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from phdb.formats.vcard import _parse_vcf
-from phdb.plugins.google_contacts import GoogleContactsPlugin as GoogleContactsAdapter
 from phdb.db import connect
+from phdb.formats.vcard import _parse_vcf
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.google_contacts import GoogleContactsPlugin as GoogleContactsAdapter
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "google_contacts"

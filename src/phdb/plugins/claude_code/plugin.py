@@ -148,11 +148,11 @@ class ClaudeCodePlugin(PhdbSourcePlugin):
                     "SELECT 1 FROM nodes WHERE kind = 'thread' AND normalized_label = ?",
                     (label.lower(),),
                 ).fetchone()
-                
+
                 # We also need to populate the threads table if it still exists
                 # and has specific columns like metadata/cwd
                 self._ensure_threads_row(conn, record)
-                
+
                 if not exists:
                     report.threads_created += 1
                 first_rec = False

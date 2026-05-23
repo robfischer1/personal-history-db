@@ -6,7 +6,6 @@ to handle Safari history, iMessages, and call history from iPhone backups.
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -15,7 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
-from phdb.formats.apple_dbs_sqlite import HANDLER_NAMES, parse as parse_apple_dbs
+from phdb.formats.apple_dbs_sqlite import HANDLER_NAMES
+from phdb.formats.apple_dbs_sqlite import parse as parse_apple_dbs
 from phdb.log import get_logger
 from phdb.plugins.apple_dbs.ingest import (
     ingest_call_record,
@@ -126,7 +126,7 @@ class AppleDbsPlugin(PhdbSourcePlugin):
             if handler_dir.exists():
                 yield handler_dir, handler
                 found = True
-        
+
         if not found and root.exists():
             # Treat root as a flat directory containing some DBs
             yield root, "apple-backup-flat"
@@ -200,7 +200,7 @@ class AppleDbsPlugin(PhdbSourcePlugin):
     def project_facets(self, emission_bus: EmissionBus, record: Any) -> None:
         """Optional — emit FacetEmission events. (Phase 8+)"""
         # iMessage -> Thread, Person
-        # Legacy handled this via direct SQL in run(); plugin-port maintains 
+        # Legacy handled this via direct SQL in run(); plugin-port maintains
         # compatibility by doing it in run() for now, or here if bus is ready.
         return None
 
@@ -235,7 +235,7 @@ class AppleDbsPlugin(PhdbSourcePlugin):
         handlers_to_run = only or list(HANDLER_NAMES)
         done_handlers = self._get_done_handlers(conn, sf_id)
         todo = [h for h in handlers_to_run if h not in done_handlers]
-        
+
         # 3. Iterate
         t_start = time.time()
         for handler_name in todo:
@@ -253,17 +253,17 @@ class AppleDbsPlugin(PhdbSourcePlugin):
                     row_id = self.ingest_row(conn, record, source_file_id=sf_id)
                     if row_id:
                         summary.rows_inserted += 1
-                        
+
                         # Handle Thread facets (legacy-style for now)
                         thread_key = getattr(record, "thread_key", None)
                         if thread_key:
                             tid, created = _upsert_thread(conn, self.name, thread_key)
-                            
+
                             # Determine source table
                             source_table = "chat_messages"
                             if isinstance(record, CallRecord):
                                 source_table = "actions"
-                            
+
                             _link_message_thread(conn, self.name, source_table, row_id, tid)
                             if created:
                                 summary.threads_created += 1

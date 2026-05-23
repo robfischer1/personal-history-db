@@ -70,7 +70,7 @@ class PhoneCallsXmlPlugin(PhdbSourcePlugin):
             if root.suffix.lower() == ".xml":
                  yield root, self.SOURCE_KIND
             return
-        
+
         # Look for calls-*.xml or just *.xml
         for path in sorted(root.rglob("*.xml")):
             yield path, self.SOURCE_KIND

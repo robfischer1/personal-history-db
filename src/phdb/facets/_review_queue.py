@@ -32,6 +32,7 @@ The ``facet_type`` argument is the short facet name (``"people"``,
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -177,10 +178,8 @@ def save_pending(
                 f.write("\n")
         os.replace(tmp_name, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 

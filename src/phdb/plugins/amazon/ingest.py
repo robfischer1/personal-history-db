@@ -141,7 +141,7 @@ def ingest_amazon_record(
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
         return table, None
-    return table, int(cur.lastrowid)
+    return table, int(cur.lastrowid)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ from textwrap import dedent
 
 import pytest
 
-from phdb.formats.mbox import is_bulk_message, parse, stream_raw_messages
+from phdb.formats.mbox import parse, stream_raw_messages
 from phdb.records import EmailMessage
 
 

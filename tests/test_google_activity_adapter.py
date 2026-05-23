@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.plugins.google_activity import GoogleActivityPlugin
+from phdb.core.plugin.manifest import load_manifest
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.google_activity import GoogleActivityPlugin
 from phdb.settings import IdentitySettings, Settings
-from phdb.core.plugin.manifest import load_manifest
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "google_activity"
 
@@ -84,6 +84,6 @@ class TestGoogleActivityIntegration:
             plugin.run(FIXTURE_DIR, conn, settings)
             searches = conn.execute("SELECT web_page_id FROM search_actions WHERE web_page_id IS NOT NULL").fetchall()
             watches = conn.execute("SELECT web_page_id FROM watch_actions WHERE web_page_id IS NOT NULL").fetchall()
-            
+
         # The fixtures should have at least one of each with a URL
         assert len(searches) + len(watches) >= 1

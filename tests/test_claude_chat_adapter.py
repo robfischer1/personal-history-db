@@ -6,7 +6,7 @@ from pathlib import Path
 
 from phdb.db import connect
 from phdb.plugins.claude_chat import ClaudeChatPlugin
-from phdb.settings import Settings, IdentitySettings
+from phdb.settings import Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "claude_chat"
 CONVOS = FIXTURE_DIR / "conversations.json"

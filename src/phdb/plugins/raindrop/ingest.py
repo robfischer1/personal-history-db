@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from phdb.formats.bookmark_upserts import (
     hash_canonical_bookmark as hash_canonical,
+)
+from phdb.formats.bookmark_upserts import (
     upsert_bookmark,
     upsert_web_page,
 )

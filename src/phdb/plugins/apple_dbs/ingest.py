@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+
 from phdb.formats.bookmark_upserts import (
     emit_bookmark_triples,
     upsert_bookmark,
@@ -15,7 +16,7 @@ from phdb.formats.bookmark_upserts import (
     upsert_web_page,
 )
 from phdb.formats.url import normalize_url
-from phdb.records import BookmarkEvent, WebActivity, ChatMessage, CallRecord, DigitalDocument
+from phdb.records import BookmarkEvent, CallRecord, ChatMessage, DigitalDocument, WebActivity
 
 
 def ingest_web_activity(
@@ -54,7 +55,7 @@ def ingest_web_activity(
             event=event, provenance="apple_dbs-emitted",
         )
         return bm_id
-    
+
     # visit -> BrowseAction
     return upsert_browse_action(
         conn, source_file_id, wp_id,

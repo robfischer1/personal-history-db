@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.plugins.writing_deltas import WritingDeltasPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.writing_deltas import WritingDeltasPlugin
 from phdb.query import writing_arc, writing_session_detail, writing_stats
 from phdb.settings import IdentitySettings, Settings
 

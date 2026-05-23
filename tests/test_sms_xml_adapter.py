@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.sms_xml import SmsXmlPlugin
+from phdb.db import connect
 from phdb.formats.smsbr_xml import (
     _epoch_ms_to_iso,
     _normalize_phone,
 )
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.sms_xml import SmsXmlPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_XML = Path(__file__).parent / "fixtures" / "sms_xml" / "sms_backup.xml"

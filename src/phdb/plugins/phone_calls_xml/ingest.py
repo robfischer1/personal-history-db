@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-from typing import Any
 
+from phdb.core.graph import get_predicate, resolve_node
 from phdb.records import CallRecord
-from phdb.core.graph import resolve_node, get_predicate
 
 _CALL_TYPE_RAW = {
     "1": "incoming", "2": "outgoing", "3": "missed",
@@ -53,7 +52,7 @@ def upsert_call(
     raw_type = _RECORD_CALL_TYPE_TO_RAW.get(record.call_type, "1")
     if record.direction == "outbound":
         raw_type = "2"
-    
+
     body = _synthesize_body(
         raw_type, record.duration_seconds or 0,
         record.caller_address, record.caller_address,
@@ -72,7 +71,7 @@ def upsert_call(
             'Action', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         ) RETURNING id""",
         (
-            f"calls-xml:{raw_hash}", subject, 
+            f"calls-xml:{raw_hash}", subject,
             record.caller_address if record.direction == "inbound" else None,
             record.caller_address if record.direction == "inbound" else None,
             record.direction, record.date_start or None, record.date_start or None,
@@ -88,7 +87,7 @@ def upsert_call(
     # 2. Link to Thread facet
     thread_key = f"calls:{record.caller_address}"
     thread_node_id = resolve_node(conn, f"{source_kind}:{thread_key}", "thread")
-    
+
     in_thread_pred = get_predicate(conn, "inThread")
     if in_thread_pred:
         record_label = f"actions:{row_id}"
@@ -97,15 +96,15 @@ def upsert_call(
             source_table="actions", source_id=row_id
         )
         conn.execute(
-            """INSERT OR IGNORE INTO triples 
-               (subject_node_id, predicate_id, object_node_id, provenance, source_ref) 
+            """INSERT OR IGNORE INTO triples
+               (subject_node_id, predicate_id, object_node_id, provenance, source_ref)
                VALUES (?, ?, ?, 'plugin', ?)""",
             (record_node_id, in_thread_pred["id"], thread_node_id, source_kind)
         )
 
     # 3. Link to Person facet (remote phone number)
     person_node_id = resolve_node(conn, record.caller_address, "person")
-    
+
     pred_name = "receivedFrom" if record.direction == "inbound" else "sentTo"
     pred = get_predicate(conn, pred_name)
     if pred:
@@ -115,8 +114,8 @@ def upsert_call(
             source_table="actions", source_id=row_id
         )
         conn.execute(
-            """INSERT OR IGNORE INTO triples 
-               (subject_node_id, predicate_id, object_node_id, provenance, source_ref) 
+            """INSERT OR IGNORE INTO triples
+               (subject_node_id, predicate_id, object_node_id, provenance, source_ref)
                VALUES (?, ?, ?, 'plugin', ?)""",
             (record_node_id, pred["id"], person_node_id, source_kind)
         )

@@ -6,17 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.phone_calls_xml import PhoneCallsXmlPlugin
-from phdb.plugins.phone_calls_xml.ingest import (
-    _synthesize_body,
-    upsert_call,
-)
+from phdb.db import connect
 from phdb.formats.smsbr_xml import (
     _epoch_ms_to_iso,
     _normalize_phone,
 )
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.phone_calls_xml import PhoneCallsXmlPlugin
+from phdb.plugins.phone_calls_xml.ingest import (
+    _synthesize_body,
+)
 from phdb.settings import IdentitySettings, Settings
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -168,8 +167,8 @@ class TestPhoneCallsXmlIntegration:
             report = plugin.run(FIXTURE_XML, conn, calls_settings)
             # Should have one person-link triple per call (sentTo or receivedFrom)
             sql = """
-                SELECT COUNT(*) FROM triples t 
-                JOIN predicates p ON t.predicate_id = p.id 
+                SELECT COUNT(*) FROM triples t
+                JOIN predicates p ON t.predicate_id = p.id
                 WHERE p.name IN ('sentTo', 'receivedFrom')
             """
             person_triples = conn.execute(sql).fetchone()[0]

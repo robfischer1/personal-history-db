@@ -223,7 +223,7 @@ class CalendarPlugin(PhdbSourcePlugin):
         )
         if cur.rowcount == 0:
             return None
-        row_id = int(cur.lastrowid)
+        row_id = int(cur.lastrowid)  # type: ignore[arg-type]
         _emit_thread_triple(
             conn, self.SOURCE_KIND, "events", row_id,
             thread_key=f"calendar:{record.calendar_name}",

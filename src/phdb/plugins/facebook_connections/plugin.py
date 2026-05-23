@@ -78,12 +78,12 @@ class FacebookConnectionsPlugin(PhdbSourcePlugin):
         if root.is_file() and detect(root):
             yield root, self.SOURCE_KIND
             return
-        # FB takeout can be a zip or a directory. 
+        # FB takeout can be a zip or a directory.
         # If it's a directory, we check it.
         if root.is_dir() and detect(root):
              yield root, self.SOURCE_KIND
              return
-        
+
         # Also look for zips in the root
         if root.is_dir():
             for path in sorted(root.rglob("*.zip")):
@@ -109,7 +109,7 @@ class FacebookConnectionsPlugin(PhdbSourcePlugin):
         # but that's expensive. Better to have them passed in.
         eid = export_id or derive_export_id(Path(record.provenance.source_path))
         edate = export_date or derive_export_date(Path(record.provenance.source_path))
-        
+
         return upsert_connection(
             conn, record,
             export_id=eid,
@@ -131,7 +131,7 @@ class FacebookConnectionsPlugin(PhdbSourcePlugin):
     ) -> IngestSummary:
         """End-to-end ingest of one source file."""
         report = IngestSummary(source_path=str(source_path))
-        
+
         if not detect(source_path):
             report.errors.append(f"No FB takeout detected at: {source_path}")
             return report
@@ -149,7 +149,7 @@ class FacebookConnectionsPlugin(PhdbSourcePlugin):
         for record in self.parse(source_path):
             report.rows_yielded += 1
             self.ingest_row(
-                conn, record, 
+                conn, record,
                 source_file_id=source_file_id,
                 export_id=export_id,
                 export_date=export_date,

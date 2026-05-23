@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.plugins.facebook_unified import FacebookUnifiedPlugin as FacebookUnifiedAdapter
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.facebook_unified import FacebookUnifiedPlugin as FacebookUnifiedAdapter
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "facebook" / "facebook_test.zip"

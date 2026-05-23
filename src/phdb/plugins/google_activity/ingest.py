@@ -13,7 +13,7 @@ from typing import Any
 from phdb.formats.bookmark_upserts import upsert_web_page
 from phdb.formats.url import normalize_url
 from phdb.records import WebActivity
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 _MAX_BODY_LEN = 2000
 
@@ -105,12 +105,12 @@ def upsert_web_activity(
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
         return 0
-    row_id = int(cur.lastrowid)
+    row_id = int(cur.lastrowid)  # type: ignore[arg-type]
 
     # 4. Handle Thread facet
     thread_key = f"google-activity:{stream}"
     thread_node_id = resolve_node(conn, thread_key, "thread")
-    
+
     in_thread_pred = get_predicate(conn, "inThread")
     if in_thread_pred:
         pred_id = in_thread_pred["id"]

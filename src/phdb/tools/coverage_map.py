@@ -10,11 +10,14 @@ import json
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
+
+from datetime import UTC
 
 from phdb.tools.sparsity import compute_sparsity
 
@@ -110,7 +113,7 @@ CONTRIBUTING_TABLES = {
 }
 
 
-def load_config(config_path: Path | None = None) -> dict:
+def load_config(config_path: Path | None = None) -> dict[str, Any]:
     """Load the coverage domains TOML config."""
     path = config_path or CONFIG_PATH
     return tomllib.loads(path.read_text(encoding="utf-8"))
@@ -120,7 +123,7 @@ def classify_domain(
     source_kind: str | None,
     schema_type: str | None,
     sender_domain: str | None,
-    config: dict,
+    config: dict[str, Any],
 ) -> str:
     """Classify a row into a life-domain using the priority ladder.
 
@@ -133,37 +136,37 @@ def classify_domain(
     if source_kind:
         sk_rules = rules.get("source_kind", {})
         if source_kind in sk_rules:
-            return sk_rules[source_kind]
+            return str(sk_rules[source_kind])
 
     # Layer 2: schema_type
     if schema_type:
         st_rules = rules.get("schema_type", {})
         if schema_type in st_rules:
-            domain = st_rules[schema_type]
+            domain = str(st_rules[schema_type])
             # Layer 3: sender_domain can override for EmailMessage
             if schema_type == "EmailMessage" and sender_domain:
                 sd_rules = rules.get("sender_domain", {})
                 if sender_domain in sd_rules:
-                    return sd_rules[sender_domain]
+                    return str(sd_rules[sender_domain])
             return domain
 
     # Layer 3 fallback: sender_domain even without schema_type match
     if sender_domain:
         sd_rules = rules.get("sender_domain", {})
         if sender_domain in sd_rules:
-            return sd_rules[sender_domain]
+            return str(sd_rules[sender_domain])
 
     return "unclassified"
 
 
-def query_coverage(conn: sqlite3.Connection, config: dict) -> list[dict]:
+def query_coverage(conn: sqlite3.Connection, config: dict[str, Any]) -> list[dict[str, Any]]:
     """Query all contributing tables and classify into year x domain cells.
 
     Each table has a pre-built SQL query returning: year, source_kind, schema_type, sender_domain.
     """
     counts: dict[tuple[int, str], int] = defaultdict(int)
 
-    for table_name, meta in CONTRIBUTING_TABLES.items():
+    for _table_name, meta in CONTRIBUTING_TABLES.items():
         sql = meta["query"]
 
         try:
@@ -187,7 +190,7 @@ def query_coverage(conn: sqlite3.Connection, config: dict) -> list[dict]:
 
     # Build cells list
     domains = config["domains"]["names"] + ["unclassified"]
-    all_years = sorted(set(y for y, _ in counts.keys())) if counts else []
+    all_years = sorted(set(y for y, _ in counts)) if counts else []
 
     cells = []
     for year in all_years:
@@ -206,9 +209,9 @@ def query_coverage(conn: sqlite3.Connection, config: dict) -> list[dict]:
 
 def generate_coverage_map(
     conn: sqlite3.Connection,
-    config: dict | None = None,
+    config: dict[str, Any] | None = None,
     config_path: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Generate the full coverage map data structure."""
     if config is None:
         config = load_config(config_path)
@@ -241,11 +244,11 @@ def generate_coverage_map(
     }
 
 
-def render_terminal(data: dict) -> str:
+def render_terminal(data: dict[str, Any]) -> str:
     """Render the coverage map as an ANSI-colored terminal table."""
     domains = data["domains"]
     years = data["years"]
-    cells_by_key: dict[tuple[int, str], dict] = {}
+    cells_by_key: dict[tuple[int, str], dict[str, Any]] = {}
     for c in data["cells"]:
         cells_by_key[(c["year"], c["domain"])] = c
 
@@ -270,7 +273,7 @@ def render_terminal(data: dict) -> str:
     lines: list[str] = []
 
     # Header
-    lines.append(f"\n\033[1mSubstrate Coverage Map\033[0m")
+    lines.append("\n\033[1mSubstrate Coverage Map\033[0m")
     lines.append(f"Total rows: {data['total_rows']:,}  |  Unclassified: {data['unclassified_pct']:.1f}%\n")
 
     # Thinnest cells summary
@@ -297,7 +300,7 @@ def render_terminal(data: dict) -> str:
         lines.append(row)
 
     # Health row (separate scale)
-    lines.append(f"\n\033[1mHealth (separate scale)\033[0m")
+    lines.append("\n\033[1mHealth (separate scale)\033[0m")
     health_header = "Year".ljust(6) + "health".center(col_width)
     lines.append(health_header)
     lines.append("-" * len(health_header))
@@ -308,12 +311,12 @@ def render_terminal(data: dict) -> str:
         lines.append(row)
 
     # Legend
-    lines.append(f"\n\033[2m·\033[0m=0  \033[31m░░░\033[0m=1-99  \033[33m▒▒▒\033[0m=100-999  \033[32m▓▓▓\033[0m=1K-9.9K  \033[32;1m███\033[0m=10K+")
+    lines.append("\n\033[2m·\033[0m=0  \033[31m░░░\033[0m=1-99  \033[33m▒▒▒\033[0m=100-999  \033[32m▓▓▓\033[0m=1K-9.9K  \033[32;1m███\033[0m=10K+")
 
     return "\n".join(lines)
 
 
-def render_vault(data: dict) -> str:
+def render_vault(data: dict[str, Any]) -> str:
     """Render the coverage map as a markdown table for the vault note."""
     domains = data["domains"]
     years = data["years"]
@@ -343,9 +346,9 @@ def render_vault(data: dict) -> str:
     lines.append('"@type": "Dataset"')
     lines.append('name: "Substrate Coverage Map"')
     lines.append(f'description: "Year x domain density matrix — {data["total_rows"]:,} total rows across {len(years)} years and {len(domains)} domains."')
-    lines.append(f'identifier: "substrate-coverage-map-rendered"')
-    lines.append(f'created: 2026-05-22')
-    lines.append(f'updated: 2026-05-22')
+    lines.append('identifier: "substrate-coverage-map-rendered"')
+    lines.append('created: 2026-05-22')
+    lines.append('updated: 2026-05-22')
     lines.append('author_type: "ai-generated"')
     lines.append('status: "Active"')
     lines.append('up: "[[State of Project]]"')
@@ -394,22 +397,22 @@ def render_vault(data: dict) -> str:
     return "\n".join(lines)
 
 
-def write_json(data: dict, output_path: Path) -> None:
+def write_json(data: dict[str, Any], output_path: Path) -> None:
     """Write the coverage map JSON to disk."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    data["generated_at"] = datetime.now(timezone.utc).isoformat()
+    data["generated_at"] = datetime.now(UTC).isoformat()
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def write_vault_note(data: dict, vault_path: Path) -> None:
+def write_vault_note(data: dict[str, Any], vault_path: Path) -> None:
     """Write the vault markdown note."""
     content = render_vault(data)
     vault_path.parent.mkdir(parents=True, exist_ok=True)
     vault_path.write_text(content, encoding="utf-8")
 
 
-def write_state(data: dict, state_path: Path) -> None:
+def write_state(data: dict[str, Any], state_path: Path) -> None:
     """Write the coverage state file for post-ingest threshold checks."""
     state = {
         "total_rows_at_last_run": data["total_rows"],
@@ -428,11 +431,11 @@ def should_rerun(state_path: Path, current_total: int, threshold_pct: float = 0.
         return True
 
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    last_total = state.get("total_rows_at_last_run", 0)
+    last_total = int(state.get("total_rows_at_last_run", 0))
     if last_total == 0:
         return True
 
     delta = current_total - last_total
     pct_growth = delta / last_total
 
-    return pct_growth >= threshold_pct or delta >= threshold_abs
+    return bool(pct_growth >= threshold_pct or delta >= threshold_abs)

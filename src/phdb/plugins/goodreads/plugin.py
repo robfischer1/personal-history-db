@@ -81,13 +81,11 @@ def _register_source_file(
 
 _INSERT_BOOK_SQL = """\
 INSERT OR IGNORE INTO books (
-    schema_type, book_key, subject, sender_address, sender_name,
-    direction, date_recorded, body_text, body_text_source, body_text_hash,
-    is_bulk, bulk_signal, raw_hash, source_file_id
+    schema_type, name, isbn, publisher, date_published,
+    raw_hash, source_file_id
 ) VALUES (
     'Book', ?, ?, ?, ?,
-    'self', ?, ?, 'goodreads-csv', ?,
-    0, NULL, ?, ?
+    ?, ?
 )"""
 
 
@@ -179,28 +177,18 @@ class GoodreadsPlugin(PhdbSourcePlugin):
         sf_id = source_file_id if source_file_id is not None else 0
         title = record.title
 
-        body_text_hash = hashlib.sha256(title.encode("utf-8")).hexdigest()
-
-        # Map ConsumedItem -> books columns (legacy contract):
-        #   subject         = title
-        #   sender_address  = isbn        (None when blank)
-        #   sender_name     = author      (publisher in the CSV; None when blank)
-        #   body_text       = title       (legacy adapter set body_text = title)
         cur = conn.execute(
             _INSERT_BOOK_SQL,
             (
-                f"goodreads:{record.provenance.raw_hash}",  # book_key
-                title,                                       # subject
-                record.isbn,                                 # sender_address
-                record.author,                               # sender_name
-                None,                                        # date_recorded
-                title,                                       # body_text
-                body_text_hash,                              # body_text_hash
-                record.provenance.raw_hash,                  # raw_hash
-                sf_id,                                       # source_file_id
+                title,                          # name
+                record.isbn,                    # isbn
+                record.author,                  # publisher (CSV publisher → ConsumedItem.author)
+                None,                           # date_published
+                record.provenance.raw_hash,     # raw_hash
+                sf_id,                          # source_file_id
             ),
         )
-        book_id = int(cur.lastrowid) if cur.rowcount else None
+        book_id = int(cur.lastrowid) if cur.rowcount else None  # type: ignore[arg-type]
 
         if book_id is not None:
             _emit_book_thread_triple(
@@ -217,7 +205,7 @@ class GoodreadsPlugin(PhdbSourcePlugin):
                     review_body.encode("utf-8")
                 ).hexdigest()
                 review_raw_hash = hashlib.sha256(
-                    f"{record.provenance.raw_hash}|review".encode("utf-8")
+                    f"{record.provenance.raw_hash}|review".encode()
                 ).hexdigest()
                 rcur = conn.execute(
                     _INSERT_REVIEW_SQL,
@@ -234,7 +222,7 @@ class GoodreadsPlugin(PhdbSourcePlugin):
                     ),
                 )
                 if rcur.rowcount:
-                    review_id = int(rcur.lastrowid)
+                    review_id = int(rcur.lastrowid)  # type: ignore[arg-type]
                     _emit_book_thread_triple(
                         conn, "reviews", review_id, self.THREAD_KEY, self.SOURCE_KIND,
                     )

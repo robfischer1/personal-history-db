@@ -18,7 +18,6 @@ from phdb.log import get_logger
 from phdb.plugins.facebook_unified.ingest import ingest_facebook_record
 
 if TYPE_CHECKING:
-    from phdb.core.plugin.manifest import PluginManifest
     from phdb.records import ChatMessage, Reaction, SocialPost
     from phdb.settings import Settings
 
@@ -129,14 +128,14 @@ class FacebookUnifiedPlugin(PhdbSourcePlugin):
 
         # To track threads created, we'd need to count resolve_node calls for kind='thread'
         # that actually insert. For now, we'll just report rows.
-        
+
         batch_count = 0
         for record in self.parse(source_path):
             report.rows_yielded += 1
             row_id = self.ingest_row(
                 conn, record, source_file_id=source_file_id, settings=settings
             )
-            
+
             if row_id is not None:
                 report.rows_inserted += 1
             else:
@@ -148,11 +147,11 @@ class FacebookUnifiedPlugin(PhdbSourcePlugin):
                 batch_count = 0
 
         conn.commit()
-        
+
         # Update message count in source_files
         # Since this plugin emits to multiple tables, we aggregate them
         # (Actually source_files.message_count is usually just an informative hint)
-        
+
         log.info(
             "[facebook_unified] Done: %d yielded, %d inserted, %d skipped",
             report.rows_yielded, report.rows_inserted, report.rows_skipped,

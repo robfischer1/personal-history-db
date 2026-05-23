@@ -15,8 +15,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from phdb.schemas.base import EntitySchema, FieldSpec
-
+from phdb.schemas.base import EntitySchema
 
 _NON_COALESCE_FIELDS: frozenset[str] = frozenset({
     "id", "created_at", "schema_type",

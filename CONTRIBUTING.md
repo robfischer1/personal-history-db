@@ -12,7 +12,7 @@ uv pip install -e ".[dev]"
 ## Running checks
 
 ```bash
-uv run pytest                     # all 563 tests
+uv run pytest                     # all 1150+ tests
 uv run pytest tests/test_db.py    # single module
 uv run pytest -k "test_bulk"      # by name pattern
 uv run pytest -xvs                # verbose, stop on first failure
@@ -30,37 +30,23 @@ All three must pass before submitting a PR.
 
 ```text
 src/phdb/
-├── cli.py                Click CLI entrypoint
-├── db.py                 SQLite connection factory (WAL, pragmas, sqlite-vec)
-├── settings.py           Three-tier settings: defaults → TOML → env vars
-├── query.py              Unified query layer (hybrid search, lookups, people)
-├── embed_pipeline.py     Chunking + batched Ollama embedding
-├── embed_service.py      Ollama HTTP client
-├── writelock.py          Cross-process file lock for DB writes
-├── log.py                PII-redacted structured logging
-├── validation.py         Instance config validation
-├── adapters/
-│   ├── base.py           Adapter ABC + AdapterRow + DedupStrategy
-│   ├── loader.py         Dynamic adapter discovery from configured paths
-│   └── *.py              32 source-format adapters
-├── atoms/
-│   └── registry.py       Schema.org @type registry
-└── migrations/
-    ├── runner.py          Migration runner (project 0001–0999, instance 1000+)
-    └── project/           SQL migration files
+├── core/         # source-agnostic infrastructure (DB, embed, scoring, graph, search, plugin loader)
+├── schemas/      # canonical Schema.org-keyed typed-table dataclasses
+├── facets/       # facet plugins (people, places, time, threads, topics)
+├── plugins/      # source plugins (34 first-party adapters)
+├── formats/      # shared format parsers + upsert helpers
+├── migrations/   # SQL migrations + runner
+├── tools/        # CLI-facing utilities (coverage maps, sparsity, schema docs)
+├── cli.py        # Click CLI entrypoint
+├── settings.py   # Three-tier settings: defaults → instance TOML → env vars
+└── query.py      # Unified query layer (hybrid search, lookups, people)
 ```
 
-## Writing an adapter
+## Writing a plugin
 
-See [docs/writing-an-adapter.md](docs/writing-an-adapter.md) for the full guide.
-
-Quick summary:
-
-1. Subclass `Adapter` from `phdb.adapters.base`
-2. Set `name`, `source_kind`, `file_kind`, `schema_type`, `dedup_strategy`
-3. Implement `iter_rows()` to yield `AdapterRow` instances
-4. Override `parse_date()`, `compute_raw_hash()`, `detect_bulk()` as needed
-5. The `run()` method handles source registration, batching, dedup, and commit
+See [docs/plugins.md](docs/plugins.md) for the plugin authoring guide. The
+`phdb plugin scaffold <name>` command generates a skeleton with the manifest,
+plugin class, tests, and ingest helper wired up.
 
 ## Conventions
 

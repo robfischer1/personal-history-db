@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
 from phdb.records import ChatMessage, Provenance
 
@@ -287,12 +287,12 @@ def _parse_plaintext_log(
     content = _strip_msn_color_codes(content)
     lines = content.split("\n")
 
-    raw_sessions: list[dict] = []
-    current: dict | None = None
+    raw_sessions: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
 
     def new_session(
         handle_str: str | None = None, start_ts_text: str | None = None
-    ) -> dict:
+    ) -> dict[str, Any]:
         proto, my, remote = _parse_session_handle(handle_str)
         return {
             "protocol": proto,

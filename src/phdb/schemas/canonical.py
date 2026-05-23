@@ -36,7 +36,6 @@ from phdb.schemas.base import (
     _provenance_fields,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helper: the messages-decomposition shape (used by ~16 action schemas)
 # ---------------------------------------------------------------------------
@@ -139,6 +138,194 @@ class WebPage(EntitySchema):
         "this table via web_page_id; future BrowseAction / SearchAction / "
         "ReadAction tables also FK here."
     )
+
+
+# ---------------------------------------------------------------------------
+# Consumed-media entity schemas (migration 0030)
+# ---------------------------------------------------------------------------
+
+
+def _consumed_media_fields(
+    *,
+    schema_type: str,
+    extras: list[FieldSpec] | None = None,
+) -> list[FieldSpec]:
+    """Shared column set for all 7 consumed-media entity tables."""
+    out: list[FieldSpec] = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default=f"'{schema_type}'"),
+        FieldSpec("name", "TEXT", nullable=False),
+        FieldSpec("description", "TEXT"),
+        FieldSpec("url", "TEXT"),
+        FieldSpec("image", "TEXT"),
+        FieldSpec("identifier", "TEXT"),
+        FieldSpec("alternate_name", "TEXT"),
+        FieldSpec("author", "TEXT"),
+        FieldSpec("publisher", "TEXT"),
+        FieldSpec("date_published", "TEXT"),
+        FieldSpec("genre", "TEXT"),
+        FieldSpec("keywords", "TEXT"),
+    ]
+    if extras:
+        out.extend(extras)
+    out.extend([
+        FieldSpec("file_path", "TEXT"),
+        *_provenance_fields(),
+    ])
+    return out
+
+
+class Book(EntitySchema):
+    """One row per book entity (migration 0030)."""
+
+    table_name = "books"
+    schema_type = "Book"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "isbn", "number_of_pages", "file_path", "source_file_id",
+    ]
+    fields = _consumed_media_fields(
+        schema_type="Book",
+        extras=[
+            FieldSpec("isbn", "TEXT"),
+            FieldSpec("number_of_pages", "INTEGER"),
+        ],
+    )
+    indexes = [
+        _standard_dedup_index("books"),
+        IndexSpec(name="idx_books_name", columns=["name"]),
+    ]
+
+
+class VideoGame(EntitySchema):
+    """One row per video game entity (migration 0030)."""
+
+    table_name = "games"
+    schema_type = "VideoGame"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "game_platform", "file_path", "source_file_id",
+    ]
+    fields = _consumed_media_fields(
+        schema_type="VideoGame",
+        extras=[FieldSpec("game_platform", "TEXT")],
+    )
+    indexes = [
+        _standard_dedup_index("games"),
+        IndexSpec(name="idx_games_name", columns=["name"]),
+    ]
+
+
+class Movie(EntitySchema):
+    """One row per movie entity (migration 0030)."""
+
+    table_name = "movies"
+    schema_type = "Movie"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "duration", "actor", "director", "file_path", "source_file_id",
+    ]
+    fields = _consumed_media_fields(
+        schema_type="Movie",
+        extras=[
+            FieldSpec("duration", "TEXT"),
+            FieldSpec("actor", "TEXT"),
+            FieldSpec("director", "TEXT"),
+        ],
+    )
+    indexes = [
+        _standard_dedup_index("movies"),
+        IndexSpec(name="idx_movies_name", columns=["name"]),
+    ]
+
+
+class TVSeries(EntitySchema):
+    """One row per TV series entity (migration 0030)."""
+
+    table_name = "tv_series"
+    schema_type = "TVSeries"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "start_date", "actor", "number_of_seasons", "file_path",
+        "source_file_id",
+    ]
+    fields = _consumed_media_fields(
+        schema_type="TVSeries",
+        extras=[
+            FieldSpec("start_date", "TEXT"),
+            FieldSpec("actor", "TEXT"),
+            FieldSpec("number_of_seasons", "INTEGER"),
+        ],
+    )
+    indexes = [
+        _standard_dedup_index("tv_series"),
+        IndexSpec(name="idx_tv_series_name", columns=["name"]),
+    ]
+
+
+class PodcastSeries(EntitySchema):
+    """One row per podcast series entity (migration 0030)."""
+
+    table_name = "podcasts"
+    schema_type = "PodcastSeries"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "start_date", "file_path", "source_file_id",
+    ]
+    fields = _consumed_media_fields(
+        schema_type="PodcastSeries",
+        extras=[FieldSpec("start_date", "TEXT")],
+    )
+    indexes = [
+        _standard_dedup_index("podcasts"),
+        IndexSpec(name="idx_podcasts_name", columns=["name"]),
+    ]
+
+
+class YouTubeChannel(EntitySchema):
+    """One row per YouTube channel entity (migration 0030)."""
+
+    table_name = "youtube_channels"
+    schema_type = "WebSite"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "file_path", "source_file_id",
+    ]
+    fields = _consumed_media_fields(schema_type="WebSite")
+    indexes = [
+        _standard_dedup_index("youtube_channels"),
+        IndexSpec(name="idx_youtube_channels_name", columns=["name"]),
+    ]
+
+
+class TwitchChannel(EntitySchema):
+    """One row per Twitch channel entity (migration 0030)."""
+
+    table_name = "twitch_channels"
+    schema_type = "WebSite"
+    dedup_key = "name"
+    coalesce_fields = [
+        "description", "url", "image", "identifier", "alternate_name",
+        "author", "publisher", "date_published", "genre", "keywords",
+        "file_path", "source_file_id",
+    ]
+    fields = _consumed_media_fields(schema_type="WebSite")
+    indexes = [
+        _standard_dedup_index("twitch_channels"),
+        IndexSpec(name="idx_twitch_channels_name", columns=["name"]),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -552,19 +739,24 @@ class GeoShape(ActionSchema):
     indexes = [_standard_dedup_index("geo_shapes")]
 
 
-class Book(ActionSchema):
-    """Currently action-shaped; will be entity-factored in Phase 7."""
+class BookLegacy(ActionSchema):
+    """Legacy messages-decomposition books table (249 Goodreads rows).
 
-    table_name = "books"
-    schema_type = "Book"
+    Dropped by migration 0030. Retained here only so the schema registry
+    doesn't break on DBs that haven't migrated yet. The new entity-shaped
+    Book is in ENTITY_SCHEMAS.
+    """
+
+    table_name = "books_legacy"
+    schema_type = "BookLegacy"
     date_column = "date_recorded"
     fields = _messages_decomp_fields(
-        schema_type="Book",
+        schema_type="BookLegacy",
         key_column="book_key",
         date_column="date_recorded",
         include_byte_offsets=False,
     )
-    indexes = [_standard_dedup_index("books")]
+    indexes = [_standard_dedup_index("books_legacy")]
 
 
 class MedicalRecord(ActionSchema):
@@ -957,7 +1149,16 @@ class Photograph(ActionSchema):
 # ---------------------------------------------------------------------------
 
 
-ENTITY_SCHEMAS: list[type[EntitySchema]] = [WebPage]
+ENTITY_SCHEMAS: list[type[EntitySchema]] = [
+    WebPage,
+    Book,
+    VideoGame,
+    Movie,
+    TVSeries,
+    PodcastSeries,
+    YouTubeChannel,
+    TwitchChannel,
+]
 
 
 ACTION_SCHEMAS: list[type[ActionSchema]] = [
@@ -981,7 +1182,7 @@ ACTION_SCHEMAS: list[type[ActionSchema]] = [
     Place,
     TravelAction,
     GeoShape,
-    Book,
+    BookLegacy,
     MedicalRecord,
     Review,
     InviteAction,
@@ -1013,8 +1214,8 @@ __all__ = [
     "ACTION_SCHEMAS",
     "Action",
     "Article",
-    "BefriendAction",
     "Book",
+    "BookLegacy",
     "BookmarkAction",
     "BrowseAction",
     "Comment",
@@ -1032,20 +1233,26 @@ __all__ = [
     "LikeAction",
     "MedicalRecord",
     "Message",
+    "Movie",
     "Observation",
     "OrderAction",
     "Person",
     "Photograph",
     "Place",
+    "PodcastSeries",
     "Product",
     "Quotation",
     "ReadAction",
     "Review",
     "SearchAction",
     "SocialMediaPosting",
+    "TVSeries",
     "Thing",
     "TravelAction",
+    "TwitchChannel",
+    "VideoGame",
     "WatchAction",
     "WebPage",
+    "YouTubeChannel",
     "register_all",
 ]

@@ -198,7 +198,7 @@ class AppleHealthBackupPlugin(PhdbSourcePlugin):
             else:
                 report.rows_skipped += 1
 
-            processed += 1
+            processed += 1  # noqa: SIM113 — used solely for commit-interval bookkeeping
             if processed % COMMIT_EVERY == 0:
                 conn.commit()
 

@@ -15,16 +15,23 @@ import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Union
+from typing import Any
 
 from phdb.formats.apple_health_xml import (
-    HRSample,
-    MetadataEntry,
     ParsedRecord,
     ParsedWorkout,
     WorkoutEvent,
     WorkoutStatistic,
 )
+
+# Re-export the dataclasses for plugins that consume both XML + backup parsers.
+__all__ = [
+    "ParsedRecord",
+    "ParsedWorkout",
+    "WorkoutEvent",
+    "WorkoutStatistic",
+    "parse",
+]
 
 MAX_BODY_LEN = 2000
 
@@ -302,7 +309,6 @@ _WORKOUT_ACTIVITY_TYPES: dict[int, str] = {
     50: "HKWorkoutActivityTypeStairClimbing",
     52: "HKWorkoutActivityTypeSwimming",
     56: "HKWorkoutActivityTypeTrackAndField",
-    50: "HKWorkoutActivityTypeStairClimbing",
     57: "HKWorkoutActivityTypeTraditionalStrengthTraining",
     58: "HKWorkoutActivityTypeVolleyball",
     59: "HKWorkoutActivityTypeWalking",
@@ -373,7 +379,7 @@ def parse(
     meta_db_path: Path | None = None,
     *,
     since_ts: float | None = None,
-) -> Iterator[Union[ParsedRecord, ParsedWorkout]]:
+) -> Iterator[ParsedRecord | ParsedWorkout]:
     """Yield ParsedRecord / ParsedWorkout from backup Health SQLite databases.
 
     Args:
@@ -409,7 +415,7 @@ def _iter_records(
 ) -> Iterator[ParsedRecord]:
     """Yield ParsedRecord for quantity + category samples."""
     where = "AND o.creation_date > ?" if since_ts else ""
-    params: tuple = (since_ts,) if since_ts else ()
+    params: tuple[Any, ...] = (since_ts,) if since_ts else ()
 
     query = f"""
         SELECT s.data_id, s.start_date, s.end_date, s.data_type,
@@ -479,7 +485,7 @@ def _iter_workouts(
 ) -> Iterator[ParsedWorkout]:
     """Yield ParsedWorkout for workout samples."""
     where = "AND o.creation_date > ?" if since_ts else ""
-    params: tuple = (since_ts,) if since_ts else ()
+    params: tuple[Any, ...] = (since_ts,) if since_ts else ()
 
     query = f"""
         SELECT s.data_id, s.start_date, s.end_date,

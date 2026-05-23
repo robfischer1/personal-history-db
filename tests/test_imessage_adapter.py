@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.imessage.plugin import IMessagePlugin as IMessageAdapter
+from phdb.db import connect
 from phdb.formats.imessage_html import (
     is_bulk_sender,
     normalize_addr,
@@ -14,8 +14,8 @@ from phdb.formats.imessage_html import (
     parse_message_block,
     parse_timestamp,
 )
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.imessage.plugin import IMessagePlugin as IMessageAdapter
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURES = Path(__file__).parent / "fixtures" / "imessage"

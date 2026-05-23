@@ -131,7 +131,7 @@ class MboxPlugin(PhdbSourcePlugin):
             "FROM emails WHERE source_file_id = ?",
             (source_file_id,),
         ).fetchone()[0]
-        
+
         if resume_offset > 0:
             log.info("[mbox] Resuming from byte offset %d", resume_offset)
 
@@ -147,7 +147,7 @@ class MboxPlugin(PhdbSourcePlugin):
                 batch_count = 0
 
         conn.commit()
-        
+
         # Update message count in source_files
         conn.execute(
             "UPDATE source_files SET message_count = "

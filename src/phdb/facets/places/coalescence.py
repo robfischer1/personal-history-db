@@ -51,11 +51,11 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from phdb.facets._coalescence_lib import (
-    Coalescer,
     CoalescenceRule,
+    Coalescer,
     MergeProposal,
     _emission_field,
     _normalize,
@@ -63,9 +63,6 @@ from phdb.facets._coalescence_lib import (
     build_predicate,
 )
 from phdb.log import get_logger
-
-if TYPE_CHECKING:
-    from phdb.core.plugin.bus import FacetEmission
 
 log = get_logger("phdb.facets.places.coalescence")
 
@@ -201,7 +198,7 @@ def _named_location_exact_predicate(
             return False
         if isinstance(va, str) and not va:
             return False
-        return va == vb
+        return bool(va == vb)
 
     return pred
 
@@ -396,7 +393,7 @@ class PlacesCoalescer(Coalescer):
     named-location resolution).
     """
 
-    def evaluate_pair(self, a: Any, b: Any) -> CoalescenceRule | None:  # type: ignore[override]
+    def evaluate_pair(self, a: Any, b: Any) -> CoalescenceRule | None:
         return super().evaluate_pair(_enrich_emission(a), _enrich_emission(b))
 
     def coalesce_batch(

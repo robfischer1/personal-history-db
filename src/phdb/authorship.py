@@ -12,7 +12,7 @@ explicit default fall back to ``ai-coauthored``.
 from __future__ import annotations
 
 import sqlite3
-from typing import Literal
+from typing import Literal, cast
 
 AuthorshipClass = Literal["rob-authored", "ai-coauthored", "external"]
 
@@ -36,14 +36,14 @@ def get_authorship(
         (repo, sha),
     ).fetchone()
     if row:
-        return row[0]
+        return cast(AuthorshipClass, row[0])
 
     repo_row = conn.execute(
         "SELECT default_class FROM commit_authorship_repos WHERE repo = ?",
         (repo,),
     ).fetchone()
     if repo_row:
-        return repo_row[0]
+        return cast(AuthorshipClass, repo_row[0])
 
     return _FALLBACK_DEFAULT
 

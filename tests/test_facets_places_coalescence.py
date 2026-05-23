@@ -28,11 +28,6 @@ import pytest
 from phdb.core.plugin import EmissionBus, discover_facets, load_plugin
 from phdb.core.plugin.bus import FacetEmission
 from phdb.db import connect
-from phdb.facets._coalescence_lib import (
-    Coalescer,
-    CoalescenceRule,
-    MergeProposal,
-)
 from phdb.facets.places import PlacesFacetPlugin
 from phdb.facets.places.coalescence import (
     AUTO_MERGE_THRESHOLD,
@@ -47,7 +42,6 @@ from phdb.facets.places.coalescence import (
     load_places_rules_from_toml,
 )
 from phdb.migrations.runner import MigrationRunner
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -148,9 +142,6 @@ class TestGeoRadiusPredicate:
         # Construct two points whose great-circle distance is
         # *exactly* 100m, then assert the predicate counts them as
         # inside (boundary policy: <= radius_m).
-        pred = build_places_predicate({
-            "shape": "geo_radius_meters", "radius_m": 100,
-        })
         a_lat, a_lon = 40.7128, -74.0060
         # Find a small lat delta that produces exactly 100m via the
         # function we're testing (round-trips the same constants).

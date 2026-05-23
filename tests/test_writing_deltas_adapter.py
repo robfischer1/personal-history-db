@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.plugins.writing_deltas import WritingDeltasPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.writing_deltas import WritingDeltasPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "writing_deltas"

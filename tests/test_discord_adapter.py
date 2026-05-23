@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.discord import DiscordPlugin
+from phdb.db import connect
 from phdb.formats.discord_json import (
     _content_type_from_filename,
     _derive_other_party,
@@ -15,8 +15,8 @@ from phdb.formats.discord_json import (
     _parse_discord_ts,
     _split_attachments,
 )
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.discord import DiscordPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "discord" / "package.zip"

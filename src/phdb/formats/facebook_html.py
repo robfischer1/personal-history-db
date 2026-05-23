@@ -16,6 +16,7 @@ import zipfile
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from bs4 import BeautifulSoup
 
@@ -304,7 +305,7 @@ def _iter_posts(
 # Residuals → SocialPost | Reaction
 # ---------------------------------------------------------------------------
 
-def _outermost_a6g(soup: BeautifulSoup) -> list:
+def _outermost_a6g(soup: BeautifulSoup) -> list[Any]:
     all_a6g = soup.find_all(class_="_a6-g")
     return [b for b in all_a6g if not b.find_parent(class_="_a6-g")]
 

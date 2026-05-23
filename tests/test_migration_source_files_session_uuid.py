@@ -20,7 +20,6 @@ import pytest
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
 
-
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
 
@@ -86,7 +85,7 @@ def db_with_pre_0010_state(tmp_path: Path) -> Path:
             "SELECT id FROM source_files WHERE source_path = ?",
             (pairs[0][2],),
         ).fetchone()[0]
-        for i, sf_id in enumerate([legacy_id, reloc_id]):
+        for _i, sf_id in enumerate([legacy_id, reloc_id]):
             for j in range(3):
                 conn.execute(
                     """INSERT INTO messages (schema_type, body_text, source_file_id, raw_hash, kind, role, direction)

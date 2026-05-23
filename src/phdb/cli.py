@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
+
+if TYPE_CHECKING:
+    import sqlite3
 
 from phdb import __version__
 
@@ -789,7 +792,7 @@ def _resolve_fk_columns(facet_name: str) -> list[tuple[str, str]]:
     return [tuple(t) for t in fks if isinstance(t, tuple) and len(t) == 2]
 
 
-def _resolve_instance_dir(settings: Any, override: str | None) -> Path | None:  # type: ignore[no-untyped-def]
+def _resolve_instance_dir(settings: Any, override: str | None) -> Path | None:
     """Resolve the per-instance config dir from --instance-dir or settings."""
     if override:
         return Path(override)

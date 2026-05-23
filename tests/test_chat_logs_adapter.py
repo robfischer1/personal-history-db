@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.chat_logs.plugin import ChatLogsPlugin
 from phdb.core.plugin.manifest import PluginManifest
+from phdb.db import connect
 from phdb.formats.chat_logs_text import (
     _combine_date_and_time,
     _html_unescape,
@@ -20,8 +20,8 @@ from phdb.formats.chat_logs_text import (
     infer_filename_date,
     parse_file,
 )
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.chat_logs.plugin import ChatLogsPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURES = Path(__file__).parent / "fixtures" / "chat_logs"

@@ -41,7 +41,7 @@ class PlacesFacetPlugin(SkeletonFacetPlugin):
         # Buffer of pending-review proposals — Phase 8C CLI reads from here.
         self.pending_review: list[MergeProposal] = []
 
-    def coalesce(  # type: ignore[override]
+    def coalesce(
         self,
         *,
         connection: sqlite3.Connection | None = None,

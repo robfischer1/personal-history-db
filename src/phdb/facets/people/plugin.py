@@ -15,6 +15,7 @@ behavior is preserved.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,7 @@ class PeopleFacetPlugin(SkeletonFacetPlugin):
         # Buffer of pending-review proposals — Phase 8C CLI reads from here.
         self.pending_review: list[MergeProposal] = []
 
-    def coalesce(  # type: ignore[override]
+    def coalesce(
         self,
         *,
         connection: sqlite3.Connection | None = None,
@@ -114,10 +115,9 @@ class PeopleFacetPlugin(SkeletonFacetPlugin):
         # consume them across process boundaries. No-op if no instance_dir.
         if instance_dir is not None and pending:
             for proposal in pending:
-                try:
+                # Defensive: don't crash coalesce() on disk errors.
+                with contextlib.suppress(Exception):  # pragma: no cover
                     append_pending("people", instance_dir, proposal)
-                except Exception:  # pragma: no cover - defensive
-                    pass
         # Drain the buffer — emissions are now represented in audit entries
         # (for auto-merged) or in self.pending_review (for low-confidence).
         self.buffer.clear()

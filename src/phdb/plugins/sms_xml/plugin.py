@@ -12,12 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
-from phdb.formats.smsbr_xml import parse_sms
 from phdb.formats.chat_upserts import (
     emit_chat_recipient_triples,
     emit_chat_thread_triple,
     upsert_chat_message,
 )
+from phdb.formats.smsbr_xml import parse_sms
 from phdb.log import get_logger
 from phdb.records import ChatMessage
 

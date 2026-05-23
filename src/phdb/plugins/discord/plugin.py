@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import time
@@ -20,8 +19,6 @@ from phdb.formats.chat_upserts import (
     upsert_chat_message,
 )
 from phdb.formats.discord_json import (
-    _derive_other_party,
-    _derive_thread_label,
     parse_channel,
 )
 from phdb.log import get_logger
@@ -282,12 +279,12 @@ class DiscordPlugin(PhdbSourcePlugin):
                     continue
 
                 report.rows_yielded += 1
-                
+
                 # In Discord exports, all messages are outbound (sent by the user)
                 message_id = self.ingest_row(
                     conn, record, source_file_id=source_file_id, direction="outbound"
                 )
-                
+
                 if message_id is None:
                     report.rows_skipped += 1
                     continue

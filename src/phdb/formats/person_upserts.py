@@ -11,7 +11,7 @@ import hashlib
 import sqlite3
 from typing import TYPE_CHECKING
 
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 if TYPE_CHECKING:
     from phdb.records import Contact
@@ -34,13 +34,13 @@ def upsert_person(
         body_parts.append(f"Emails: {', '.join(record.emails)}")
     if record.phones:
         body_parts.append(f"Phones: {', '.join(record.phones)}")
-    
+
     body = "\n".join(body_parts)[:5000]
     body_hash = hashlib.sha256(body.encode()).hexdigest()
 
     primary_addr = (
-        record.emails[0] 
-        if record.emails 
+        record.emails[0]
+        if record.emails
         else (record.phones[0] if record.phones else record.full_name.lower())
     )
 

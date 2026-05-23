@@ -103,7 +103,7 @@ class ChatLogsPlugin(PhdbSourcePlugin):
         Note: this plugin's parse method yields tuples because ChatSession
         needs context (relpath) to generate thread_keys correctly.
         """
-        # We need a root to get a relpath. 
+        # We need a root to get a relpath.
         # For ChatLogs, the 'path' passed to parse is an individual file,
         # but the thread_key needs its relpath from the original ingest root.
         # This plugin expects run() to handle this.
@@ -123,7 +123,7 @@ class ChatLogsPlugin(PhdbSourcePlugin):
     ) -> int | None:
         """Upsert a ChatMessage + triples."""
         sf_id = source_file_id if source_file_id is not None else 0
-        
+
         msg_id = upsert_chat_message(
             conn, sf_id, record,
             direction=direction,
@@ -215,7 +215,7 @@ class ChatLogsPlugin(PhdbSourcePlugin):
         t_start = time.time()
         files_done = 0
 
-        for fi, file_path in enumerate(todo):
+        for _fi, file_path in enumerate(todo):
             if self.max_seconds and (time.time() - t_start) > self.max_seconds:
                 log.info("[%s] Time budget reached after %d files", self.SOURCE_KIND, files_done)
                 break
@@ -236,7 +236,7 @@ class ChatLogsPlugin(PhdbSourcePlugin):
 
                     for msg in session.messages:
                         report.rows_yielded += 1
-                        
+
                         # Infer direction
                         sender_name = msg.sender_name or ""
                         sender_addr = msg.sender_address or ""

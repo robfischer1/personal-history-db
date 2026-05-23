@@ -18,7 +18,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -35,7 +34,6 @@ from phdb.facets._review_queue import (
     save_pending,
 )
 from phdb.migrations.runner import MigrationRunner
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -140,7 +138,7 @@ class TestReviewQueue:
         append_pending("people", instance_dir, _proposal(-1, [1, 2]))
         append_pending("people", instance_dir, _proposal(-1, [3, 4]))
         path = instance_dir / QUEUE_DIRNAME / "people.jsonl"
-        lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
         assert len(lines) == 2
         for line in lines:
             obj = json.loads(line)
@@ -500,8 +498,8 @@ class TestStats:
         # Pending section reports the queue depth.
         assert "Pending review" in result.output
         # 1 in people queue.
-        people_line = [l for l in result.output.splitlines() if l.strip().startswith("people")]
-        assert any("1" in l for l in people_line), people_line
+        people_line = [ln for ln in result.output.splitlines() if ln.strip().startswith("people")]
+        assert any("1" in ln for ln in people_line), people_line
 
 
 # ---------------------------------------------------------------------------

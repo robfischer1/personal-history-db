@@ -86,7 +86,7 @@ personal-history-db/            # Project tier (this repo) — no PII
 │   ├── formats/                # Pure parsers + shared upsert helpers
 │   ├── records/                # Typed record dataclasses
 │   └── migrations/project/     # Schema migrations 0001-0028
-└── tests/                      # synthetic fixtures + 600+ tests
+└── tests/                      # synthetic fixtures + 1150+ tests
 
 personal-history-instance/      # Instance tier (private) — owner identity
 ├── identity.toml               # Emails, phones, names for direction inference
@@ -208,6 +208,13 @@ Install via uvx:
 uvx --from git+https://github.com/robfischer1/personal-history-db-mcp.git personal-history-db-mcp
 ```
 
+Or install the bundled `server.py` shipped in this repo with the
+`[server]` extra:
+
+```bash
+pip install "personal-history-db[server]"
+```
+
 Plugins can register their own MCP tools via `register_tools(server)`;
 those tools merge into the same MCP surface alongside the core 12.
 
@@ -241,7 +248,7 @@ Claude Code / Desktop setup.
 ## Development
 
 ```bash
-uv run pytest                  # 600+ tests
+uv run pytest                  # 1150+ tests
 uv run ruff check src/ tests/  # lint
 uv run mypy src/               # type check
 ```

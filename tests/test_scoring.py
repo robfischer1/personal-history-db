@@ -1,7 +1,6 @@
 """Tests for decay scoring engine."""
 
 import math
-import sqlite3
 from pathlib import Path
 
 import pytest

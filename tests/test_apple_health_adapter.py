@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phdb.plugins.apple_health import AppleHealthPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.apple_health import AppleHealthPlugin
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "apple_health" / "Health_Export.zip"

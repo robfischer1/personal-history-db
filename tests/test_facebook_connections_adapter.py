@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from phdb.db import connect
 from phdb.formats.facebook_connections_html import (
     normalize_name,
 )
-from phdb.plugins.facebook_connections.ingest import make_dedupe_key
-from phdb.plugins.facebook_connections import FacebookConnectionsPlugin
-from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.facebook_connections import FacebookConnectionsPlugin
+from phdb.plugins.facebook_connections.ingest import make_dedupe_key
 from phdb.settings import IdentitySettings, Settings
 
 FIXTURE_ZIP = (

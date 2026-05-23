@@ -102,13 +102,12 @@ class GoogleFitPlugin(PhdbSourcePlugin):
             if existing:
                 return existing[0], False
             from phdb.triples import resolve_node
-            return resolve_node(conn, label, "thread"), True
+            return resolve_node(conn, label, "thread"), True  # type: ignore[return-value]
 
         processed = 0
         for record in self.parse(source_path):
             report.rows_yielded += 1
 
-            prov = record.provenance
             metric = record.observation_type
 
             meta_dict = dict(record.metadata)
@@ -151,7 +150,7 @@ class GoogleFitPlugin(PhdbSourcePlugin):
             else:
                 report.rows_skipped += 1
 
-            processed += 1
+            processed += 1  # noqa: SIM113 — used solely for commit-interval bookkeeping
             if processed % COMMIT_EVERY == 0:
                 conn.commit()
 

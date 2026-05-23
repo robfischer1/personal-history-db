@@ -185,9 +185,11 @@ class TestAddTriple:
             assert result["object_node_id"] is None
 
     def test_unknown_predicate_raises(self, triple_db: Path):
-        with connect(triple_db) as conn:
-            with pytest.raises(ValueError, match="Unknown predicate"):
-                add_triple(conn, "A", "bogus", "B")
+        with (
+            connect(triple_db) as conn,
+            pytest.raises(ValueError, match="Unknown predicate"),
+        ):
+            add_triple(conn, "A", "bogus", "B")
 
     def test_with_qualifiers(self, triple_db: Path):
         with connect(triple_db) as conn:
@@ -207,7 +209,7 @@ class TestAddTriple:
 
     def test_observed_at(self, triple_db: Path):
         with connect(triple_db) as conn:
-            result = add_triple(
+            add_triple(
                 conn, "Rob", "wentTo", "Store",
                 observed_at="2026-05-18T10:00:00Z",
                 provenance="explicit",

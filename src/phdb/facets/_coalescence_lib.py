@@ -57,11 +57,7 @@ import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from phdb.core.plugin.bus import FacetEmission
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -189,7 +185,7 @@ def _exact_field_predicate(
             return False
         if isinstance(va, str) and not va:
             return False
-        return va == vb
+        return bool(va == vb)
 
     return pred
 
@@ -377,9 +373,12 @@ class Coalescer:
         best: CoalescenceRule | None = None
         for rule in self.rules:
             try:
-                if rule.predicate(a, b) and rule.confidence >= self.threshold:
-                    if best is None or rule.confidence > best.confidence:
-                        best = rule
+                if (
+                    rule.predicate(a, b)
+                    and rule.confidence >= self.threshold
+                    and (best is None or rule.confidence > best.confidence)
+                ):
+                    best = rule
             except Exception:  # pragma: no cover - defensive
                 continue
         return best
@@ -520,17 +519,19 @@ def _node_id(node: Any) -> int | None:
       4. dict ``id`` key (raw-dict case).
     """
     if isinstance(node, dict):
-        if "id" in node:
-            return node["id"]
-        return None
+        node_id = node.get("id")
+        return int(node_id) if node_id is not None else None
     # FacetEmission has no ``id`` attr by default — check payload first.
     payload = getattr(node, "payload", None)
     if isinstance(payload, dict):
         if "id" in payload:
-            return payload["id"]
+            pid = payload["id"]
+            return int(pid) if pid is not None else None
         if "node_id" in payload:
-            return payload["node_id"]
-    return getattr(node, "id", None)
+            nid = payload["node_id"]
+            return int(nid) if nid is not None else None
+    attr_id = getattr(node, "id", None)
+    return int(attr_id) if attr_id is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -609,7 +610,9 @@ def apply_merge(
         merged_away,
     )
     cols = [c[0] for c in cur.description]
-    captured_rows: list[dict[str, Any]] = [dict(zip(cols, r)) for r in cur.fetchall()]
+    captured_rows: list[dict[str, Any]] = [
+        dict(zip(cols, r, strict=False)) for r in cur.fetchall()
+    ]
 
     # 3. Update FK columns in dependent tables.
     for table, column in fk_columns:

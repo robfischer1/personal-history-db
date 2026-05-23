@@ -260,11 +260,6 @@ def parse_file(
             f"{thread_key}|{msg_idx}|{info['date_sent']}|{sender_addr}|{(body_text or '')[:100]}".encode()
         ).hexdigest()
 
-        direction = (
-            "outbound" if direction_str == "sent"
-            else ("inbound" if direction_str == "received" else "unknown")
-        )
-
         raw_atts = info["attachments"]
         att_list: list[dict[str, str | None]] = list(raw_atts) if isinstance(raw_atts, list) else []
 

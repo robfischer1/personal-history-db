@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -50,9 +49,8 @@ def test_connect_load_vec(tmp_path: Path) -> None:
 
 def test_connect_rejects_missing_db(tmp_path: Path) -> None:
     db_path = tmp_path / "nonexistent.db"
-    with pytest.raises(sqlite3.OperationalError):
-        with connect(db_path) as conn:
-            pass
+    with pytest.raises(sqlite3.OperationalError), connect(db_path):
+        pass
 
 
 def test_connect_readonly(migrated_db: Path) -> None:

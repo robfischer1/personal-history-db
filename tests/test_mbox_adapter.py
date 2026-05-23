@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from phdb.plugins.mbox import MboxPlugin
 from phdb.db import connect
 from phdb.migrations.runner import MigrationRunner
+from phdb.plugins.mbox import MboxPlugin
 from phdb.settings import IdentitySettings, Settings
 
 

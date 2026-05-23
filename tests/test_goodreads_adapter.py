@@ -64,7 +64,7 @@ class TestGoodreadsIntegration:
         adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
-            titles = conn.execute("SELECT subject FROM books").fetchall()
+            titles = conn.execute("SELECT name FROM books").fetchall()
         title_list = [t[0] for t in titles]
         assert "" not in title_list
         assert None not in title_list
@@ -95,15 +95,15 @@ class TestGoodreadsIntegration:
             ).fetchone()[0]
         assert "goodreads:library" in label
 
-    def test_isbn_as_sender_address(self, gr_db: Path, gr_settings: Settings) -> None:
+    def test_isbn_column(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
         adapter = _new_plugin()
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
-            addrs = conn.execute(
-                "SELECT sender_address FROM books WHERE subject = 'To Kill a Mockingbird'"
+            row = conn.execute(
+                "SELECT isbn FROM books WHERE name = 'To Kill a Mockingbird'"
             ).fetchone()
-        assert addrs[0] == "0061120081"
+        assert row[0] == "0061120081"
 
     def test_missing_isbn(self, gr_db: Path, gr_settings: Settings) -> None:
         gr_settings.db_path = gr_db
@@ -111,7 +111,7 @@ class TestGoodreadsIntegration:
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             row = conn.execute(
-                "SELECT sender_address, sender_name FROM books WHERE subject = 'Untitled Book'"
+                "SELECT isbn, publisher FROM books WHERE name = 'Untitled Book'"
             ).fetchone()
         assert row[0] is None
         assert row[1] == "Self Published"
@@ -134,7 +134,7 @@ class TestGoodreadsIntegration:
         with connect(gr_db) as conn:
             adapter.run(FIXTURE_CSV, conn, gr_settings)
             row = conn.execute(
-                "SELECT subject FROM books WHERE sender_address = '0061120081'"
+                "SELECT name FROM books WHERE isbn = '0061120081'"
             ).fetchone()
         assert row is not None
         assert row[0] == "To Kill a Mockingbird"

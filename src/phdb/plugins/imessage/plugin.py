@@ -20,13 +20,13 @@ from phdb.formats.imessage_html import (
     is_bulk_sender,
     normalize_addr,
     parse_file,
-    parse_filename_participants,
 )
 from phdb.log import get_logger
 from phdb.records import ChatMessage
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 if TYPE_CHECKING:
+    from phdb.core.plugin.manifest import PluginManifest
     from phdb.settings import Settings
 
 log = get_logger("phdb.plugins.imessage")
@@ -107,7 +107,7 @@ class IMessagePlugin(PhdbSourcePlugin):
     ) -> int | None:
         """Insert ChatMessage + sidecars (attachments, recipients)."""
         sf_id = source_file_id if source_file_id is not None else 0
-        
+
         body = record.body_text
         if body and len(body) > _MAX_BODY_LEN:
             body = body[:_MAX_BODY_LEN]
@@ -139,7 +139,7 @@ class IMessagePlugin(PhdbSourcePlugin):
         row = cur.fetchone()
         if not row:
             return None
-        
+
         message_id = int(row[0])
         self._insert_sidecars(conn, message_id, record)
         return message_id
@@ -264,8 +264,9 @@ class IMessagePlugin(PhdbSourcePlugin):
         pred = get_predicate(conn, name)
         if pred is None:
             raise ValueError(f"Predicate {name!r} not found")
-        self._predicate_cache[name] = pred["id"]
-        return pred["id"]
+        pid = int(pred["id"])
+        self._predicate_cache[name] = pid
+        return pid
 
     def _insert_sidecars(
         self, conn: sqlite3.Connection, message_id: int, record: ChatMessage
@@ -323,7 +324,7 @@ class IMessagePlugin(PhdbSourcePlugin):
             return existing[0], False
 
         node_id = resolve_node(conn, label, "thread")
-        return node_id, True
+        return node_id, True  # type: ignore[return-value]
 
     def _link_message_thread(
         self, conn: sqlite3.Connection, message_id: int, thread_node_id: int

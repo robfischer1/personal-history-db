@@ -16,7 +16,7 @@ from phdb.core.plugin import PhdbSourcePlugin
 from phdb.formats.google_voice_html import parse as parse_voice
 from phdb.log import get_logger
 from phdb.records import CallRecord, ChatMessage
-from phdb.triples import resolve_node, get_predicate
+from phdb.triples import get_predicate, resolve_node
 
 if TYPE_CHECKING:
     from phdb.core.plugin import PluginManifest
@@ -105,7 +105,7 @@ class GoogleVoicePlugin(PhdbSourcePlugin):
         if isinstance(record, ChatMessage):
             body = (record.body_text or "")[:_MAX_BODY_LEN]
             body_hash = hashlib.sha256(body.encode()).hexdigest() if body else None
-            
+
             cur = conn.execute(
                 """INSERT OR IGNORE INTO chat_messages (
                     schema_type, message_key, subject, sender_address, sender_name,
@@ -138,7 +138,7 @@ class GoogleVoicePlugin(PhdbSourcePlugin):
             kind_label = record.call_type.capitalize() if record.call_type != "voice" else "Received"
             body = f"[{kind_label} call]"
             body_hash = hashlib.sha256(body.encode()).hexdigest()
-            
+
             cur = conn.execute(
                 """INSERT OR IGNORE INTO actions (
                     schema_type, action_key, subject, sender_address,
@@ -195,7 +195,7 @@ class GoogleVoicePlugin(PhdbSourcePlugin):
             if isinstance(record, ChatMessage):
                 if settings and settings.identity.is_configured:
                     direction = self._infer_direction(record.sender_address, settings)
-                
+
                 # Google Voice parser yields ChatMessage with thread_key
                 thread_key = record.thread_key
             else:
@@ -254,8 +254,9 @@ class GoogleVoicePlugin(PhdbSourcePlugin):
         pred = get_predicate(conn, name)
         if pred is None:
             raise ValueError(f"Predicate {name!r} not found")
-        self._predicate_cache[name] = pred["id"]
-        return pred["id"]
+        pid = int(pred["id"])
+        self._predicate_cache[name] = pid
+        return pid
 
     def _upsert_thread(self, conn: sqlite3.Connection, thread_key: str) -> tuple[int, bool]:
         label = f"{self.SOURCE_KIND}:{thread_key}"
@@ -267,7 +268,7 @@ class GoogleVoicePlugin(PhdbSourcePlugin):
             return existing[0], False
 
         node_id = resolve_node(conn, label, "thread")
-        return node_id, True
+        return node_id, True  # type: ignore[return-value]
 
     def _link_message_thread(
         self, conn: sqlite3.Connection, row_id: int, table_name: str, thread_node_id: int

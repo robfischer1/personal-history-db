@@ -27,7 +27,6 @@ from phdb.db import connect
 from phdb.facets._coalescence_lib import (
     AuditEntry,
     Coalescer,
-    CoalescenceRule,
     MergeProposal,
     apply_merge,
     build_predicate,
@@ -46,7 +45,6 @@ from phdb.facets.people.coalescence import (
     coalesce_buffer_to_db,
 )
 from phdb.migrations.runner import MigrationRunner
-
 
 # ---------------------------------------------------------------------------
 # Helpers

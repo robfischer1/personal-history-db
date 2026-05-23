@@ -17,8 +17,8 @@ from phdb.log import get_logger
 from phdb.plugins.google_activity.ingest import upsert_web_activity
 
 if TYPE_CHECKING:
-    from phdb.settings import Settings
     from phdb.records import WebActivity
+    from phdb.settings import Settings
 
 log = get_logger("phdb.plugins.google_activity")
 
@@ -59,16 +59,14 @@ class GoogleActivityPlugin(PhdbSourcePlugin):
     def discover(self, root: Path) -> Iterator[tuple[Path, str]]:
         """Walk a directory; yield paths to MyActivity.html or *history.html."""
         if root.is_file():
-            if root.suffix == ".zip":
-                yield root, "google-activity"
-            elif root.name.endswith("MyActivity.html") or root.name.endswith("history.html"):
+            if root.suffix == ".zip" or root.name.endswith("MyActivity.html") or root.name.endswith("history.html"):
                 yield root, "google-activity"
             return
 
         # Zips are common for Google Takeout
         for path in sorted(root.rglob("*.zip")):
              yield path, "google-activity"
-        
+
         for path in sorted(root.rglob("MyActivity.html")):
             yield path, "google-activity"
         for path in sorted(root.rglob("*history.html")):
