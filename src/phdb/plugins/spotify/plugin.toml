@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "spotify"
+version = "0.1.0"
+description = "Spotify Extended Streaming History (music / podcast / audiobook plays)"
+kind = "source"
+entry_point = "phdb.plugins.spotify:SpotifyPlugin"
+
+[source]
+emits = ["ListenAction"]
+entity_refs = []
+formats_used = ["spotify_json"]
+records_required = ["MediaPlay"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Time"]
