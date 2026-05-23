@@ -745,6 +745,45 @@ class BrowseAction(ActionSchema):
     ]
 
 
+class ReadAction(ActionSchema):
+    """Reading-list events (Pocket / Instapaper / future read-it-later sources).
+
+    WPEF inherited follow-on (brief 102). Third consumer of the
+    entity-FK pattern after BookmarkAction and BrowseAction —
+    reading-list entries are events that FK into the WebPage entity
+    (the URL identity), with body extraction (Pocket/Instapaper offer
+    article text) handled via the standard messages-decomposition
+    ``body_text`` / ``body_text_source`` columns.
+
+    Schema is ready; the matching ``phdb.plugins.readaction`` stub
+    plugin awaits a Pocket / Instapaper format parser.
+    """
+
+    table_name = "read_actions"
+    schema_type = "ReadAction"
+    date_column = "date_read"
+    entity_refs = [EntityFK(entity_table="web_pages", column_name="web_page_id")]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'ReadAction'"),
+        FieldSpec("web_page_id", "INTEGER", references="web_pages(id)"),
+        FieldSpec("date_read", "TEXT"),
+        FieldSpec("direction", "TEXT", nullable=False, default="'self'"),
+        FieldSpec("body_text", "TEXT"),
+        FieldSpec("body_text_source", "TEXT"),
+        FieldSpec("source_file_id", "INTEGER", references="source_files(id)"),
+        FieldSpec("raw_hash", "TEXT"),
+        FieldSpec(
+            "created_at", "TEXT", nullable=False,
+            default="(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        ),
+    ]
+    indexes = [
+        _standard_dedup_index("read_actions"),
+        IndexSpec(name="idx_read_actions_web_page_id", columns=["web_page_id"]),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Document-shaped schemas — file-like with file_path / mtime / bucket
 # ---------------------------------------------------------------------------
@@ -953,6 +992,7 @@ ACTION_SCHEMAS: list[type[ActionSchema]] = [
     # Entity-FK actions
     BookmarkAction,
     BrowseAction,
+    ReadAction,
     # Document-shaped
     DigitalDocumentFile,
     Article,
@@ -999,6 +1039,7 @@ __all__ = [
     "Place",
     "Product",
     "Quotation",
+    "ReadAction",
     "Review",
     "SearchAction",
     "SocialMediaPosting",
