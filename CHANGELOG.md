@@ -4,6 +4,53 @@ All notable changes to personal-history-db are documented here.
 
 This project uses [Semantic Versioning](https://semver.org/). During the 0.x series, the API may change between minor versions. A 1.0 release will be tagged once the adapter and schema contracts stabilize.
 
+## [0.4.0b0] - 2026-05-23
+
+phdb pivots from a monolithic-adapter codebase to a **plugin host** for
+centralizing scattered personal digital history. The `Adapter` ABC is
+gone; sources are now `PhdbSourcePlugin` subclasses discovered via
+Python entry points. The codebase is a 4-layer stack — `phdb.core/`
+(connection, embed, scoring, graph, search, plugin loader) +
+`phdb.schemas/` (canonical Schema.org-keyed typed table registry) +
+`phdb.facets/` (Person / Place / Time / Thread / Topic facet plugins,
+skeleton consumers pending Phase 8's coalescer) + `phdb.plugins/` (34
+first-party source plugins, all ported from the dissolved adapter
+collection).
+
+### Breaking changes (Q14 hard break, no shim)
+
+- `phdb.adapters` package **removed entirely**. The `Adapter` ABC + typed-table mapper at `phdb.adapters.base`, the `discover_adapters` loader at `phdb.adapters.loader`, and every per-source `phdb.adapters.<name>` module no longer exist. Replace `from phdb.adapters.<name> import <Name>Adapter` with `from phdb.plugins.<name> import <Name>Plugin`.
+- `phdb ingest --adapter <name>` CLI command removed. Use `phdb plugin ingest <name> <path>` instead.
+- `bookmarks` table reshaped (migration 0028): `url`, `normalized_url`, `title`, `excerpt`, `cover_url` dropped — URL identity lives only in `web_pages` joinable via `web_page_id`. Replace `SELECT url FROM bookmarks` with `SELECT wp.url FROM bookmarks b JOIN web_pages wp ON b.web_page_id = wp.id`. Unique index moved from `(normalized_url, instrument)` to `(web_page_id, instrument)`.
+- `scripts/scaffold_adapter.py` retired (emitted dead-code adapter scaffolds). Use `phdb plugin scaffold <name>` or `scripts/scaffold_plugin.py` instead.
+
+### Added
+
+- **`phdb.core/` package** — source-agnostic infrastructure (DB connection, embed pipeline, scoring, graph service, hybrid search, plugin loader, registry).
+- **`phdb.schemas/` package** — 33 canonical typed-table dataclasses keyed by Schema.org `@type`; DDL generator + `upsert_<entity>()` helper generator + migration diff against `sqlite_master`.
+- **`phdb.core.plugin/` sub-package** — `PluginManifest` + `PhdbSourcePlugin` / `PhdbFacetPlugin` ABCs + entry-point loader; runtime-validated contract per Q4.
+- **`phdb.facets/` package** — 5 first-party facet plugins (people, places, time, threads, topics) + `EmissionBus` for source → facet dispatch. Skeleton consumers; Phase 8 ships the rules engine.
+- **`phdb.plugins/`** — 34 first-party source plugins ported from the dissolved adapter collection (amazon, apple_dbs, apple_health, apple_health_backup, apple_notes_full, articles, calendar, chat_logs, claude_chat, claude_code, clippings, discord, facebook_connections, facebook_unified, goodreads, google_activity, google_contacts, google_drive, google_fit, google_timeline, google_voice, imessage, mbox, onedrive, phone_calls_xml, phone_photos, phone_sms, raindrop, sms_xml, spotify, staged_md, strong, writing_deltas) + 1 stub plugin (readaction).
+- **Shared upsert helpers in `phdb.formats/`** — `bookmark_upserts`, `email_upserts`, `chat_upserts`, `conversation_upserts`, `person_upserts` — extracted as plugins ported; mirror the COALESCE last-write-wins pattern.
+- **`phdb plugin scaffold <name>`** — generate a skeleton plugin from CLI args; manifest-validates emits against the schemas registry.
+- **`phdb plugin list/describe/ingest`** — plugin introspection + ingest CLI.
+- **`phdb schema regenerate/diff`** — DB_SCHEMA.md regeneration from the schemas registry + live `sqlite_master`; post-ingest hook (suppress with `--no-schema-regen`).
+- **WebPage entity factoring** — `web_pages` is a URL-identity entity table (migration 0023); bookmarks FK into it via `web_page_id`. BrowseAction (migration 0024, apple_dbs) and SearchAction FK retrofit (migration 0025, google_activity) extend the pattern.
+- **ReadAction schema + stub plugin** — for future Pocket/Instapaper-shaped reading-list sources (migration 0027).
+- **Bookmark triple emission** — `taggedWith` / `inFolder` / `mentions` / `relatesTo` predicates emitted at ingest from raindrop + apple_dbs (migration 0026 seeds the `inFolder` predicate).
+- **`docs/plugins.md`** — full author guide (962 lines) covering quick-start, worked example, ABC + manifest reference, shared helpers, testing patterns, discovery + distribution, facet projection, common pitfalls.
+- **`phdb-plugin-example`** sibling repo — canonical example third-party plugin demonstrating the contract end-to-end.
+
+### Changed
+
+- `README.md` reframed as plugin-host pitch; first-party plugins listed by domain.
+- `phdb.formats/url.py` extracted as the first shared adapter primitive (precedent for the `*_upserts` family).
+- Migration numbering passed 0028 (was 0023 pre-Phase-7).
+
+### Plan reference
+
+`Outputs/Plans/phdb Plugin Architecture.md` — 10-phase plan; Phases 1-9 shipped in this release (1 core extraction, 2 schemas pillar, 3 plugin contract, 4 facets framework, 5 raindrop pilot, 6 schema-doc regen, 7 plugin port × 33 briefs + WPEF follow-ons, 9 polish + docs + scaffolder + example). Phase 8 (identity coalescence rules engine) and Phase 10 (final polish + 0.4.0 release) follow this beta.
+
 ## [0.3.0] - 2026-05-19
 
 ### Added
