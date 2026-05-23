@@ -1,0 +1,16 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "phone_calls_xml"
+version = "0.1.0"
+description = "Ingest SMS Backup & Restore call-log XML exports"
+kind = "source"
+entry_point = "phdb.plugins.phone_calls_xml:PhoneCallsXmlPlugin"
+
+[source]
+emits = ["Action"]
+entity_refs = []
+formats_used = ["smsbr_xml"]
+records_required = ["CallRecord"]
+facets_projected = ["Person", "Time"]
