@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -738,3 +739,489 @@ def schema_diff(ctx: click.Context) -> None:
         return
     for line in drift:
         click.echo(line)
+
+
+# ---------------------------------------------------------------------------
+# Facet review CLI — Phase 8C of the phdb Plugin Architecture plan
+# ---------------------------------------------------------------------------
+
+
+# Facet metadata table — keyed by short facet name (matches plugin.toml
+# `[plugin] name`). Each entry names the node_table the apply_merge call
+# operates on, the facet_type Schema.org @type tag, and the FK-columns
+# constant module path. Phase 8C ships people + places; new facet plugins
+# extend this map.
+_FACET_REGISTRY: dict[str, dict[str, str]] = {
+    "people": {
+        "node_table": "persons",
+        "facet_type": "Person",
+        "fk_columns_module": "phdb.facets.people.coalescence",
+        "fk_columns_attr": "PEOPLE_FK_COLUMNS",
+    },
+    "places": {
+        "node_table": "places",
+        "facet_type": "Place",
+        "fk_columns_module": "phdb.facets.places.coalescence",
+        "fk_columns_attr": "PLACES_FK_COLUMNS",
+    },
+}
+
+
+def _resolve_fk_columns(facet_name: str) -> list[tuple[str, str]]:
+    """Import the facet's coalescence module and read its FK-columns constant.
+
+    Returns ``[]`` when the module or attribute is missing (Phase 8B's
+    places module may not exist yet when this CLI ships; the sibling
+    can add the constant later without breaking the CLI).
+    """
+    import importlib
+
+    meta = _FACET_REGISTRY.get(facet_name)
+    if not meta:
+        return []
+    try:
+        mod = importlib.import_module(meta["fk_columns_module"])
+    except ImportError:
+        return []
+    fks = getattr(mod, meta["fk_columns_attr"], None)
+    if not isinstance(fks, list):
+        return []
+    return [tuple(t) for t in fks if isinstance(t, tuple) and len(t) == 2]
+
+
+def _resolve_instance_dir(settings: Any, override: str | None) -> Path | None:  # type: ignore[no-untyped-def]
+    """Resolve the per-instance config dir from --instance-dir or settings."""
+    if override:
+        return Path(override)
+    if getattr(settings, "instance_dir", None):
+        return Path(settings.instance_dir)
+    return None
+
+
+@cli.group()
+def facet() -> None:
+    """Facet coalescence review + audit commands (Phase 8C)."""
+
+
+@cli.group(name="facets")
+def facets_group() -> None:
+    """Cross-facet aggregate commands (e.g., stats)."""
+
+
+def _format_proposal(proposal_idx: int, total: int, proposal: Any) -> str:
+    """Render one proposal as a scannable block for the interactive prompt."""
+    from phdb.core.plugin.bus import FacetEmission
+
+    lines = [
+        f"\n[{proposal_idx}/{total}] rule={proposal.rule}  "
+        f"confidence={proposal.confidence:.2f}  "
+        f"survivor={proposal.into_node_id}",
+    ]
+    payload = proposal.payload or {}
+    if payload:
+        shape = payload.get("shape", "?")
+        ec = payload.get("emission_count", "?")
+        xc = payload.get("existing_count", "?")
+        lines.append(f"  shape={shape}  emissions={ec}  existing={xc}")
+    lines.append(f"  from_emissions ({len(proposal.from_emissions)}):")
+    for i, emission in enumerate(proposal.from_emissions, 1):
+        if isinstance(emission, FacetEmission):
+            src = f"{emission.source_table}#{emission.source_id}"
+            payload_repr = ", ".join(
+                f"{k}={v!r}"
+                for k, v in (emission.payload or {}).items()
+                if k != "id"
+            )
+        elif isinstance(emission, dict):
+            src = f"{emission.get('source_table', '?')}#{emission.get('source_id', '?')}"
+            inner_payload = emission.get("payload", {}) or {}
+            if inner_payload:
+                payload_repr = ", ".join(
+                    f"{k}={v!r}" for k, v in inner_payload.items() if k != "id"
+                )
+            else:
+                payload_repr = ", ".join(
+                    f"{k}={v!r}" for k, v in emission.items()
+                    if k not in {"source_table", "source_id", "facet_type", "payload"}
+                )
+        else:
+            src = repr(emission)
+            payload_repr = ""
+        lines.append(f"    {i}. {src}  {payload_repr}")
+    return "\n".join(lines)
+
+
+def _review_loop(  # noqa: PLR0913 — interactive CLI helper
+    ctx: click.Context,
+    facet_name: str,
+    *,
+    auto_accept_threshold: float | None,
+    limit: int | None,
+    rule_filter: str | None,
+    dry_run: bool,
+    instance_dir_override: str | None,
+) -> None:
+    """Walk the pending-review queue for a facet, dispatching per answer."""
+    from phdb.db import connect
+    from phdb.facets._coalescence_lib import apply_merge
+    from phdb.facets._review_queue import load_pending, save_pending
+
+    settings = ctx.obj["settings"]
+    meta = _FACET_REGISTRY.get(facet_name)
+    if meta is None:
+        click.echo(
+            f"Unknown facet {facet_name!r}. Known facets: "
+            + ", ".join(sorted(_FACET_REGISTRY))
+        )
+        raise SystemExit(1)
+
+    inst_dir = _resolve_instance_dir(settings, instance_dir_override)
+    if inst_dir is None:
+        click.echo(
+            "No --instance-dir set and no instance config discovered. "
+            "Pass --instance-dir <path> or run from within a directory "
+            "that has personal-history-instance/."
+        )
+        raise SystemExit(1)
+
+    proposals = load_pending(facet_name, inst_dir)
+    if rule_filter:
+        proposals = [p for p in proposals if p.rule == rule_filter]
+    if not proposals:
+        click.echo(f"No pending proposals for facet {facet_name!r}.")
+        return
+
+    fk_columns = _resolve_fk_columns(facet_name)
+    accepted: list[Any] = []
+    rejected: list[Any] = []
+    deferred: list[Any] = []
+    stopped_early = False
+
+    work = proposals if limit is None else proposals[:limit]
+    total = len(work)
+
+    if dry_run:
+        click.echo(f"[dry-run] Would review {total} proposal(s) for {facet_name!r}.")
+
+    def _process(conn: sqlite3.Connection | None) -> None:
+        nonlocal stopped_early
+        for i, proposal in enumerate(work, 1):
+            click.echo(_format_proposal(i, total, proposal))
+
+            # Auto-accept above threshold (per-invocation override).
+            if (
+                auto_accept_threshold is not None
+                and proposal.confidence >= auto_accept_threshold
+            ):
+                click.echo(f"  [auto-accept @ {auto_accept_threshold:.2f}]")
+                if dry_run or conn is None:
+                    accepted.append(proposal)
+                    continue
+                survivor = apply_merge(
+                    conn,
+                    node_table=meta["node_table"],
+                    proposal=proposal,
+                    facet_type=meta["facet_type"],
+                    fk_columns=fk_columns,
+                )
+                accepted.append(proposal)
+                click.echo(f"  -> merged into id={survivor}")
+                continue
+
+            answer = click.prompt(
+                "  [a]ccept / [r]eject / [d]efer / [s]top",
+                default="d",
+                show_default=True,
+                type=click.Choice(["a", "r", "d", "s"], case_sensitive=False),
+            ).lower()
+            if answer == "s":
+                stopped_early = True
+                # Remaining items (including this one) default to deferred.
+                deferred.extend(work[i - 1 :])
+                break
+            if answer == "a":
+                if dry_run or conn is None:
+                    click.echo("  [dry-run] would accept")
+                    accepted.append(proposal)
+                    continue
+                try:
+                    survivor = apply_merge(
+                        conn,
+                        node_table=meta["node_table"],
+                        proposal=proposal,
+                        facet_type=meta["facet_type"],
+                        fk_columns=fk_columns,
+                    )
+                except Exception as exc:
+                    click.echo(f"  ! apply_merge failed: {exc}")
+                    deferred.append(proposal)
+                    continue
+                accepted.append(proposal)
+                click.echo(f"  -> merged into id={survivor}")
+            elif answer == "r":
+                if dry_run:
+                    click.echo("  [dry-run] would reject")
+                rejected.append(proposal)
+            else:
+                if dry_run:
+                    click.echo("  [dry-run] would defer")
+                deferred.append(proposal)
+
+    if dry_run:
+        _process(None)
+    else:
+        with connect(settings.db_path) as conn:
+            _process(conn)
+
+    # Anything beyond the limit window stays in the queue untouched.
+    if limit is not None and len(proposals) > limit:
+        deferred.extend(proposals[limit:])
+
+    # Rewrite the queue: deferred only (accepted are now in audit log;
+    # rejected are dropped on the operator's say-so).
+    if not dry_run:
+        save_pending(facet_name, inst_dir, deferred)
+
+    click.echo()
+    click.echo(
+        f"Done. accepted={len(accepted)}  rejected={len(rejected)}  "
+        f"deferred={len(deferred)}"
+        + ("  (stopped early)" if stopped_early else "")
+    )
+    if dry_run:
+        click.echo("[dry-run] No DB writes; queue file unchanged.")
+
+
+def _unmerge_command(
+    ctx: click.Context, facet_name: str, audit_id: int,
+) -> None:
+    """Shared body for ``phdb facet <facet> unmerge <audit_id>``."""
+    from phdb.db import connect
+    from phdb.facets._coalescence_lib import unmerge
+
+    settings = ctx.obj["settings"]
+    meta = _FACET_REGISTRY.get(facet_name)
+    if meta is None:
+        click.echo(f"Unknown facet {facet_name!r}.")
+        raise SystemExit(1)
+
+    with connect(settings.db_path) as conn:
+        try:
+            summary = unmerge(conn, meta["node_table"], audit_id)
+        except ValueError as exc:
+            click.echo(f"unmerge failed: {exc}")
+            raise SystemExit(1) from exc
+
+    click.echo(f"Unmerged audit_id={summary['audit_id']}")
+    click.echo(f"  survivor_id:   {summary['survivor_id']}")
+    click.echo(f"  restored_ids:  {summary['restored_ids']}")
+    click.echo(f"  restored_count:{summary['restored_count']}")
+    click.echo(f"  node_table:    {summary['node_table']}")
+    click.echo(f"  note: {summary['note']}")
+
+
+# --- people subcommands ----------------------------------------------------
+
+
+@facet.group()
+def people() -> None:
+    """People facet — Person identity coalescence commands."""
+
+
+@people.command(name="review")
+@click.option(
+    "--auto-accept-threshold", type=float, default=None,
+    help="Auto-accept any proposal whose confidence >= this value.",
+)
+@click.option(
+    "--limit", type=int, default=None,
+    help="Review at most N proposals this session.",
+)
+@click.option(
+    "--rule", "rule_filter", type=str, default=None,
+    help="Only review proposals generated by the named rule.",
+)
+@click.option(
+    "--dry-run", is_flag=True,
+    help="Preview accept/reject decisions; no DB writes or queue mutation.",
+)
+@click.option(
+    "--instance-dir", "instance_dir_override", type=click.Path(),
+    default=None, help="Override the per-instance config dir.",
+)
+@click.pass_context
+def people_review(  # noqa: PLR0913 — Click-mapped flags
+    ctx: click.Context,
+    auto_accept_threshold: float | None,
+    limit: int | None,
+    rule_filter: str | None,
+    dry_run: bool,
+    instance_dir_override: str | None,
+) -> None:
+    """Interactively walk pending merge proposals for the people facet."""
+    _review_loop(
+        ctx, "people",
+        auto_accept_threshold=auto_accept_threshold,
+        limit=limit,
+        rule_filter=rule_filter,
+        dry_run=dry_run,
+        instance_dir_override=instance_dir_override,
+    )
+
+
+@people.command(name="unmerge")
+@click.argument("audit_id", type=int)
+@click.pass_context
+def people_unmerge(ctx: click.Context, audit_id: int) -> None:
+    """Reverse a single audit entry on the persons table."""
+    _unmerge_command(ctx, "people", audit_id)
+
+
+# --- places subcommands ----------------------------------------------------
+
+
+@facet.group()
+def places() -> None:
+    """Places facet — geographic place coalescence commands."""
+
+
+@places.command(name="review")
+@click.option(
+    "--auto-accept-threshold", type=float, default=None,
+    help="Auto-accept any proposal whose confidence >= this value.",
+)
+@click.option(
+    "--limit", type=int, default=None,
+    help="Review at most N proposals this session.",
+)
+@click.option(
+    "--rule", "rule_filter", type=str, default=None,
+    help="Only review proposals generated by the named rule.",
+)
+@click.option(
+    "--dry-run", is_flag=True,
+    help="Preview accept/reject decisions; no DB writes or queue mutation.",
+)
+@click.option(
+    "--instance-dir", "instance_dir_override", type=click.Path(),
+    default=None, help="Override the per-instance config dir.",
+)
+@click.pass_context
+def places_review(  # noqa: PLR0913 — Click-mapped flags
+    ctx: click.Context,
+    auto_accept_threshold: float | None,
+    limit: int | None,
+    rule_filter: str | None,
+    dry_run: bool,
+    instance_dir_override: str | None,
+) -> None:
+    """Interactively walk pending merge proposals for the places facet."""
+    _review_loop(
+        ctx, "places",
+        auto_accept_threshold=auto_accept_threshold,
+        limit=limit,
+        rule_filter=rule_filter,
+        dry_run=dry_run,
+        instance_dir_override=instance_dir_override,
+    )
+
+
+@places.command(name="unmerge")
+@click.argument("audit_id", type=int)
+@click.pass_context
+def places_unmerge(ctx: click.Context, audit_id: int) -> None:
+    """Reverse a single audit entry on the places table."""
+    _unmerge_command(ctx, "places", audit_id)
+
+
+# --- aggregate stats -------------------------------------------------------
+
+
+def _confidence_bucket(c: float) -> str:
+    """Bucket a confidence score for the stats summary."""
+    if c >= 0.90:
+        return "0.90+"
+    if c >= 0.75:
+        return "0.75-0.89"
+    if c >= 0.50:
+        return "0.50-0.74"
+    return "<0.50"
+
+
+@facets_group.command(name="stats")
+@click.option(
+    "--instance-dir", "instance_dir_override", type=click.Path(),
+    default=None, help="Override the per-instance config dir for pending counts.",
+)
+@click.pass_context
+def facets_stats(
+    ctx: click.Context, instance_dir_override: str | None,
+) -> None:
+    """Summarize facet_coalescence_log + pending-review queue depths."""
+    from phdb.db import connect
+    from phdb.facets._review_queue import load_pending
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM facet_coalescence_log"
+            ).fetchone()[0]
+        except Exception:
+            click.echo(
+                "facet_coalescence_log table not found. "
+                "Run `phdb migrate` first."
+            )
+            raise SystemExit(1) from None
+
+        by_facet = conn.execute(
+            "SELECT facet_type, COUNT(*) FROM facet_coalescence_log "
+            "GROUP BY facet_type ORDER BY facet_type"
+        ).fetchall()
+        by_rule = conn.execute(
+            "SELECT rule_name, COUNT(*) FROM facet_coalescence_log "
+            "GROUP BY rule_name ORDER BY COUNT(*) DESC"
+        ).fetchall()
+        conf_rows = conn.execute(
+            "SELECT confidence FROM facet_coalescence_log"
+        ).fetchall()
+
+    click.echo(f"Facet coalescence — total merges: {total}\n")
+
+    click.echo("By facet_type:")
+    if by_facet:
+        for ftype, count in by_facet:
+            click.echo(f"  {ftype or '(null)':20s} {count:>6}")
+    else:
+        click.echo("  (none)")
+
+    click.echo("\nBy rule:")
+    if by_rule:
+        for rname, count in by_rule:
+            click.echo(f"  {rname or '(null)':40s} {count:>6}")
+    else:
+        click.echo("  (none)")
+
+    click.echo("\nBy confidence bucket:")
+    buckets: dict[str, int] = {}
+    for (c,) in conf_rows:
+        if c is None:
+            continue
+        buckets[_confidence_bucket(float(c))] = (
+            buckets.get(_confidence_bucket(float(c)), 0) + 1
+        )
+    if buckets:
+        for label in ("0.90+", "0.75-0.89", "0.50-0.74", "<0.50"):
+            count = buckets.get(label, 0)
+            click.echo(f"  {label:20s} {count:>6}")
+    else:
+        click.echo("  (none)")
+
+    inst_dir = _resolve_instance_dir(settings, instance_dir_override)
+    click.echo("\nPending review (deferred):")
+    if inst_dir is None:
+        click.echo("  (no instance dir; pass --instance-dir to inspect)")
+        return
+    for facet_name in sorted(_FACET_REGISTRY):
+        pending = load_pending(facet_name, inst_dir)
+        click.echo(f"  {facet_name:20s} {len(pending):>6}")

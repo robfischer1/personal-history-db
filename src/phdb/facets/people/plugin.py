@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from phdb.facets._coalescence_lib import MergeProposal
+from phdb.facets._review_queue import append_pending
 from phdb.facets.base import SkeletonFacetPlugin
 from phdb.facets.people.coalescence import (
     AUTO_MERGE_THRESHOLD,
+    PEOPLE_FK_COLUMNS,
     PeopleCoalescer,
     coalesce_buffer_to_db,
 )
@@ -97,14 +99,25 @@ class PeopleFacetPlugin(SkeletonFacetPlugin):
             }
 
         # Live mode — auto-merge + audit writes.
+        # Default to PEOPLE_FK_COLUMNS when caller didn't pass a list
+        # (Phase 8C Q3 — explicit per-facet constants beat introspection).
+        effective_fks = fk_columns if fk_columns is not None else PEOPLE_FK_COLUMNS
         summary, pending = coalesce_buffer_to_db(
             connection,
             self.buffer,
             instance_dir=instance_dir,
             auto_merge_threshold=auto_merge_threshold,
-            fk_columns=fk_columns,
+            fk_columns=effective_fks,
         )
         self.pending_review.extend(pending)
+        # Phase 8C: persist pending proposals so the review CLI can
+        # consume them across process boundaries. No-op if no instance_dir.
+        if instance_dir is not None and pending:
+            for proposal in pending:
+                try:
+                    append_pending("people", instance_dir, proposal)
+                except Exception:  # pragma: no cover - defensive
+                    pass
         # Drain the buffer — emissions are now represented in audit entries
         # (for auto-merged) or in self.pending_review (for low-confidence).
         self.buffer.clear()

@@ -62,6 +62,24 @@ log = get_logger("phdb.facets.people.coalescence")
 
 AUTO_MERGE_THRESHOLD = 0.90
 
+# FK columns that reference persons(id) — Phase 8C explicit-list approach
+# (introspection via sqlite_master is a Phase 10 polish item, Q3).
+#
+# Walked the schema 2026-05-23: NO migration in src/phdb/migrations/project/
+# currently declares ``REFERENCES persons(id)``. ``triples.subject_node_id``
+# and ``triples.object_node_id`` FK to ``nodes(id)`` (an indirection layer
+# via the nodes table — kind='person' nodes carry source_table='persons' +
+# source_id soft refs, not hard FKs). geo_traces uses parent_message_id,
+# a legacy column with no FK constraint to persons.
+#
+# Empty list is therefore correct + safe. apply_merge() still runs;
+# fk_columns=[] makes the FK-rewrite step a no-op. The unmerge path
+# restores the merged-away rows from the audit-log payload regardless.
+#
+# Future plugins that add direct persons.id FKs should extend this list
+# (and revisit the introspection alternative in Phase 10).
+PEOPLE_FK_COLUMNS: list[tuple[str, str]] = []
+
 # Bundled defaults — used when the instance has no identity_rules.toml.
 DEFAULT_PEOPLE_RULES: list[dict[str, Any]] = [
     {
@@ -296,6 +314,7 @@ __all__ = [
     "AUTO_MERGE_THRESHOLD",
     "CoalesceSummary",
     "DEFAULT_PEOPLE_RULES",
+    "PEOPLE_FK_COLUMNS",
     "PeopleCoalescer",
     "coalesce_buffer_to_db",
 ]
