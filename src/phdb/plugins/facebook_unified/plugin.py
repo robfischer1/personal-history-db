@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.facebook_html import parse as parse_facebook
 from phdb.log import get_logger
 from phdb.plugins.facebook_unified.ingest import ingest_facebook_record
@@ -35,31 +36,6 @@ class IngestSummary:
     rows_skipped: int = 0
     threads_created: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "facebook",
-    file_kind: str = "zip",
-) -> int:
-    """Insert or refresh a source_files row."""
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, file_kind, source_kind),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 class FacebookUnifiedPlugin(PhdbSourcePlugin):
     """Facebook Unified plugin — messenger, posts, residuals."""
 
@@ -98,7 +74,7 @@ class FacebookUnifiedPlugin(PhdbSourcePlugin):
         *,
         source_file_id: int,
         settings: Settings | None = None,
-    ) -> int:
+    ) -> int | None:
         """Ingest a single Facebook record."""
         return ingest_facebook_record(
             conn, record, source_file_id, settings=settings

@@ -55,7 +55,7 @@ def _entry_point_descriptors(group: str) -> list[PluginDescriptor]:
     try:
         eps = entry_points(group=group)
     except TypeError:
-        eps = entry_points().get(group, [])
+        eps = entry_points().get(group, [])  # type: ignore[arg-type]
     for ep in eps:
         try:
             dist_name = ep.dist.name if ep.dist else None

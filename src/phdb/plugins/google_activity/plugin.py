@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.google_activity_html import parse as parse_google_activity
 from phdb.log import get_logger
 from phdb.plugins.google_activity.ingest import upsert_web_activity
@@ -31,24 +32,6 @@ class IngestSummary:
     rows_inserted: int = 0
     rows_skipped: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-) -> int:
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE SET
-             ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, "html", "google-activity"),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
 
 
 class GoogleActivityPlugin(PhdbSourcePlugin):
@@ -104,7 +87,10 @@ class GoogleActivityPlugin(PhdbSourcePlugin):
         settings: Settings | None = None,
     ) -> IngestSummary:
         report = IngestSummary(source_path=str(source_path))
-        source_file_id = _register_source_file(conn, source_path)
+        source_file_id = _register_source_file(
+            conn, source_path,
+            source_kind="google-activity", file_kind="html",
+        )
         report.source_file_id = source_file_id
 
         batch_count = 0

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.ical import parse as parse_ical
 from phdb.log import get_logger
 from phdb.records import CalendarEvent
@@ -54,36 +55,6 @@ class IngestSummary:
     rows_skipped: int = 0
     threads_created: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "calendar",
-    file_kind: str = "ical",
-) -> int:
-    """Insert (or refresh) a source_files row for the given path.
-
-    Mirrors the helper used by the raindrop + amazon plugin ports —
-    Phase 7 will lift this into a shared ``phdb.core.sources`` helper
-    once enough plugins port.
-    """
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, file_kind, source_kind),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 _INSERT_EVENT_SQL = """\
 INSERT OR IGNORE INTO events (
     schema_type, event_key, subject, sender_address, sender_name,
@@ -134,7 +105,9 @@ def _emit_thread_triple(
         thread_node_id = int(existing[0])
         created = False
     else:
-        thread_node_id = resolve_node(conn, thread_label, "thread")
+        _node = resolve_node(conn, thread_label, "thread")
+        assert _node is not None
+        thread_node_id = _node
         created = True
 
     conn.execute(

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.google_voice_html import parse as parse_voice
 from phdb.log import get_logger
 from phdb.records import CallRecord, ChatMessage
@@ -38,31 +39,6 @@ class IngestSummary:
     rows_skipped: int = 0
     threads_created: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "google-voice",
-    file_kind: str = "html",
-) -> int:
-    """Insert (or refresh) a source_files row for the given path."""
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, file_kind, source_kind),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 class GoogleVoicePlugin(PhdbSourcePlugin):
     """Google Voice call/text/voicemail plugin."""
 

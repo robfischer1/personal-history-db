@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.goodreads_csv import parse as parse_goodreads_csv
 from phdb.log import get_logger
 from phdb.records import ConsumedItem
@@ -49,36 +50,6 @@ class IngestSummary:
     rows_inserted: int = 0
     rows_skipped: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "goodreads",
-    file_kind: str = "csv",
-) -> int:
-    """Insert (or refresh) a source_files row for the given path.
-
-    Mirrors the helper used by the raindrop + facebook_unified plugin
-    ports — Phase 7 will lift this into a shared phdb.core.sources
-    helper as more plugins port.
-    """
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, file_kind, source_kind),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 _INSERT_BOOK_SQL = """\
 INSERT OR IGNORE INTO books (
     schema_type, name, isbn, publisher, date_published,

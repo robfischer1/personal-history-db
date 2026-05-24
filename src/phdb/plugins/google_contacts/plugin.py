@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.vcard import parse as parse_vcard
 from phdb.log import get_logger
 from phdb.plugins.google_contacts.ingest import ingest_record
@@ -31,35 +32,6 @@ class IngestSummary:
     rows_inserted: int = 0
     rows_skipped: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "google-contacts",
-    source_org: str = "Google Takeout",
-    file_kind: str = "vcf",
-) -> int:
-    """Insert or refresh a source_files row."""
-    file_size = source_path.stat().st_size if source_path.exists() else None
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid,
-            file_size, ingested_at)
-           VALUES (?, ?, ?, ?, NULL, ?,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                 file_size = excluded.file_size
-           RETURNING id""",
-        (str(source_path), source_org, file_kind, source_kind, file_size),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 class GoogleContactsPlugin(PhdbSourcePlugin):
     """Google Contacts plugin — Phase 7 port."""
 
@@ -119,9 +91,11 @@ class GoogleContactsPlugin(PhdbSourcePlugin):
     ) -> IngestSummary:
         """End-to-end ingest of one source file."""
         report = IngestSummary(source_path=str(source_path))
+        file_size = source_path.stat().st_size if source_path.exists() else None
         source_file_id = _register_source_file(
             conn, source_path,
             source_kind=self.SOURCE_KIND, file_kind=self.FILE_KIND,
+            source_org="Google Takeout", file_size=file_size,
         )
         report.source_file_id = source_file_id
 

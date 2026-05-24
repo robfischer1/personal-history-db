@@ -168,9 +168,8 @@ class AppleHealthBackupPlugin(PhdbSourcePlugin):
             report.threads_created += 1
 
         secure_db = self._resolve_secure_db(source_path)
-        meta_db = secure_db.parent / "healthdb.sqlite"
-        if not meta_db.exists():
-            meta_db = None
+        meta_db_path = secure_db.parent / "healthdb.sqlite"
+        meta_db: Path | None = meta_db_path if meta_db_path.exists() else None
 
         since_ts = self._last_ingest_ts(conn)
         if since_ts is not None:

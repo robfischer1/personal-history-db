@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from phdb.core.plugin import PhdbSourcePlugin
+from phdb.core.source_files import register_source_file as _register_source_file
 from phdb.formats.chat_upserts import (
     emit_chat_recipient_triples,
     emit_chat_thread_triple,
@@ -38,31 +39,6 @@ class IngestSummary:
     rows_inserted: int = 0
     rows_skipped: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "phone-sms",
-    file_kind: str = "sqlite",
-) -> int:
-    """Insert (or refresh) a source_files row for the given path."""
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, file_kind, source_kind),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 class PhoneSmsPlugin(PhdbSourcePlugin):
     """Android SMS/MMS plugin."""
 

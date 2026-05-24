@@ -25,6 +25,7 @@ Facet plugins implement:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from pathlib import Path
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     import sqlite3
 
     from phdb.core.plugin.manifest import PluginManifest
+    from phdb.core.plugin.summary import IngestSummary
 
 
 class PhdbPlugin(ABC):
@@ -104,6 +106,55 @@ class PhdbSourcePlugin(PhdbPlugin):
         ABC + EmissionBus implementation ship in Phase 4.
         """
         return None
+
+    def run(
+        self,
+        source_path: Path,
+        conn: sqlite3.Connection,
+        settings: Any = None,
+    ) -> IngestSummary:
+        """Standard ingest runner — register source, parse, ingest, batch-commit.
+
+        Plugins with custom run logic (resume, sidecar tables, identity
+        resolution, channel iteration, etc.) should override this method.
+        Requires ``SOURCE_KIND``, ``FILE_KIND``, and ``BATCH_SIZE`` class
+        attributes.
+        """
+        from phdb.core.plugin.summary import IngestSummary
+        from phdb.core.source_files import register_source_file
+
+        log = logging.getLogger(f"phdb.plugins.{self.name}")
+
+        report = IngestSummary(source_path=str(source_path))
+        source_file_id = register_source_file(
+            conn, source_path,
+            source_kind=self.SOURCE_KIND,  # type: ignore[attr-defined]
+            file_kind=self.FILE_KIND,  # type: ignore[attr-defined]
+        )
+        report.source_file_id = source_file_id
+
+        batch_size: int = getattr(self, "BATCH_SIZE", 500)
+        batch_count = 0
+        for record in self.parse(source_path):
+            report.rows_yielded += 1
+            row_id = self.ingest_row(conn, record, source_file_id=source_file_id)
+            if row_id is None:
+                report.rows_skipped += 1
+            else:
+                report.rows_inserted += 1
+
+            batch_count += 1
+            if batch_count >= batch_size:
+                conn.commit()
+                batch_count = 0
+
+        conn.commit()
+
+        log.info(
+            "[%s] Done: %d yielded, %d inserted, %d skipped",
+            self.name, report.rows_yielded, report.rows_inserted, report.rows_skipped,
+        )
+        return report
 
 
 class PhdbFacetPlugin(PhdbPlugin):

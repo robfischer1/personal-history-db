@@ -187,7 +187,9 @@ def emit_thread_triple(
         thread_node_id = int(existing[0])
         created = False
     else:
-        thread_node_id = resolve_node(conn, thread_label, "thread")
+        _node = resolve_node(conn, thread_label, "thread")
+        assert _node is not None
+        thread_node_id = _node
         created = True
 
     conn.execute(

@@ -40,6 +40,7 @@ from phdb.core.plugin.manifest import (
     load_manifest,
     parse_manifest_toml,
 )
+from phdb.core.plugin.summary import IngestSummary
 
 MANIFEST_VERSION = 1
 
@@ -49,6 +50,7 @@ __all__ = [
     "FACET_ENTRY_POINT_GROUP",
     "FacetEmission",
     "FacetManifestExtras",
+    "IngestSummary",
     "MANIFEST_VERSION",
     "PhdbFacetPlugin",
     "PhdbPlugin",

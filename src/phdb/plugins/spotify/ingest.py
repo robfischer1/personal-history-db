@@ -9,35 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-from pathlib import Path
 
+from phdb.core.source_files import register_source_file as register_source_file
 from phdb.records import MediaPlay
 from phdb.triples import resolve_node
 
 _MAX_BODY_LEN = 2000
-
-
-def register_source_file(
-    conn: sqlite3.Connection,
-    source_path: Path,
-    *,
-    source_kind: str = "spotify",
-    file_kind: str = "json",
-) -> int:
-    """Insert (or refresh) a source_files row for the given path."""
-    cur = conn.execute(
-        """INSERT INTO source_files
-           (source_path, source_org, file_kind, source_kind, session_uuid, ingested_at)
-           VALUES (?, ?, ?, ?, NULL,
-                   strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ON CONFLICT(source_path) DO UPDATE
-             SET ingested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           RETURNING id""",
-        (str(source_path), None, file_kind, source_kind),
-    )
-    row = cur.fetchone()
-    assert row is not None
-    return int(row[0])
 
 
 def build_body_text(rec: MediaPlay) -> str:
