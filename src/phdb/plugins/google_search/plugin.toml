@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "google_search"
+version = "0.1.0"
+description = "Google Takeout Search MyActivity HTML — search queries + visited results"
+kind = "source"
+entry_point = "phdb.plugins.google_search:GoogleSearchPlugin"
+
+[source]
+emits = ["SearchAction"]
+entity_refs = []
+formats_used = ["google_search_html"]
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []
