@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from collections.abc import Iterator
@@ -150,17 +149,14 @@ class ClaudeCodePlugin(PhdbSourcePlugin):
             report.rows_yielded += 1
 
             if first_rec and record.thread_key:
-                # Thread creation signal
+                # Thread-node creation signal (graph layer; the legacy
+                # `threads` table was dropped in the Messages Decomposition
+                # refactor — migrations 0016-0022).
                 label = f"{self.SOURCE_KIND}:{record.thread_key}"
                 exists = conn.execute(
                     "SELECT 1 FROM nodes WHERE kind = 'thread' AND normalized_label = ?",
                     (label.lower(),),
                 ).fetchone()
-
-                # We also need to populate the threads table if it still exists
-                # and has specific columns like metadata/cwd
-                self._ensure_threads_row(conn, record)
-
                 if not exists:
                     report.threads_created += 1
                 first_rec = False
@@ -198,21 +194,3 @@ class ClaudeCodePlugin(PhdbSourcePlugin):
             if "refuses live" in str(exc):
                 raise
 
-    def _ensure_threads_row(self, conn: sqlite3.Connection, record: AISessionMessage) -> None:
-        """Populate threads table with metadata/cwd if it exists and is missing this thread."""
-        if not record.thread_key:
-            return
-
-        exists = conn.execute(
-            "SELECT 1 FROM threads WHERE source_kind = ? AND thread_key = ?",
-            (self.SOURCE_KIND, record.thread_key),
-        ).fetchone()
-
-        if not exists:
-            metadata_json = json.dumps(record.thread_metadata) if record.thread_metadata else None
-            cwd = record.thread_metadata.get("cwd") if record.thread_metadata else None
-            conn.execute(
-                """INSERT INTO threads (schema_type, source_kind, thread_key, metadata, cwd)
-                   VALUES ('Conversation', ?, ?, ?, ?)""",
-                (self.SOURCE_KIND, record.thread_key, metadata_json, cwd),
-            )
