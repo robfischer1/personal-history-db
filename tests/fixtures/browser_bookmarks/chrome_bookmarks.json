@@ -1,0 +1,85 @@
+{
+   "checksum": "abc123deadbeef",
+   "roots": {
+      "bookmark_bar": {
+         "children": [
+            {
+               "date_added": "13347573500000000",
+               "id": "4",
+               "name": "Python Docs",
+               "type": "url",
+               "url": "https://docs.python.org/3/"
+            },
+            {
+               "children": [
+                  {
+                     "date_added": "13348000000000000",
+                     "id": "6",
+                     "name": "FastAPI",
+                     "type": "url",
+                     "url": "https://fastapi.tiangolo.com/"
+                  },
+                  {
+                     "children": [
+                        {
+                           "date_added": "13349000000000000",
+                           "id": "8",
+                           "name": "SQLite Docs",
+                           "type": "url",
+                           "url": "https://www.sqlite.org/docs.html"
+                        }
+                     ],
+                     "date_added": "13347000000000000",
+                     "date_modified": "13349000000000000",
+                     "id": "7",
+                     "name": "Databases",
+                     "type": "folder"
+                  }
+               ],
+               "date_added": "13346000000000000",
+               "date_modified": "13349000000000000",
+               "id": "5",
+               "name": "Dev",
+               "type": "folder"
+            }
+         ],
+         "date_added": "13340000000000000",
+         "date_modified": "13349000000000000",
+         "id": "1",
+         "name": "Bookmarks bar",
+         "type": "folder"
+      },
+      "other": {
+         "children": [
+            {
+               "date_added": "13350000000000000",
+               "id": "10",
+               "name": "Hacker News",
+               "type": "url",
+               "url": "https://news.ycombinator.com/"
+            },
+            {
+               "date_added": "13351000000000000",
+               "id": "11",
+               "name": "Google Search Result",
+               "type": "url",
+               "url": "https://www.google.com/search?q=test+query"
+            }
+         ],
+         "date_added": "13340000000000000",
+         "date_modified": "13351000000000000",
+         "id": "2",
+         "name": "Other bookmarks",
+         "type": "folder"
+      },
+      "synced": {
+         "children": [],
+         "date_added": "13340000000000000",
+         "date_modified": "13340000000000000",
+         "id": "3",
+         "name": "Mobile bookmarks",
+         "type": "folder"
+      }
+   },
+   "version": 1
+}

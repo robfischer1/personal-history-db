@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "browser_bookmarks"
+version = "0.1.0"
+description = "Browser bookmark exports — Netscape HTML and Chrome JSON formats; writes to shared bookmarks table"
+kind = "source"
+entry_point = "phdb.plugins.browser_bookmarks:BrowserBookmarksPlugin"
+
+[source]
+emits = ["BookmarkAction"]
+entity_refs = ["web_pages"]
+formats_used = ["url", "bookmark_upserts"]
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []

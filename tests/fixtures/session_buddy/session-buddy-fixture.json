@@ -1,0 +1,172 @@
+{
+  "format": "nxs.json.v2",
+  "exportId": "fixture_export_001",
+  "created": "2024-04-28T22:00:00.000Z",
+  "scope": "all",
+  "source": {
+    "type": "client",
+    "id": "fixture_client",
+    "version": "4.0.3",
+    "language": "en-US",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  },
+  "collections": [
+    {
+      "id": "coll_research_abc123",
+      "sourceType": "local-client",
+      "created": 1714200000000,
+      "pinned": 1,
+      "updated": 1714200000000,
+      "touched": 1714200000000,
+      "folders": [
+        {
+          "state": "maximized",
+          "top": 0,
+          "left": 0,
+          "width": 1920,
+          "height": 1080,
+          "id": "folder_abc",
+          "links": [
+            {
+              "url": "https://github.com/anthropics/anthropic-sdk-python",
+              "title": "anthropic-sdk-python",
+              "favIconUrl": "https://github.com/favicon.ico",
+              "id": "link_github_sdk"
+            },
+            {
+              "url": "https://docs.python.org/3/library/dataclasses.html",
+              "title": "dataclasses — Python Docs",
+              "favIconUrl": "https://docs.python.org/favicon.ico",
+              "id": "link_py_docs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coll_reading_xyz789",
+      "sourceType": "db-migration",
+      "created": 1714100000000,
+      "pinned": 0,
+      "updated": 1714100000000,
+      "touched": 1714100000000,
+      "folders": [
+        {
+          "state": "normal",
+          "top": 0,
+          "left": 0,
+          "width": 1920,
+          "height": 1080,
+          "id": "folder_xyz",
+          "links": [
+            {
+              "url": "https://sqlite.org/json1.html",
+              "title": "The JSON1 extension",
+              "favIconUrl": "https://sqlite.org/favicon.ico",
+              "id": "link_sqlite_json",
+              "active": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "history": [
+    {
+      "id": 1714339790627,
+      "type": "snapshot-scheduled",
+      "windows": [
+        {
+          "height": 1048,
+          "id": "win_snap1",
+          "left": -8,
+          "state": "maximized",
+          "top": -8,
+          "width": 1936,
+          "tabs": [
+            {
+              "favIconUrl": "https://github.com/favicon.ico",
+              "id": 12345,
+              "title": "anthropic-sdk-python",
+              "url": "https://github.com/anthropics/anthropic-sdk-python"
+            },
+            {
+              "favIconUrl": "https://mail.google.com/favicon.ico",
+              "id": 12346,
+              "title": "Gmail",
+              "url": "https://mail.google.com/mail/u/0/"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 1714332672938,
+      "type": "browser-closed",
+      "windows": [
+        {
+          "height": 1048,
+          "id": "win_closed1a",
+          "left": 0,
+          "state": "normal",
+          "top": 0,
+          "width": 1920,
+          "tabs": [
+            {
+              "favIconUrl": "https://docs.python.org/favicon.ico",
+              "id": 22001,
+              "title": "dataclasses — Python Docs",
+              "url": "https://docs.python.org/3/library/dataclasses.html"
+            }
+          ]
+        },
+        {
+          "height": 1048,
+          "id": "win_closed1b",
+          "left": 100,
+          "state": "normal",
+          "top": 0,
+          "width": 1920,
+          "tabs": [
+            {
+              "active": true,
+              "favIconUrl": "https://sqlite.org/favicon.ico",
+              "id": 22002,
+              "title": "The JSON1 extension",
+              "url": "https://sqlite.org/json1.html"
+            },
+            {
+              "active": false,
+              "favIconUrl": "https://sqlite.org/favicon.ico",
+              "id": 22003,
+              "title": "SQLite Docs",
+              "url": "https://sqlite.org/docs.html"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 1714300000000,
+      "type": "snapshot-scheduled",
+      "windows": [
+        {
+          "height": 1048,
+          "id": "win_snap2",
+          "left": 0,
+          "state": "normal",
+          "top": 0,
+          "width": 1920,
+          "tabs": [
+            {
+              "favIconUrl": "https://github.com/favicon.ico",
+              "id": 33001,
+              "title": "anthropic-sdk-python",
+              "url": "https://github.com/anthropics/anthropic-sdk-python"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
