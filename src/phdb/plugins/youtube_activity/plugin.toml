@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "youtube_activity"
+version = "0.1.0"
+description = "Google Takeout YouTube watch/search/subscribe activity"
+kind = "source"
+entry_point = "phdb.plugins.youtube_activity:YouTubeActivityPlugin"
+
+[source]
+emits = ["WatchAction", "SearchAction", "FollowAction"]
+entity_refs = ["WebPage"]
+formats_used = []
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []

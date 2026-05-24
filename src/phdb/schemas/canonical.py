@@ -867,6 +867,30 @@ class LikeAction(ActionSchema):
     indexes = [_standard_dedup_index("like_actions")]
 
 
+class FollowAction(ActionSchema):
+    table_name = "follow_actions"
+    schema_type = "FollowAction"
+    date_column = "date_followed"
+    entity_refs = [EntityFK(entity_table="web_pages", column_name="web_page_id")]
+    fields = _messages_decomp_fields(
+        schema_type="FollowAction",
+        key_column="follow_key",
+        date_column="date_followed",
+        extras=[
+            FieldSpec("platform_name", "TEXT"),
+            FieldSpec("channel_name", "TEXT"),
+            FieldSpec("web_page_id", "INTEGER", references="web_pages(id)"),
+        ],
+        include_sender=False,
+        is_bulk_default="1",
+    )
+    indexes = [
+        _standard_dedup_index("follow_actions"),
+        _date_index("follow_actions", "date_followed"),
+        IndexSpec(name="idx_follow_actions_web_page_id", columns=["web_page_id"]),
+    ]
+
+
 class Person(ActionSchema):
     """Currently action-shaped; will be entity-factored in Phase 7."""
 
@@ -1389,6 +1413,7 @@ ACTION_SCHEMAS: list[type[ActionSchema]] = [
     Product,
     OrderAction,
     LikeAction,
+    FollowAction,
     Person,
     SocialMediaPosting,
     Comment,
@@ -1445,6 +1470,7 @@ __all__ = [
     "EmailMessage",
     "Event",
     "ExerciseAction",
+    "FollowAction",
     "GeoShape",
     "InviteAction",
     "JoinAction",
