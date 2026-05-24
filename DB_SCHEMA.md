@@ -4,7 +4,7 @@
 > are overwritten on next ingest. Schema descriptions and column
 > notes live on the dataclass schemas in `phdb.schemas.canonical`.
 
-**Regenerated at:** 2026-05-23T02:47:53Z
+**Regenerated at:** 2026-05-24T22:14:20Z
 
 ## Entity tables
 
@@ -13,7 +13,18 @@ Action rows FK to these via the auto-generated ``<entity>_id`` column.
 
 | Table | @type | Rows | dedup_key | Plugins |
 |:---|:---|---:|:---|:---|
+| `books` | Book | 0 | `name` | consumed_media, goodreads, staged_md |
+| `browser_sessions` | BrowserSession | 0 | `source_id` | session_buddy |
+| `games` | VideoGame | 0 | `name` | consumed_media |
+| `movies` | Movie | 0 | `name` | consumed_media |
+| `plans` | VaultPlan | 0 | `name` | vault_tasks_plans |
+| `podcasts` | PodcastSeries | 0 | `name` | consumed_media |
+| `sessions` | Session | 0 | `session_key` | — |
+| `tasks` | VaultTask | 0 | `name` | vault_tasks_plans |
+| `tv_series` | TVSeries | 0 | `name` | consumed_media |
+| `twitch_channels` | WebSite | 0 | `name` | consumed_media |
 | `web_pages` | WebPage | 0 | `normalized_url` | apple_dbs |
+| `youtube_channels` | WebSite | 0 | `name` | consumed_media |
 
 ## Action / document tables
 
@@ -22,39 +33,42 @@ declare ``emits = [<@type>]`` in their manifest.
 
 | Table | @type | Rows | Date column | Plugins |
 |:---|:---|---:|:---|:---|
-| `actions` | Action | 0 | `date_performed` | apple_dbs |
-| `articles` | Article | 0 | `mtime` | — |
-| `bookmarks` | BookmarkAction | 0 | `first_seen_in_instrument` | apple_dbs, raindrop |
-| `books` | Book | 0 | `date_recorded` | — |
+| `actions` | Action | 0 | `date_performed` | apple_dbs, calendar, google_voice, phone_calls_xml |
+| `articles` | Article | 0 | `mtime` | articles, staged_md |
+| `bookmarks` | BookmarkAction | 0 | `first_seen_in_instrument` | apple_dbs, browser_bookmarks, raindrop |
+| `books_legacy` | BookLegacy | 0 | `date_recorded` | — |
 | `browse_actions` | BrowseAction | 0 | `visit_time` | apple_dbs |
-| `chat_messages` | Message | 0 | `date_sent` | apple_dbs, imessage |
-| `clippings` | Quotation | 0 | `mtime` | — |
-| `comments` | Comment | 0 | `date_posted` | — |
-| `conversations_messages` | Conversation | 0 | `date_sent` | — |
-| `creative_works` | CreativeWork | 0 | `date_created` | — |
-| `digital_documents` | DigitalDocument | 0 | `date_created` | apple_dbs |
-| `documents` | DigitalDocument | 0 | `mtime` | apple_dbs |
-| `emails` | EmailMessage | 1 | `date_sent` | mbox |
-| `events` | Event | 0 | `date_occurred` | — |
-| `exercise_actions` | ExerciseAction | 0 | `date_performed` | — |
-| `geo_shapes` | GeoShape | 0 | `date_recorded` | — |
-| `invite_actions` | InviteAction | 0 | `date_invited` | — |
-| `join_actions` | JoinAction | 0 | `date_joined` | — |
-| `like_actions` | LikeAction | 0 | `date_liked` | — |
-| `listen_actions` | ListenAction | 0 | `date_listened` | — |
-| `medical_records` | MedicalRecord | 0 | `date_recorded` | — |
-| `observations` | Observation | 0 | `date_observed` | — |
-| `order_actions` | OrderAction | 0 | `date_ordered` | — |
-| `persons` | Person | 0 | `date_recorded` | — |
-| `photographs` | Photograph | 0 | `captured_at` | — |
-| `places` | Place | 0 | `date_recorded` | — |
-| `products` | Product | 0 | `date_recorded` | — |
-| `reviews` | Review | 0 | `date_reviewed` | — |
-| `search_actions` | SearchAction | 0 | `date_performed` | google_activity |
-| `social_postings` | SocialMediaPosting | 0 | `date_posted` | — |
-| `things` | Thing | 0 | `date_recorded` | — |
-| `travel_actions` | TravelAction | 0 | `date_traveled` | — |
-| `watch_actions` | WatchAction | 0 | `date_watched` | google_activity |
+| `chat_messages` | Message | 0 | `date_sent` | apple_dbs, chat_logs, discord, facebook_unified, google_voice, imessage, phone_sms, sms_xml, staged_md |
+| `clippings` | Quotation | 0 | `mtime` | clippings |
+| `comments` | Comment | 0 | `date_posted` | facebook_unified |
+| `conversations_messages` | Conversation | 0 | `date_sent` | claude_chat, claude_code, facebook_unified |
+| `creative_works` | CreativeWork | 0 | `date_created` | claude_chat, staged_md |
+| `digital_documents` | DigitalDocument | 0 | `date_created` | apple_dbs, apple_notes_full, claude_chat, google_drive, onedrive, staged_md |
+| `documents` | DigitalDocument | 0 | `mtime` | apple_dbs, apple_notes_full, claude_chat, google_drive, onedrive, staged_md |
+| `emails` | EmailMessage | 1 | `date_sent` | mbox, staged_md |
+| `events` | Event | 0 | `date_occurred` | calendar, facebook_unified |
+| `exercise_actions` | ExerciseAction | 0 | `date_performed` | apple_health, apple_health_backup, google_fit, strong |
+| `geo_shapes` | GeoShape | 0 | `date_recorded` | google_timeline |
+| `invite_actions` | InviteAction | 0 | `date_invited` | calendar, facebook_unified |
+| `join_actions` | JoinAction | 0 | `date_joined` | facebook_unified |
+| `like_actions` | LikeAction | 0 | `date_liked` | facebook_unified |
+| `listen_actions` | ListenAction | 0 | `date_listened` | spotify |
+| `medical_records` | MedicalRecord | 0 | `date_recorded` | apple_health, apple_health_backup |
+| `observations` | Observation | 0 | `date_observed` | apple_health, apple_health_backup, google_fit, staged_md |
+| `order_actions` | OrderAction | 0 | `date_ordered` | amazon |
+| `persons` | Person | 0 | `date_recorded` | claude_chat, google_contacts, vault_entities |
+| `photographs` | Photograph | 0 | `captured_at` | phone_photos |
+| `places` | Place | 0 | `date_recorded` | google_timeline, vault_entities |
+| `products` | Product | 0 | `date_recorded` | amazon |
+| `read_actions` | ReadAction | 0 | `date_read` | readaction |
+| `reviews` | Review | 0 | `date_reviewed` | amazon, goodreads |
+| `search_actions` | SearchAction | 0 | `date_performed` | google_activity, google_search, youtube_activity |
+| `session_events` | SessionEvent | 0 | `ts` | — |
+| `session_tabs` | SessionTab | 0 | `created_at` | session_buddy |
+| `social_postings` | SocialMediaPosting | 0 | `date_posted` | facebook_unified, staged_md |
+| `things` | Thing | 0 | `date_recorded` | claude_chat |
+| `travel_actions` | TravelAction | 0 | `date_traveled` | google_timeline |
+| `watch_actions` | WatchAction | 0 | `date_watched` | amazon, google_activity, youtube_activity |
 
 ## Facet plugins
 
@@ -70,6 +84,266 @@ Facet plugins subscribe to source-plugin emissions via the
 | `topics` | Topic | `topic_clusters` |
 
 ## Column detail
+
+### `books` — Book
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'Book' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `isbn` | TEXT | yes |  |  |
+| `number_of_pages` | INTEGER | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_books_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_books_name` — (name)
+
+### `browser_sessions` — BrowserSession
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'BrowserSession' |
+| `session_type` | TEXT | no |  |  |
+| `timestamp` | INTEGER | yes |  |  |
+| `window_count` | INTEGER | yes |  |  |
+| `tab_count` | INTEGER | yes |  |  |
+| `source_file` | TEXT | yes |  |  |
+| `source_id` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_browser_sessions_source_id` — UNIQUE (source_id) WHERE source_id IS NOT NULL
+- `idx_browser_sessions_timestamp` — (timestamp)
+
+### `games` — VideoGame
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'VideoGame' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `game_platform` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_games_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_games_name` — (name)
+
+### `movies` — Movie
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'Movie' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `duration` | TEXT | yes |  |  |
+| `actor` | TEXT | yes |  |  |
+| `director` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_movies_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_movies_name` — (name)
+
+### `plans` — VaultPlan
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'Plan' |
+| `name` | TEXT | no |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `description` | TEXT | yes |  |  |
+| `status` | TEXT | no |  |  |
+| `phase` | TEXT | yes |  |  |
+| `effort` | TEXT | yes |  |  |
+| `maintenance` | TEXT | yes |  |  |
+| `created` | TEXT | yes |  |  |
+| `updated` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_plans_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_plans_name` — (name)
+- `idx_plans_status` — (status)
+
+### `podcasts` — PodcastSeries
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'PodcastSeries' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `start_date` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_podcasts_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_podcasts_name` — (name)
+
+### `sessions` — Session
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'Session' |
+| `session_key` | TEXT | no |  |  |
+| `environment` | TEXT | yes |  |  |
+| `start_ts` | TEXT | yes |  |  |
+| `end_ts` | TEXT | yes |  |  |
+| `model` | TEXT | yes |  |  |
+| `handoff_suffix` | TEXT | yes |  |  |
+| `session_summary` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_sessions_key` — UNIQUE (session_key)
+- `idx_sessions_start` — (start_ts)
+
+### `tasks` — VaultTask
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'Action' |
+| `name` | TEXT | no |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `tier` | TEXT | yes |  |  |
+| `status` | TEXT | no |  |  |
+| `effort` | TEXT | yes |  |  |
+| `maintenance` | TEXT | yes |  |  |
+| `project` | TEXT | yes |  |  |
+| `created` | TEXT | yes |  |  |
+| `updated` | TEXT | yes |  |  |
+| `closure_date` | TEXT | yes |  |  |
+| `closure_evidence` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_tasks_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_tasks_name` — (name)
+- `idx_tasks_status` — (status)
+- `idx_tasks_tier` — (tier)
+
+### `tv_series` — TVSeries
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'TVSeries' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `start_date` | TEXT | yes |  |  |
+| `actor` | TEXT | yes |  |  |
+| `number_of_seasons` | INTEGER | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_tv_series_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_tv_series_name` — (name)
+
+### `twitch_channels` — WebSite
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'WebSite' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_twitch_channels_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_twitch_channels_name` — (name)
 
 ### `web_pages` — WebPage
 
@@ -93,6 +367,32 @@ URL-identity entity. One row per normalized URL across all bookmark / history / 
 Indexes:
 - `idx_web_pages_normalized_url` — UNIQUE (normalized_url)
 - `idx_web_pages_domain` — (domain)
+
+### `youtube_channels` — WebSite
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'WebSite' |
+| `name` | TEXT | no |  |  |
+| `description` | TEXT | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `image` | TEXT | yes |  |  |
+| `identifier` | TEXT | yes |  |  |
+| `alternate_name` | TEXT | yes |  |  |
+| `author` | TEXT | yes |  |  |
+| `publisher` | TEXT | yes |  |  |
+| `date_published` | TEXT | yes |  |  |
+| `genre` | TEXT | yes |  |  |
+| `keywords` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_youtube_channels_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_youtube_channels_name` — (name)
 
 ### `actions` — Action
 
@@ -163,13 +463,8 @@ Indexes:
 | `id` | INTEGER | yes | yes |  |
 | `schema_type` | TEXT | no |  | 'BookmarkAction' |
 | `instrument` | TEXT | no |  |  |
-| `url` | TEXT | no |  |  |
-| `normalized_url` | TEXT | no |  |  |
 | `raindrop_id` | TEXT | yes |  |  |
-| `title` | TEXT | yes |  |  |
 | `note` | TEXT | yes |  |  |
-| `excerpt` | TEXT | yes |  |  |
-| `cover_url` | TEXT | yes |  |  |
 | `folder` | TEXT | yes |  |  |
 | `tags` | TEXT | yes |  |  |
 | `favorite` | INTEGER | no |  | 0 |
@@ -186,20 +481,19 @@ Indexes:
 | `web_page_id` | INTEGER | yes |  |  |
 
 Indexes:
-- `idx_bookmarks_url_instrument` — UNIQUE (normalized_url, instrument)
+- `idx_bookmarks_web_page_instrument` — UNIQUE (web_page_id, instrument)
 - `idx_bookmarks_instrument` — (instrument)
-- `idx_bookmarks_normalized_url` — (normalized_url)
 - `idx_bookmarks_folder` — (folder)
 - `idx_bookmarks_first_seen` — (first_seen_in_instrument)
 - `idx_bookmarks_excluded` — (excluded)
 - `idx_bookmarks_web_page_id` — (web_page_id)
 
-### `books` — Book
+### `books_legacy` — BookLegacy
 
 | Column | Type | Null | PK | Default |
 |:---|:---|:---:|:---:|:---|
 | `id` | INTEGER | yes | yes |  |
-| `schema_type` | TEXT | no |  | 'Book' |
+| `schema_type` | TEXT | no |  | 'BookLegacy' |
 | `book_key` | TEXT | yes |  |  |
 | `subject` | TEXT | yes |  |  |
 | `sender_address` | TEXT | yes |  |  |
@@ -216,7 +510,7 @@ Indexes:
 | `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
 
 Indexes:
-- `idx_books_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_books_legacy_dedup` — UNIQUE (source_file_id, raw_hash)
 
 ### `browse_actions` — BrowseAction
 
@@ -856,6 +1150,25 @@ Indexes:
 Indexes:
 - `idx_products_dedup` — UNIQUE (source_file_id, raw_hash)
 
+### `read_actions` — ReadAction
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'ReadAction' |
+| `web_page_id` | INTEGER | yes |  |  |
+| `date_read` | TEXT | yes |  |  |
+| `direction` | TEXT | no |  | 'self' |
+| `body_text` | TEXT | yes |  |  |
+| `body_text_source` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_read_actions_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_read_actions_web_page_id` — (web_page_id)
+
 ### `reviews` — Review
 
 | Column | Type | Null | PK | Default |
@@ -908,6 +1221,49 @@ Indexes:
 - `idx_search_actions_dedup` — UNIQUE (source_file_id, raw_hash)
 - `idx_search_actions_date` — (date_performed)
 - `idx_search_actions_web_page_id` — (web_page_id)
+
+### `session_events` — SessionEvent
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'SessionEvent' |
+| `session_id` | INTEGER | yes |  |  |
+| `event_type` | TEXT | no |  |  |
+| `ts` | TEXT | yes |  |  |
+| `payload` | TEXT | yes |  |  |
+| `file_path` | TEXT | yes |  |  |
+| `commit_sha` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_session_events_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_session_events_session` — (session_id)
+- `idx_session_events_type` — (event_type)
+- `idx_session_events_ts` — (ts)
+
+### `session_tabs` — SessionTab
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'SessionTab' |
+| `session_id` | INTEGER | yes |  |  |
+| `window_index` | INTEGER | yes |  |  |
+| `tab_index` | INTEGER | yes |  |  |
+| `url` | TEXT | yes |  |  |
+| `title` | TEXT | yes |  |  |
+| `active` | BOOLEAN | yes |  |  |
+| `fav_icon_url` | TEXT | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_session_tabs_session_id` — (session_id)
+- `idx_session_tabs_url` — (url)
 
 ### `social_postings` — SocialMediaPosting
 

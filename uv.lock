@@ -678,6 +678,11 @@ server = [
     { name = "mcp" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12" },
@@ -697,6 +702,9 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1" },
 ]
 provides-extras = ["docs", "photos", "server", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "pillow"

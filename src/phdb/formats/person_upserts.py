@@ -23,7 +23,7 @@ def upsert_person(
     record: Contact,
     *,
     source_kind: str = "google-contacts",
-) -> int:
+) -> int | None:
     """Upsert a Person action row into the persons table."""
     body_parts = [record.full_name]
     if record.organization:

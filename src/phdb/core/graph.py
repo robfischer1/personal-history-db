@@ -533,11 +533,11 @@ def emit_for_frontmatter(
             for entry in pred_value:
                 if not isinstance(entry, str):
                     continue
-                result = _parse_predicate_entry(
+                pred_result = _parse_predicate_entry(
                     conn, entry, subj_id, file_label,
                     provenance=provenance, source_ref=rel_path,
                 )
-                if result and result["created"]:
+                if pred_result and pred_result["created"]:
                     created += 1
 
     return created

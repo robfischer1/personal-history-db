@@ -216,7 +216,7 @@ def run(
     print(f"Extraction {mode} complete")
     print(f"  Files processed:  {summary['files_processed']}")
     print(f"  Triples {'created' if apply else 'would create'}:  {summary['triples_created']}")
-    print(f"  By predicate:")
+    print("  By predicate:")
     for pred, count in sorted(pred_totals.items()):
         print(f"    {pred:20s} {count:>6d}")
     if apply:

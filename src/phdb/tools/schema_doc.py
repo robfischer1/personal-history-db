@@ -96,7 +96,9 @@ def regenerate(conn: sqlite3.Connection | None = None) -> str:
     lines.append("")
 
     # Entity schemas
-    entity_schemas = [s for s in schemas if issubclass(s, EntitySchema)]
+    entity_schemas: list[type[EntitySchema]] = [
+        s for s in schemas if issubclass(s, EntitySchema)
+    ]
     if entity_schemas:
         lines.append("## Entity tables")
         lines.append("")
@@ -105,12 +107,12 @@ def regenerate(conn: sqlite3.Connection | None = None) -> str:
         lines.append("")
         lines.append("| Table | @type | Rows | dedup_key | Plugins |")
         lines.append("|:---|:---|---:|:---|:---|")
-        for s in entity_schemas:
-            row_count = counts.get(s.table_name, 0)
-            plugins = ", ".join(emitters.get(s.schema_type, [])) or "—"
+        for es in entity_schemas:
+            row_count = counts.get(es.table_name, 0)
+            plugins = ", ".join(emitters.get(es.schema_type, [])) or "—"
             lines.append(
-                f"| `{s.table_name}` | {s.schema_type} | {row_count:,} | "
-                f"`{s.dedup_key}` | {plugins} |"
+                f"| `{es.table_name}` | {es.schema_type} | {row_count:,} | "
+                f"`{es.dedup_key}` | {plugins} |"
             )
         lines.append("")
 
@@ -124,12 +126,12 @@ def regenerate(conn: sqlite3.Connection | None = None) -> str:
         lines.append("")
         lines.append("| Table | @type | Rows | Date column | Plugins |")
         lines.append("|:---|:---|---:|:---|:---|")
-        for s in action_schemas:
-            row_count = counts.get(s.table_name, 0)
-            plugins = ", ".join(emitters.get(s.schema_type, [])) or "—"
-            date_col = s.date_column or "—"
+        for as_ in action_schemas:
+            row_count = counts.get(as_.table_name, 0)
+            plugins = ", ".join(emitters.get(as_.schema_type, [])) or "—"
+            date_col = as_.date_column or "—"
             lines.append(
-                f"| `{s.table_name}` | {s.schema_type} | {row_count:,} | "
+                f"| `{as_.table_name}` | {as_.schema_type} | {row_count:,} | "
                 f"`{date_col}` | {plugins} |"
             )
         lines.append("")

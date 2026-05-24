@@ -93,7 +93,7 @@ def parse(source_path: Path) -> Iterator[DigitalDocument]:
             rel_parts = fpath.relative_to(source_path).parts
             bucket = _derive_bucket(rel_parts)
             relpath = str(fpath.relative_to(source_path))
-            path_hash = hashlib.sha1(str(fpath).encode()).hexdigest()[:16]
+            path_hash = hashlib.sha1(str(fpath).encode()).hexdigest()[:16]  # noqa: S324 — id only, not crypto
 
             try:
                 mtime = datetime.fromtimestamp(

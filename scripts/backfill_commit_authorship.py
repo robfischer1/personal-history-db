@@ -143,7 +143,7 @@ def main() -> None:
         print(f"Default class: {default}")
 
         if not Path(path).exists():
-            print(f"  SKIP — path not found")
+            print("  SKIP — path not found")
             continue
 
         first_date_result = subprocess.run(

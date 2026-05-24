@@ -96,7 +96,7 @@ def parse(source_path: Path) -> Iterator[AISessionMessage]:
     with source_path.open(encoding="utf-8") as fh:
         raw_lines = fh.readlines()
 
-    thread_meta: dict[str, str | None] = {}
+    thread_meta: dict[str, object] = {}
     thread_cwd: str | None = None
 
     for raw in raw_lines:
@@ -110,7 +110,7 @@ def parse(source_path: Path) -> Iterator[AISessionMessage]:
         if obj.get("type") in _META_TYPES:
             meta = _extract_meta(obj)
             if meta.get("sessionId"):
-                thread_key = meta["sessionId"]
+                thread_key = str(meta["sessionId"])
             if not thread_cwd and meta.get("cwd"):
                 thread_cwd = meta["cwd"]
             if not thread_meta:

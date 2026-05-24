@@ -31,6 +31,7 @@ class EmbedProvider(Protocol):
 
     model: str
     dim: int
+    endpoint: str
 
     def embed(self, text: str) -> bytes:
         """Embed a single query string. Returns packed float32 vector."""

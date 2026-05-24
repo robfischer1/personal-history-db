@@ -30,7 +30,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -156,7 +156,7 @@ def main() -> int:
         return 0
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     snapshot = out_dir / f"snap-{stamp}.db"
     manifest_path = out_dir / f"snap-{stamp}.json"
 

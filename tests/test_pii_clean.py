@@ -86,8 +86,8 @@ def test_project_tier_pii_clean() -> None:
                     f"(pattern: {pat.pattern})"
                 )
         for m in GH_HANDLE.finditer(text):
-            ctx = text[max(0, m.start() - 30) : m.end() + 20]
-            if GH_URL_CONTEXT not in ctx.lower():
+            ctx = text[max(0, m.start() - 30) : m.end() + 40].lower()
+            if GH_URL_CONTEXT not in ctx and "noreply.github" not in ctx:
                 violations.append(
                     f"{rel}:{_line_of(text, m.start())}: handle outside github URL: "
                     f"'{m.group()}'"

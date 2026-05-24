@@ -110,7 +110,8 @@ def _parse_timeline_path(
     points = rec.get("timelinePath") or []
     start_ts = _ts_iso_utc(str(rec.get("startTime", "")))
     end_ts = _ts_iso_utc(str(rec.get("endTime", "")))
-    dedup_key = f"{start_ts}|{end_ts}|points={len(points)}"
+    point_count = len(points) if isinstance(points, list) else 0
+    dedup_key = f"{start_ts}|{end_ts}|points={point_count}"
 
     waypoints: list[tuple[float, float, str]] = []
     if isinstance(points, list):

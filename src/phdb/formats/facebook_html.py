@@ -310,7 +310,7 @@ def _outermost_a6g(soup: BeautifulSoup) -> list[Any]:
     return [b for b in all_a6g if not b.find_parent(class_="_a6-g")]
 
 
-def _entry_footer_parts(block) -> tuple[str | None, str | None]:
+def _entry_footer_parts(block: Any) -> tuple[str | None, str | None]:
     footer = block.find("footer", class_=re.compile(r"_a6-o"))
     timestamp_iso: str | None = None
     url: str | None = None
@@ -440,7 +440,7 @@ def _iter_residuals(
             if not body_text:
                 continue
 
-            content_hash = hashlib.sha1(
+            content_hash = hashlib.sha1(  # noqa: S324 — id only, not crypto
                 body_text.encode("utf-8")[:200]
             ).hexdigest()[:16]
             msg_id = f"facebook:{kind}:{content_hash}"

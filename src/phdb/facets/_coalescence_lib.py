@@ -587,8 +587,9 @@ def apply_merge(
     fk_columns = fk_columns or []
 
     # 1. Determine survivor + merged-away ids.
-    emission_ids = [
-        _node_id(e) for e in proposal.from_emissions if _node_id(e) is not None
+    emission_ids: list[int] = [
+        nid for e in proposal.from_emissions
+        if (nid := _node_id(e)) is not None
     ]
     candidate_ids = list(emission_ids)
     if proposal.into_node_id >= 0:
