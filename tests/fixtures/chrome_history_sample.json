@@ -1,0 +1,44 @@
+{
+  "Browser History": [
+    {
+      "favicon_url": "https://www.google.com/favicon.ico",
+      "page_transition_qualifier": "FROM_ADDRESS_BAR",
+      "title": "Google",
+      "url": "https://www.google.com/",
+      "time_usec": 1773000330606420,
+      "client_id": "inSOtfpy5kBsXGLBRTqRQQ=="
+    },
+    {
+      "favicon_url": "",
+      "page_transition_qualifier": "CLIENT_REDIRECT",
+      "title": "Session Buddy",
+      "url": "chrome-extension://edacconmaakjimmfgnblocblbcdcpbko/main.html",
+      "time_usec": 1773000400000000,
+      "client_id": "inSOtfpy5kBsXGLBRTqRQQ=="
+    },
+    {
+      "favicon_url": "https://github.com/favicon.ico",
+      "page_transition_qualifier": "CHAIN_END",
+      "title": "GitHub: Let's build from here",
+      "url": "https://github.com/",
+      "time_usec": 1773000500000000,
+      "client_id": "abc123def456=="
+    },
+    {
+      "favicon_url": "",
+      "page_transition_qualifier": "",
+      "title": "",
+      "url": "https://example.com/empty-title",
+      "time_usec": 1773000600000000,
+      "client_id": "inSOtfpy5kBsXGLBRTqRQQ=="
+    },
+    {
+      "favicon_url": "",
+      "page_transition_qualifier": "FROM_ADDRESS_BAR",
+      "title": "Google",
+      "url": "https://www.google.com/",
+      "time_usec": 1773000330606420,
+      "client_id": "inSOtfpy5kBsXGLBRTqRQQ=="
+    }
+  ]
+}

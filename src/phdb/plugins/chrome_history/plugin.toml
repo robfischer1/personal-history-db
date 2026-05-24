@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "chrome_history"
+version = "0.1.0"
+description = "Chrome browser history from Google Takeout JSON exports"
+kind = "source"
+entry_point = "phdb.plugins.chrome_history:ChromeHistoryPlugin"
+
+[source]
+emits = []
+entity_refs = []
+formats_used = []
+records_required = []
+sidecars = []
+embeddable_tables = []
+facets_projected = []
