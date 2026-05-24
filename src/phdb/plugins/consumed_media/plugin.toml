@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "consumed_media"
+version = "0.1.0"
+description = "Vault Entities/ consumed-media — 7 subdirs (Books, Games, Movies, Podcasts, TV Series, YouTube/Twitch Channels) into typed tables"
+kind = "source"
+entry_point = "phdb.plugins.consumed_media:ConsumedMediaPlugin"
+
+[source]
+emits = ["Book", "VideoGame", "Movie", "TVSeries", "PodcastSeries", "WebSite"]
+entity_refs = []
+formats_used = ["consumed_media_md"]
+records_required = ["Provenance"]
+sidecars = []
+embeddable_tables = []
+facets_projected = ["Topic"]
