@@ -21,8 +21,16 @@ if TYPE_CHECKING:
 
 log = get_logger("phdb.plugins.claude_code")
 
+# Matches either a canonical session UUID (8-4-4-4-12 hex) or an agent
+# sub-session identifier (`agent-<hex>`), anchored to the `.jsonl` tail.
+# Both are unique-per-session/agent and feed source_files.session_uuid
+# so the partial UNIQUE index on (source_kind, session_uuid) protects
+# against duplicate ingests when a session file is later relocated.
 _UUID_TAIL_RE = re.compile(
-    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$",
+    r"("
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"|agent-[0-9a-f]+"
+    r")\.jsonl$",
     re.IGNORECASE,
 )
 

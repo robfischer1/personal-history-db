@@ -148,14 +148,18 @@ def test_backfill_extracts_uuid_from_relocated_path(migrated_db: Path) -> None:
         assert row[0] == "bbbb2222-3333-4444-5555-666677778888"
 
 
-def test_backfill_leaves_agent_subsession_null(migrated_db: Path) -> None:
+def test_agent_subsession_backfilled_by_followup_migration(migrated_db: Path) -> None:
+    # Migration 0010's backfill GLOB only matches the 36-char UUID shape,
+    # so it leaves agent sub-sessions at NULL. Migration 0038 fills them
+    # in with their `agent-<hex>` identifier; this fixture applies all
+    # pending migrations, so the post-state covers 0038's contribution.
     with connect(migrated_db) as conn:
         row = conn.execute(
             """SELECT session_uuid FROM source_files
                WHERE source_path = ?""",
             (r"D:\<records>\AI Sessions\Claude\claude-code__c--Users__agent-a1709f28e260fa9f.jsonl",),
         ).fetchone()
-        assert row[0] is None
+        assert row[0] == "agent-a1709f28e260fa9f"
 
 
 # ── Cleanup ─────────────────────────────────────────────────────────────────

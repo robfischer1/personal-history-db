@@ -27,7 +27,7 @@ def test_cli_version() -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "0.3.0" in result.output
+    assert "0.4.0" in result.output
 
 
 def test_cli_migrate(tmp_path: Path) -> None:
@@ -35,7 +35,7 @@ def test_cli_migrate(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["--db", str(db_path), "migrate"])
     assert result.exit_code == 0
-    assert "Applied 29 migration(s)" in result.output
+    assert "Applied 38 migration(s)" in result.output
 
 
 def test_cli_migrate_idempotent(tmp_path: Path) -> None:

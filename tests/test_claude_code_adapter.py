@@ -465,10 +465,12 @@ def test_compute_session_uuid_extracts_from_legacy_filename(adapter: ClaudeCodeA
     assert adapter.compute_session_uuid(p) == "4efecc8b-d706-4667-b922-7476858b2991"
 
 
-def test_compute_session_uuid_returns_none_for_agent_subsession(adapter: ClaudeCodeAdapter) -> None:
-    # Agent sub-sessions are `agent-<hex>.jsonl` and have no session UUID.
+def test_compute_session_uuid_extracts_agent_id_from_subsession(adapter: ClaudeCodeAdapter) -> None:
+    # Agent sub-sessions are `agent-<hex>.jsonl`; the agent-prefixed id is
+    # treated as a first-class session identifier so the partial UNIQUE
+    # index on (source_kind, session_uuid) protects them too.
     p = Path(r"D:\<records>\AI Sessions\Claude\claude-code__c--Users-<owner>-Obsidian__agent-a1709f28e260fa9fa.jsonl")
-    assert adapter.compute_session_uuid(p) is None
+    assert adapter.compute_session_uuid(p) == "agent-a1709f28e260fa9fa"
 
 
 def test_compute_session_uuid_returns_none_for_unrelated_filename(adapter: ClaudeCodeAdapter) -> None:

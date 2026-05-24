@@ -21,9 +21,9 @@ def test_discover_finds_project_migrations() -> None:
     migrations = runner.discover()
     conn.close()
 
-    assert len(migrations) >= 29
+    assert len(migrations) >= 30
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0029_facet_coalescence_log"
+    assert migrations[-1].migration_id == "0038_agent_session_uuid_backfill"
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
