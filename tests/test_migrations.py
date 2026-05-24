@@ -23,7 +23,9 @@ def test_discover_finds_project_migrations() -> None:
 
     assert len(migrations) >= 30
     assert migrations[0].migration_id == "0001_init"
-    assert migrations[-1].migration_id == "0038_agent_session_uuid_backfill"
+    # Note: don't assert the last migration_id — that's a parallel-session
+    # gridlock trap. discover() correctness is covered by the count floor +
+    # first-element check; identity of the tail migrates with every new file.
 
 
 def test_apply_all_to_fresh_db(tmp_path: Path) -> None:
