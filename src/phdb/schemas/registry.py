@@ -13,6 +13,7 @@ schemas at plugin load time.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -51,7 +52,7 @@ class SchemaRegistry:
     def get_by_table(self, table_name: str) -> type[Schema] | None:
         return self.by_table.get(table_name)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[type[Schema]]:
         return iter(self.by_table.values())
 
     def __len__(self) -> int:

@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "vault_tasks_plans"
+version = "0.1.0"
+description = "Vault Outputs/Tasks/ + System/Tasks/ + Outputs/Plans/ + System/Plans/ into typed tables"
+kind = "source"
+entry_point = "phdb.plugins.vault_tasks_plans:VaultTasksPlansPlugin"
+
+[source]
+emits = ["VaultTask", "VaultPlan"]
+entity_refs = []
+formats_used = ["vault_tasks_plans_md"]
+records_required = ["Provenance"]
+sidecars = []
+embeddable_tables = []
+facets_projected = []

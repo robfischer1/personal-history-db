@@ -24,6 +24,11 @@ photographs, bookmarks, web_pages) are authored explicitly.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from phdb.schemas.registry import SchemaRegistry
+
 from phdb.schemas.base import (
     ActionSchema,
     EntityFK,
@@ -325,6 +330,210 @@ class TwitchChannel(EntitySchema):
     indexes = [
         _standard_dedup_index("twitch_channels"),
         IndexSpec(name="idx_twitch_channels_name", columns=["name"]),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Task/Plan schemas (migration 0033 — Tasks and Projects Dissolution)
+# ---------------------------------------------------------------------------
+
+
+class VaultTask(EntitySchema):
+    """One row per vault task — identity-bearing by name."""
+
+    table_name = "tasks"
+    schema_type = "VaultTask"
+    dedup_key = "name"
+    coalesce_fields = [
+        "identifier", "tier", "status", "effort", "maintenance",
+        "project", "created", "updated", "closure_date",
+        "closure_evidence", "file_path", "source_file_id",
+    ]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'Action'"),
+        FieldSpec("name", "TEXT", nullable=False),
+        FieldSpec("identifier", "TEXT"),
+        FieldSpec("tier", "TEXT"),
+        FieldSpec("status", "TEXT", nullable=False),
+        FieldSpec("effort", "TEXT"),
+        FieldSpec("maintenance", "TEXT"),
+        FieldSpec("project", "TEXT"),
+        FieldSpec("created", "TEXT"),
+        FieldSpec("updated", "TEXT"),
+        FieldSpec("closure_date", "TEXT"),
+        FieldSpec("closure_evidence", "TEXT"),
+        FieldSpec("file_path", "TEXT"),
+        *_provenance_fields(),
+    ]
+    indexes = [
+        _standard_dedup_index("tasks"),
+        IndexSpec(name="idx_tasks_name", columns=["name"]),
+        IndexSpec(name="idx_tasks_status", columns=["status"]),
+        IndexSpec(name="idx_tasks_tier", columns=["tier"]),
+    ]
+
+
+class VaultPlan(EntitySchema):
+    """One row per vault plan — identity-bearing by name."""
+
+    table_name = "plans"
+    schema_type = "VaultPlan"
+    dedup_key = "name"
+    coalesce_fields = [
+        "identifier", "description", "status", "phase", "effort",
+        "maintenance", "created", "updated", "file_path", "source_file_id",
+    ]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'Plan'"),
+        FieldSpec("name", "TEXT", nullable=False),
+        FieldSpec("identifier", "TEXT"),
+        FieldSpec("description", "TEXT"),
+        FieldSpec("status", "TEXT", nullable=False),
+        FieldSpec("phase", "TEXT"),
+        FieldSpec("effort", "TEXT"),
+        FieldSpec("maintenance", "TEXT"),
+        FieldSpec("created", "TEXT"),
+        FieldSpec("updated", "TEXT"),
+        FieldSpec("file_path", "TEXT"),
+        *_provenance_fields(),
+    ]
+    indexes = [
+        _standard_dedup_index("plans"),
+        IndexSpec(name="idx_plans_name", columns=["name"]),
+        IndexSpec(name="idx_plans_status", columns=["status"]),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Browser session schemas (migration 0034 — Session Buddy ingest)
+# ---------------------------------------------------------------------------
+
+
+class BrowserSession(EntitySchema):
+    """One row per Session Buddy snapshot or saved collection.
+
+    session_type: 'snapshot-scheduled' | 'browser-closed' | 'collection'
+    source_id is the Session Buddy id — used as the dedup key.
+    timestamp is Unix ms (from Session Buddy's id field for history
+    entries or the 'created' field for collections).
+    """
+
+    table_name = "browser_sessions"
+    schema_type = "BrowserSession"
+    dedup_key = "source_id"
+    coalesce_fields = [
+        "session_type", "timestamp", "window_count", "tab_count",
+        "source_file", "raw_hash", "source_file_id",
+    ]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'BrowserSession'"),
+        FieldSpec("session_type", "TEXT", nullable=False),
+        FieldSpec("timestamp", "INTEGER"),
+        FieldSpec("window_count", "INTEGER"),
+        FieldSpec("tab_count", "INTEGER"),
+        FieldSpec("source_file", "TEXT"),
+        FieldSpec("source_id", "TEXT"),
+        *_provenance_fields(),   # raw_hash, source_file_id, created_at
+    ]
+    indexes = [
+        IndexSpec(
+            name="idx_browser_sessions_source_id",
+            columns=["source_id"],
+            unique=True,
+            where_clause="source_id IS NOT NULL",
+        ),
+        IndexSpec(name="idx_browser_sessions_timestamp", columns=["timestamp"]),
+    ]
+
+
+class SessionTab(ActionSchema):
+    """One row per tab within a browser_sessions snapshot.
+
+    session_id FK links to browser_sessions.id.
+    window_index and tab_index record ordering within the snapshot.
+    active=1 means the tab was the active (foreground) tab.
+    """
+
+    table_name = "session_tabs"
+    schema_type = "SessionTab"
+    date_column = "created_at"
+    entity_refs = [EntityFK(entity_table="browser_sessions", column_name="session_id")]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'SessionTab'"),
+        FieldSpec("session_id", "INTEGER", references="browser_sessions(id)"),
+        FieldSpec("window_index", "INTEGER"),
+        FieldSpec("tab_index", "INTEGER"),
+        FieldSpec("url", "TEXT"),
+        FieldSpec("title", "TEXT"),
+        FieldSpec("active", "BOOLEAN"),
+        FieldSpec("fav_icon_url", "TEXT"),
+        *_provenance_fields(),   # raw_hash, source_file_id, created_at
+    ]
+    indexes = [
+        IndexSpec(name="idx_session_tabs_session_id", columns=["session_id"]),
+        IndexSpec(name="idx_session_tabs_url", columns=["url"]),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Session schemas (migration 0032 — Session-Close Dissolution)
+# ---------------------------------------------------------------------------
+
+
+class Session(EntitySchema):
+    """One row per Claude session — identity-bearing by session_key."""
+
+    table_name = "sessions"
+    schema_type = "Session"
+    dedup_key = "session_key"
+    coalesce_fields = [
+        "environment", "start_ts", "end_ts", "model",
+        "handoff_suffix", "session_summary", "source_file_id",
+    ]
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'Session'"),
+        FieldSpec("session_key", "TEXT", nullable=False),
+        FieldSpec("environment", "TEXT"),
+        FieldSpec("start_ts", "TEXT"),
+        FieldSpec("end_ts", "TEXT"),
+        FieldSpec("model", "TEXT"),
+        FieldSpec("handoff_suffix", "TEXT"),
+        FieldSpec("session_summary", "TEXT"),
+        *_provenance_fields(),
+    ]
+    indexes = [
+        IndexSpec(name="idx_sessions_key", columns=["session_key"], unique=True),
+        IndexSpec(name="idx_sessions_start", columns=["start_ts"]),
+    ]
+
+
+class SessionEvent(ActionSchema):
+    """Many rows per session — structured events (decisions, file touches, etc.)."""
+
+    table_name = "session_events"
+    schema_type = "SessionEvent"
+    date_column = "ts"
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'SessionEvent'"),
+        FieldSpec("session_id", "INTEGER", references="sessions(id)"),
+        FieldSpec("event_type", "TEXT", nullable=False),
+        FieldSpec("ts", "TEXT"),
+        FieldSpec("payload", "TEXT"),
+        FieldSpec("file_path", "TEXT"),
+        FieldSpec("commit_sha", "TEXT"),
+        *_provenance_fields(),
+    ]
+    indexes = [
+        _standard_dedup_index("session_events"),
+        IndexSpec(name="idx_session_events_session", columns=["session_id"]),
+        IndexSpec(name="idx_session_events_type", columns=["event_type"]),
+        IndexSpec(name="idx_session_events_ts", columns=["ts"]),
     ]
 
 
@@ -1158,6 +1367,10 @@ ENTITY_SCHEMAS: list[type[EntitySchema]] = [
     PodcastSeries,
     YouTubeChannel,
     TwitchChannel,
+    VaultTask,
+    VaultPlan,
+    Session,
+    BrowserSession,
 ]
 
 
@@ -1199,15 +1412,19 @@ ACTION_SCHEMAS: list[type[ActionSchema]] = [
     Article,
     Quotation,
     Photograph,
+    # Session-shaped (migration 0032)
+    SessionEvent,
+    # Browser-session-shaped (migration 0034)
+    SessionTab,
 ]
 
 
-def register_all(registry) -> None:  # type: ignore[no-untyped-def]
+def register_all(registry: SchemaRegistry) -> None:
     """Register every canonical schema in a SchemaRegistry."""
-    for schema in ENTITY_SCHEMAS:
-        registry.register(schema)
-    for schema in ACTION_SCHEMAS:
-        registry.register(schema)
+    for entity_schema in ENTITY_SCHEMAS:
+        registry.register(entity_schema)
+    for action_schema in ACTION_SCHEMAS:
+        registry.register(action_schema)
 
 
 __all__ = [
@@ -1218,6 +1435,7 @@ __all__ = [
     "BookLegacy",
     "BookmarkAction",
     "BrowseAction",
+    "BrowserSession",
     "Comment",
     "Conversation",
     "CreativeWork",
@@ -1245,11 +1463,16 @@ __all__ = [
     "ReadAction",
     "Review",
     "SearchAction",
+    "Session",
+    "SessionEvent",
+    "SessionTab",
     "SocialMediaPosting",
     "TVSeries",
     "Thing",
     "TravelAction",
     "TwitchChannel",
+    "VaultPlan",
+    "VaultTask",
     "VideoGame",
     "WatchAction",
     "WebPage",
