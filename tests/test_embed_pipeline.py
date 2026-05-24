@@ -268,3 +268,164 @@ class TestEmbedPipeline:
             run_embed_pipeline(conn, fake_client, limit=1)
             result2 = run_embed_pipeline(conn, fake_client)
         assert result2.messages_processed == 2
+
+
+# ---- Web pages embedding tests ----
+
+
+def _seed_web_pages(
+    conn: sqlite3.Connection,
+    *,
+    count: int = 3,
+    with_bookmarks: bool = True,
+) -> None:
+    """Insert synthetic web_pages + bookmarks into a migrated DB."""
+    conn.execute(
+        "INSERT INTO source_files (id, source_path, source_org, file_kind, message_count)"
+        " VALUES (99, '/test/raindrop.csv', 'raindrop', 'csv', ?)",
+        (count,),
+    )
+    for i in range(1, count + 1):
+        conn.execute(
+            "INSERT INTO web_pages"
+            " (id, schema_type, url, normalized_url, title, excerpt,"
+            "  domain, first_seen, last_seen, source_file_id)"
+            " VALUES (?, 'WebPage', ?, ?, ?, ?,"
+            "  'example.com', '2024-01-01', '2024-06-01', 99)",
+            (
+                i,
+                f"https://example.com/page-{i}",
+                f"example.com/page-{i}",
+                f"Page Title {i} — a longer title for embedding content",
+                f"This is an excerpt for page {i} with enough text to exceed the minimum.",
+            ),
+        )
+        if with_bookmarks:
+            conn.execute(
+                "INSERT INTO bookmarks"
+                " (id, schema_type, instrument, web_page_id, note, tags,"
+                "  first_seen_in_instrument, appearance_count,"
+                "  source_file_id, ingested_at)"
+                " VALUES (?, 'BookmarkAction', 'raindrop', ?, ?, ?,"
+                "  '2024-01-01', 1, 99, '2024-06-01T00:00:00Z')",
+                (
+                    i,
+                    i,
+                    f"My note about page {i} — why I saved this bookmark.",
+                    json.dumps(["tag-a", "tag-b", f"topic-{i}"]),
+                ),
+            )
+    conn.commit()
+
+
+class TestWebPagesEmbedding:
+    def test_web_pages_are_embedded(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=3)
+            result = run_embed_pipeline(conn, fake_client)
+        assert result.messages_processed >= 3
+        assert result.chunks_embedded >= 3
+
+    def test_web_pages_chunk_rows_correct(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=2)
+            run_embed_pipeline(conn, fake_client)
+            rows = conn.execute(
+                "SELECT schema_type, source_table, title FROM chunks"
+                " WHERE source_table = 'web_pages'"
+            ).fetchall()
+        assert len(rows) >= 2
+        for r in rows:
+            assert r[0] == "WebPage"
+            assert r[1] == "web_pages"
+            assert r[2] is not None
+
+    def test_web_pages_body_includes_bookmark_note(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=1)
+            run_embed_pipeline(conn, fake_client)
+            content = conn.execute(
+                "SELECT content FROM chunks WHERE source_table = 'web_pages'"
+            ).fetchone()[0]
+        assert "My note about page 1" in content
+        assert "Page Title 1" in content
+
+    def test_web_pages_body_includes_tags(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=1)
+            run_embed_pipeline(conn, fake_client)
+            content = conn.execute(
+                "SELECT content FROM chunks WHERE source_table = 'web_pages'"
+            ).fetchone()[0]
+        assert "tag-a" in content
+
+    def test_web_pages_without_bookmarks_still_embedded(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=2, with_bookmarks=False)
+            result = run_embed_pipeline(conn, fake_client)
+        assert result.messages_processed >= 2
+
+    def test_excluded_bookmarks_not_included(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=1)
+            conn.execute("UPDATE bookmarks SET excluded = 1, note = 'EXCLUDED NOTE'")
+            conn.commit()
+            run_embed_pipeline(conn, fake_client)
+            content = conn.execute(
+                "SELECT content FROM chunks WHERE source_table = 'web_pages'"
+            ).fetchone()[0]
+        assert "EXCLUDED NOTE" not in content
+
+    def test_web_pages_status_count(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=3)
+            st = get_embed_status(conn)
+        assert st.total_eligible >= 3
+        assert st.pending >= 3
+
+    def test_web_pages_skip_already_embedded(
+        self, tmp_path: Path, fake_client: FakeEmbedClient
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        with connect(db_path, create=True, load_vec=True) as conn:
+            MigrationRunner(conn).apply_pending()
+            ensure_vec_table(conn)
+            _seed_web_pages(conn, count=2)
+            run_embed_pipeline(conn, fake_client)
+            result2 = run_embed_pipeline(conn, fake_client)
+        assert result2.messages_processed == 0

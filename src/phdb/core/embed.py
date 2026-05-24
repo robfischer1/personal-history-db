@@ -141,11 +141,26 @@ def get_embed_status(
     for tname, _ in reg.embeddable_document_tables:
         if not _has_table(conn, tname):
             continue
-        # Documents has is_bulk; articles/clippings do not.
         if tname == "documents":
             n_eligible += conn.execute(
                 "SELECT COUNT(*) FROM documents "
                 "WHERE is_bulk=0 AND body_text IS NOT NULL AND length(body_text) >= ?",
+                (MIN_CHUNK_CHARS,),
+            ).fetchone()[0]
+        elif tname == "web_pages":
+            n_eligible += conn.execute(
+                "SELECT COUNT(*) FROM web_pages wp"
+                " LEFT JOIN ("
+                "   SELECT web_page_id,"
+                "          GROUP_CONCAT(note, char(10)) AS notes"
+                "     FROM bookmarks WHERE excluded = 0"
+                "    GROUP BY web_page_id"
+                " ) b ON b.web_page_id = wp.id"
+                " WHERE length("
+                "   COALESCE(wp.title, '') ||"
+                "   COALESCE(wp.excerpt, '') ||"
+                "   COALESCE(b.notes, '')"
+                " ) >= ?",
                 (MIN_CHUNK_CHARS,),
             ).fetchone()[0]
         else:
@@ -239,10 +254,50 @@ SELECT c.id, c.subject, c.body_text, c.bucket, c.mtime
  ORDER BY c.id
 """
 
+_PENDING_WEB_PAGES_SQL = """\
+SELECT wp.id,
+       wp.title,
+       COALESCE(wp.title, '') || char(10) ||
+       COALESCE(wp.excerpt, '') ||
+       COALESCE(char(10) || b.notes, '') ||
+       COALESCE(char(10) || b.highlights, '') ||
+       COALESCE(char(10) || b.tag_list, ''),
+       wp.domain,
+       wp.last_seen
+  FROM web_pages wp
+  LEFT JOIN (
+      SELECT web_page_id,
+             GROUP_CONCAT(note, char(10)) AS notes,
+             GROUP_CONCAT(highlights, char(10)) AS highlights,
+             GROUP_CONCAT(
+                 REPLACE(REPLACE(tags, '["', ''), '"]', ''),
+                 ', '
+             ) AS tag_list
+        FROM bookmarks
+       WHERE excluded = 0
+         AND (note IS NOT NULL OR highlights IS NOT NULL
+              OR (tags IS NOT NULL AND tags != '[]'))
+       GROUP BY web_page_id
+  ) b ON b.web_page_id = wp.id
+ WHERE length(
+       COALESCE(wp.title, '') ||
+       COALESCE(wp.excerpt, '') ||
+       COALESCE(b.notes, '')
+ ) >= ?
+   AND NOT EXISTS (
+       SELECT 1 FROM chunks d
+        WHERE d.source_table = 'web_pages'
+          AND d.source_id = wp.id
+          AND d.embedded_at IS NOT NULL
+   )
+ ORDER BY wp.id
+"""
+
 _DOCUMENT_PENDING_SQL: dict[str, str] = {
     "documents": _PENDING_DOCUMENTS_SQL,
     "articles": _PENDING_ARTICLES_SQL,
     "clippings": _PENDING_CLIPPINGS_SQL,
+    "web_pages": _PENDING_WEB_PAGES_SQL,
 }
 
 _UPSERT_CHUNK_SQL = """\
