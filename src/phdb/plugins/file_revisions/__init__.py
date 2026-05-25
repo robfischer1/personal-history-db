@@ -16,18 +16,26 @@ from __future__ import annotations
 
 from phdb.plugins.file_revisions.plugin import FileRevisionsPlugin
 from phdb.plugins.file_revisions.summarizer import (
+    Bundle,
     Item,
+    bulk_skip,
     pick_model,
     prepare_batch,
+    prepare_bundles,
     record_skip,
+    record_summaries,
     record_summary,
 )
 
 __all__ = [
+    "Bundle",
     "FileRevisionsPlugin",
     "Item",
+    "bulk_skip",
     "pick_model",
     "prepare_batch",
+    "prepare_bundles",
     "record_skip",
+    "record_summaries",
     "record_summary",
 ]

@@ -1118,6 +1118,168 @@ def revision_write_summary(
     click.echo(f"Wrote summary for rev_id={rev_id} (model={model}, len={len(summary)}).")
 
 
+@revision.command(name="prepare-bundles")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--bundle-size", type=int, default=5,
+              help="Revisions per bundle / agent call (default 5).")
+@click.option("--bundle-count", type=int, default=4,
+              help="Number of bundles to stage (default 4).")
+@click.option("--repo-root", type=click.Path(), default=None,
+              help="Override the repo checkout path.")
+@click.option("--staging-dir", type=click.Path(), default=None,
+              help="Where to write bundle-N.txt files "
+                   "(default: System/Trash/.summary-tmp/).")
+@click.option("--skip-pattern", multiple=True,
+              help="SQL LIKE pattern to exclude from the queue "
+                   "(may be repeated; e.g. --skip-pattern 'Archives/%').")
+@click.option("--skip-deletes", is_flag=True, default=False,
+              help="Also exclude change_type='delete' rows.")
+@click.pass_context
+def revision_prepare_bundles(  # noqa: PLR0913 — Click flags
+    ctx: click.Context,
+    repo: str,
+    bundle_size: int,
+    bundle_count: int,
+    repo_root: str | None,
+    staging_dir: str | None,
+    skip_pattern: tuple[str, ...],
+    skip_deletes: bool,
+) -> None:
+    """Stage N bundles of M revisions for parallel subagent dispatch (5x throughput).
+
+    Each bundle file holds one model-homogeneous group of revisions
+    (haiku or sonnet). Dispatch one Agent(model=tier) call per bundle,
+    have it read the file and output JSON {rev_id: summary}, then
+    persist via ``phdb revision write-summaries``.
+    """
+    import json
+    from phdb.db import connect
+    from phdb.plugins.file_revisions import prepare_bundles
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    staging = Path(staging_dir) if staging_dir else None
+
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        bundles = prepare_bundles(
+            conn, repo=repo,
+            bundle_size=bundle_size, bundle_count=bundle_count,
+            repo_root=repo_root, staging_dir=staging,
+            skip_patterns=list(skip_pattern) if skip_pattern else None,
+            skip_deletes=skip_deletes,
+        )
+
+    if not bundles:
+        click.echo("(no unsummarized rows matched the filter)")
+        return
+
+    for b in bundles:
+        click.echo(json.dumps({
+            "bundle_id": b.bundle_id,
+            "model_tier": b.model_tier,
+            "rev_ids": b.rev_ids,
+            "file_path": b.file_path,
+            "total_bytes": b.total_bytes,
+        }))
+
+
+@revision.command(name="write-summaries")
+@click.option("--model", required=True,
+              help="Model tier the bundle came from ('haiku' / 'sonnet').")
+@click.option("--json-file", "json_file", type=click.Path(exists=True), default=None,
+              help="Path to JSON file with {rev_id: summary} mapping. "
+                   "Pass '-' (or omit) to read JSON from stdin.")
+@click.pass_context
+def revision_write_summaries(
+    ctx: click.Context, model: str, json_file: str | None,
+) -> None:
+    """Bulk-persist a bundle's {rev_id: summary} JSON in one transaction."""
+    import json, sys
+    from phdb.db import connect
+    from phdb.plugins.file_revisions import record_summaries
+    from phdb.writelock import write_lock
+
+    if json_file:
+        text = Path(json_file).read_text(encoding="utf-8")
+    else:
+        text = sys.stdin.read()
+    if not text.strip():
+        raise click.UsageError("No JSON input received.")
+
+    # Tolerate code-fenced output from the subagent.
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else stripped[3:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        stripped = stripped.strip()
+        if stripped.startswith("json"):
+            stripped = stripped[4:].strip()
+
+    data = json.loads(stripped)
+    # Coerce keys to int (JSON keys are always strings).
+    summaries = {int(k): v for k, v in data.items()}
+
+    settings = ctx.obj["settings"]
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        written = record_summaries(conn, summaries=summaries, model=model)
+    click.echo(f"Wrote {written} summaries (model={model}).")
+
+
+@revision.command(name="bulk-skip")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--pattern", multiple=True,
+              help="SQL LIKE pattern (may be repeated; e.g. --pattern 'Archives/%').")
+@click.option("--skip-deletes", is_flag=True, default=False,
+              help="Also mark all change_type='delete' rows as skipped.")
+@click.option("--reason", default="out of clone-substrate scope",
+              help="Free-text reason embedded in the persisted summary.")
+@click.option("--apply", is_flag=True, default=False,
+              help="Actually write; without --apply, prints the would-be counts.")
+@click.pass_context
+def revision_bulk_skip(  # noqa: PLR0913 — Click flags
+    ctx: click.Context,
+    repo: str,
+    pattern: tuple[str, ...],
+    skip_deletes: bool,
+    reason: str,
+    apply: bool,
+) -> None:
+    """Drain unsummarized rows matching path patterns / change_type=delete.
+
+    Writes the SKIP_MODEL_OUT_OF_SCOPE sentinel (or SKIP_MODEL_DELETE
+    for delete-events) so matching rows exit the queue without any
+    subagent dispatch. Idempotent — rows that already have a summary
+    are not touched.
+    """
+    from phdb.db import connect
+    from phdb.plugins.file_revisions import bulk_skip
+    from phdb.writelock import write_lock
+
+    if not pattern and not skip_deletes:
+        raise click.UsageError(
+            "Provide at least one --pattern or --skip-deletes.",
+        )
+
+    settings = ctx.obj["settings"]
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        result = bulk_skip(
+            conn, repo=repo,
+            patterns=list(pattern) if pattern else None,
+            skip_deletes=skip_deletes,
+            reason=reason, apply=apply,
+        )
+
+    mode = "APPLIED" if apply else "DRY-RUN"
+    click.echo(
+        f"[bulk-skip:{mode}] pattern_matches={result['patterns']:,}"
+        f" delete_matches={result['deletes']:,}"
+        f" total={result['total']:,}"
+    )
+    if not apply and result["total"] > 0:
+        click.echo("  (re-run with --apply to write sentinels)")
+
+
 # ---------------------------------------------------------------------------
 # Dissolution Tracking CLI — Outputs/Plans/Dissolution Tracking.md (migration 0041)
 # ---------------------------------------------------------------------------

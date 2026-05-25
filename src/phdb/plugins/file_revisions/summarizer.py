@@ -40,6 +40,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from phdb.file_revisions import (  # noqa: PLC2701 — same subsystem
     _git_cat_file,
@@ -73,6 +74,8 @@ DEFAULT_BATCH_SIZE = 100
 # decisions — written into summary_model so the row exits the
 # unsummarized queue.
 SKIP_MODEL_UNREADABLE = "skip:blob-unreadable"
+SKIP_MODEL_OUT_OF_SCOPE = "skip:out-of-scope"
+SKIP_MODEL_DELETE = "skip:delete-event"
 
 
 # ---------------------------------------------------------------------------
@@ -354,3 +357,313 @@ def record_skip(
         (reason, SKIP_MODEL_UNREADABLE, rev_id),
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Bundle dispatch (Refactor A — 5× throughput per orchestrator turn)
+# ---------------------------------------------------------------------------
+
+
+BUNDLE_SYSTEM_PROMPT = (
+    "You write 2-4 sentence change summaries for a markdown vault's git "
+    "history. You will see MULTIPLE revisions below, each in its own "
+    "section marked with `### REV <id> ###`. Each section shows a file "
+    "path, change type, prior body, and current body. For each revision, "
+    "describe what changed and why — architectural intent, semantic shift, "
+    "structural reshape, governance move. Focus on producer intent. Do not "
+    "narrate the diff line by line. Two to four sentences per revision."
+    "\n\n"
+    "Output ONLY a single JSON object mapping the rev_id (as a string key) "
+    "to the summary string. Example: "
+    '{"42": "Two-sentence summary here.", "43": "Another summary."} '
+    "No prose around the JSON, no code fences, no preamble."
+)
+
+
+@dataclass
+class Bundle:
+    """A group of revisions packaged for a single subagent dispatch."""
+
+    bundle_id: int
+    model_tier: str          # 'haiku' | 'sonnet' — homogeneous within a bundle
+    rev_ids: list[int]
+    file_path: str           # path to the staged prompt file on disk
+    total_bytes: int         # combined materialized body size in the bundle
+
+
+def _build_bundle_prompt(items: list[Item]) -> str:
+    """Build the user-turn prompt that packs N revisions into one call.
+
+    Sections are delimited by `### REV <id> ###` markers so the agent can
+    output a JSON object keyed by rev_id. Each section reuses the same
+    per-revision shape as `_build_prompt`.
+    """
+    parts: list[str] = []
+    for it in items:
+        old_trim, old_trunc = _truncate(it.old_body)
+        new_trim, new_trunc = _truncate(it.new_body)
+
+        def fence(label: str, body: str, truncated: bool) -> str:
+            if not body:
+                return f"  {label}: (empty)"
+            trunc_note = f" (truncated to first {MAX_BODY_BYTES} bytes)" if truncated else ""
+            return f"  {label}{trunc_note}:\n```markdown\n{body}\n```"
+
+        if it.change_type == "add":
+            prior = "  Prior body: (no prior — first revision)"
+            current = fence("Current body", new_trim, new_trunc)
+        elif it.change_type == "delete":
+            prior = fence("Prior body", old_trim, old_trunc)
+            current = "  Current body: (deleted)"
+        else:
+            prior = fence("Prior body", old_trim, old_trunc)
+            current = fence("Current body", new_trim, new_trunc)
+
+        parts.append(
+            f"### REV {it.rev_id} ###\n"
+            f"  File: `{it.file_path}`\n"
+            f"  Change type: `{it.change_type}`\n"
+            f"{prior}\n"
+            f"{current}\n"
+        )
+
+    rev_ids = [it.rev_id for it in items]
+    example_key = str(rev_ids[0])
+    return (
+        f"Summarize each of the {len(items)} revisions below. "
+        f"Output a single JSON object keyed by rev_id (as string).\n\n"
+        + "\n".join(parts)
+        + "\n### END ###\n\n"
+        f"Output ONLY the JSON object now. Keys must be the string rev_ids: "
+        f"{[str(r) for r in rev_ids]}. Example shape: "
+        f'{{"{example_key}": "..."}}.'
+    )
+
+
+def prepare_bundles(
+    conn: sqlite3.Connection,
+    *,
+    repo: str = "vault",
+    bundle_size: int = 5,
+    bundle_count: int = 4,
+    repo_root: str | None = None,
+    staging_dir: Path | None = None,
+    skip_patterns: list[str] | None = None,
+    skip_deletes: bool = False,
+) -> list[Bundle]:
+    """Stage N bundles of M unsummarized rows for parallel agent dispatch.
+
+    Pulls ``bundle_size * bundle_count`` rows from the unsummarized queue
+    (oldest first), filters out any matching ``skip_patterns`` (SQL LIKE
+    patterns) or — when ``skip_deletes`` is True — any ``change_type='delete'``
+    rows, groups by model tier (haiku/sonnet) for homogeneous-model bundles,
+    then packs into ``bundle_count`` bundle files. Each bundle is written
+    to ``staging_dir / bundle-<id>.txt`` with a system-prompt header + per-
+    revision sections delimited by ``### REV <id> ###`` markers.
+
+    Returns a list of ``Bundle`` records that the orchestrator dispatches
+    in parallel — one ``Agent(model=bundle.model_tier)`` call per bundle,
+    each reading its bundle file and outputting a JSON
+    ``{rev_id: summary}`` object that ``record_summaries`` parses.
+
+    Rows materializing to empty bodies are auto-skipped with the
+    ``SKIP_MODEL_UNREADABLE`` sentinel (matches ``prepare_batch``); rows
+    matching ``skip_patterns`` are NOT auto-skipped here — use
+    ``bulk_skip`` for that path.
+    """
+    if staging_dir is None:
+        staging_dir = Path.home() / "Forge" / "Obsidian" / "System" / "Trash" / ".summary-tmp"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    target_count = bundle_size * bundle_count
+    # Over-fetch in case the LIKE filter trims rows mid-page.
+    fetch_count = target_count * 4 if (skip_patterns or skip_deletes) else target_count
+
+    sql = (
+        "SELECT id, repo, commit_sha, file_path, git_blob_sha, parent_blob_sha, change_type"
+        " FROM file_revisions"
+        " WHERE repo = ? AND summary IS NULL"
+    )
+    params: list[Any] = [repo]
+    if skip_patterns:
+        for pat in skip_patterns:
+            sql += " AND file_path NOT LIKE ?"
+            params.append(pat)
+    if skip_deletes:
+        sql += " AND change_type != 'delete'"
+    sql += " ORDER BY captured_at ASC LIMIT ?"
+    params.append(fetch_count)
+    rows = conn.execute(sql, tuple(params)).fetchall()
+
+    root = _resolve_repo_root(conn, repo, override=repo_root)
+
+    # Materialize prompts up to target_count usable items, splitting auto-
+    # skipped (empty) rows along the way via record_skip.
+    items: list[Item] = []
+    for r in rows:
+        if len(items) >= target_count:
+            break
+        rev_id, r_repo, sha, path, blob_new, blob_old, ctype = r
+        old_body, new_body = _materialize_pair(
+            repo_root=root,
+            git_blob_sha=blob_new,
+            parent_blob_sha=blob_old,
+            change_type=ctype,
+        )
+        combined_bytes = len(old_body.encode("utf-8")) + len(new_body.encode("utf-8"))
+        if combined_bytes == 0:
+            record_skip(conn, rev_id=rev_id)
+            continue
+        tier = pick_model(ctype, combined_bytes)
+        items.append(Item(
+            rev_id=rev_id, repo=r_repo, commit_sha=sha, file_path=path,
+            change_type=ctype, model_tier=tier, combined_bytes=combined_bytes,
+            prompt="", system_prompt=BUNDLE_SYSTEM_PROMPT,
+            old_body=old_body, new_body=new_body, skip=False,
+        ))
+
+    # Group by tier so each bundle hits one model; pack greedily.
+    haiku_items = [i for i in items if i.model_tier == HAIKU_TIER]
+    sonnet_items = [i for i in items if i.model_tier == SONNET_TIER]
+
+    bundles: list[Bundle] = []
+    next_id = 1
+
+    def pack_tier(tier: str, src: list[Item]) -> None:
+        nonlocal next_id
+        for chunk_start in range(0, len(src), bundle_size):
+            chunk = src[chunk_start:chunk_start + bundle_size]
+            if not chunk:
+                continue
+            body = BUNDLE_SYSTEM_PROMPT + "\n\n" + _build_bundle_prompt(chunk)
+            fp = staging_dir / f"bundle-{next_id}.txt"
+            fp.write_text(body, encoding="utf-8")
+            bundles.append(Bundle(
+                bundle_id=next_id,
+                model_tier=tier,
+                rev_ids=[i.rev_id for i in chunk],
+                file_path=str(fp),
+                total_bytes=sum(i.combined_bytes for i in chunk),
+            ))
+            next_id += 1
+
+    pack_tier(HAIKU_TIER, haiku_items)
+    pack_tier(SONNET_TIER, sonnet_items)
+    return bundles
+
+
+def record_summaries(
+    conn: sqlite3.Connection,
+    *,
+    summaries: dict[int, str],
+    model: str,
+) -> int:
+    """Bulk-persist a dict of {rev_id: summary} in one transaction.
+
+    Used by the orchestrator after a bundle subagent returns its JSON
+    object. Empty / whitespace-only summaries are skipped (with a log)
+    so the row stays in the queue for a retry pass.
+    """
+    written = 0
+    for rev_id, summary in summaries.items():
+        if not summary or not summary.strip():
+            log.warning(
+                "[summarizer] skipping empty bundle-summary for rev_id=%d", rev_id,
+            )
+            continue
+        conn.execute(
+            "UPDATE file_revisions"
+            " SET summary = ?,"
+            "     summary_model = ?,"
+            "     summary_generated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+            " WHERE id = ?",
+            (summary.strip(), model, int(rev_id)),
+        )
+        written += 1
+    conn.commit()
+    return written
+
+
+# ---------------------------------------------------------------------------
+# Bulk skip (Refactor B — drain out-of-scope rows without LLM dispatch)
+# ---------------------------------------------------------------------------
+
+
+def bulk_skip(
+    conn: sqlite3.Connection,
+    *,
+    repo: str = "vault",
+    patterns: list[str] | None = None,
+    skip_deletes: bool = False,
+    reason: str = "out of clone-substrate scope (legacy / archive / deletion event)",
+    apply: bool = False,
+) -> dict[str, int]:
+    """Mark unsummarized rows that match the filter as SKIP_MODEL_OUT_OF_SCOPE.
+
+    Drains the queue without going through subagent dispatch. Path
+    matching is SQL LIKE (use ``%`` wildcards). ``skip_deletes=True``
+    additionally matches all ``change_type='delete'`` rows regardless of
+    path. ``apply=False`` returns the count without writing.
+
+    Delete-event rows use a distinct sentinel (``SKIP_MODEL_DELETE``) so
+    they're separable from path-filtered skips in later analysis.
+
+    Returns ``{patterns: N, deletes: M, total: N+M}``.
+    """
+    pattern_count = 0
+    delete_count = 0
+
+    if patterns:
+        like_clauses = " OR ".join(["file_path LIKE ?"] * len(patterns))
+        check_sql = (
+            f"SELECT COUNT(*) FROM file_revisions"
+            f" WHERE repo = ? AND summary IS NULL AND ({like_clauses})"
+        )
+        if skip_deletes:
+            check_sql += " AND change_type != 'delete'"  # counted separately
+        pattern_count = conn.execute(
+            check_sql, (repo, *patterns),
+        ).fetchone()[0]
+
+    if skip_deletes:
+        delete_count = conn.execute(
+            "SELECT COUNT(*) FROM file_revisions"
+            " WHERE repo = ? AND summary IS NULL AND change_type = 'delete'",
+            (repo,),
+        ).fetchone()[0]
+
+    result = {
+        "patterns": pattern_count,
+        "deletes": delete_count,
+        "total": pattern_count + delete_count,
+    }
+
+    if not apply or result["total"] == 0:
+        return result
+
+    if patterns and pattern_count > 0:
+        like_clauses = " OR ".join(["file_path LIKE ?"] * len(patterns))
+        update_sql = (
+            "UPDATE file_revisions"
+            " SET summary = ?, summary_model = ?,"
+            "     summary_generated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+            f" WHERE repo = ? AND summary IS NULL AND ({like_clauses})"
+        )
+        if skip_deletes:
+            update_sql += " AND change_type != 'delete'"
+        conn.execute(
+            update_sql,
+            (f"[skipped] {reason}", SKIP_MODEL_OUT_OF_SCOPE, repo, *patterns),
+        )
+
+    if skip_deletes and delete_count > 0:
+        conn.execute(
+            "UPDATE file_revisions"
+            " SET summary = ?, summary_model = ?,"
+            "     summary_generated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+            " WHERE repo = ? AND summary IS NULL AND change_type = 'delete'",
+            (f"[skipped] {reason} (deletion event)", SKIP_MODEL_DELETE, repo),
+        )
+
+    conn.commit()
+    return result
