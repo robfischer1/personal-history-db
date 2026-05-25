@@ -1,0 +1,18 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "file_revisions"
+version = "0.4.0"
+description = "Git-log walker — emits one file_revisions row per markdown file changed per commit, plus revision_triple_deltas (migration 0039)"
+kind = "source"
+entry_point = "phdb.plugins.file_revisions:FileRevisionsPlugin"
+
+[source]
+emits = ["FileRevision"]
+entity_refs = []
+formats_used = []
+records_required = ["FileRevision"]
+sidecars = ["revision_triple_deltas"]
+embeddable_tables = []
+facets_projected = []

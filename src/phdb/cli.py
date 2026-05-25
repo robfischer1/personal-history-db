@@ -745,6 +745,659 @@ def schema_diff(ctx: click.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Revision CLI — Git for Ideas (migration 0039 + plugin file_revisions)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def revision() -> None:
+    """Git-for-ideas file_revisions commands — walker, materialize, list, diff, stats."""
+
+
+@revision.command(name="capture")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--repo-path", type=click.Path(), default=None,
+              help="Override the repo checkout path; defaults to commit_authorship_repos.repo_path.")
+@click.option("--since", default=None,
+              help="Only walk commits after this rev (anything `git log <since>..HEAD` accepts).")
+@click.option("--limit", type=int, default=None, help="Stop after walking N commits.")
+@click.pass_context
+def revision_capture(  # noqa: PLR0913 — Click flags
+    ctx: click.Context,
+    repo: str,
+    repo_path: str | None,
+    since: str | None,
+    limit: int | None,
+) -> None:
+    """Run the git-log walker over a repo and emit file_revisions + delta rows.
+
+    Idempotent on (repo, commit_sha, file_path) so re-runs are safe.
+    Use ``phdb revision rerun <commit_sha>`` to force re-derivation
+    of a single commit's rows.
+    """
+    from phdb.db import connect
+    from phdb.plugins.file_revisions import FileRevisionsPlugin
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    plugin = FileRevisionsPlugin()
+
+    source_root: Path | None = None
+    if repo_path:
+        source_root = Path(repo_path)
+    else:
+        # Best-effort: use a non-existent stub so the plugin's
+        # _resolve_repo_root falls back to commit_authorship_repos lookup
+        # or DEFAULT_REPO_PATH.
+        source_root = Path("___use_default___")
+
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        report = plugin.run(
+            source_root, conn, settings,
+            repo=repo, since=since, limit=limit,
+        )
+
+    click.echo(
+        f"[{plugin.name}] Done:"
+        f" commits={report.commits_processed}"
+        f" yielded={report.rows_yielded}"
+        f" inserted={report.rows_inserted}"
+        f" skipped={report.rows_skipped}"
+        f" deltas=+{report.deltas_added}/-{report.deltas_removed}"
+        f" unknown_preds={len(report.unknown_predicates)}"
+        f" errors={len(report.errors)}"
+    )
+    if report.unknown_predicates:
+        click.echo("Unknown predicates (delta rows written with predicate_pk=NULL):")
+        for name in sorted(report.unknown_predicates):
+            click.echo(f"  - {name}")
+
+
+@revision.command(name="materialize")
+@click.argument("rev_id", type=int)
+@click.option("--out", type=click.Path(), default=None,
+              help="Write to file instead of stdout.")
+@click.option("--repo-root", type=click.Path(), default=None,
+              help="Override the repo checkout path.")
+@click.pass_context
+def revision_materialize(
+    ctx: click.Context, rev_id: int, out: str | None, repo_root: str | None,
+) -> None:
+    """Materialize the body of a file_revisions row via `git cat-file -p`."""
+    from phdb.db import connect
+    from phdb.file_revisions import materialize
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        body = materialize(conn, rev_id, repo_root=repo_root)
+    if out:
+        Path(out).write_text(body, encoding="utf-8")
+        click.echo(f"Wrote {len(body)} chars to {out}")
+    else:
+        click.echo(body, nl=False)
+
+
+@revision.command(name="list")
+@click.argument("file_path")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--limit", type=int, default=20, help="Max rows (default 20; 0=all).")
+@click.pass_context
+def revision_list(
+    ctx: click.Context, file_path: str, repo: str, limit: int,
+) -> None:
+    """List revision history for one vault path."""
+    from phdb.db import connect
+    from phdb.file_revisions import list_for_path
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        rows = list_for_path(
+            conn, file_path, repo=repo, limit=None if limit == 0 else limit,
+        )
+    if not rows:
+        click.echo(f"No revisions for {file_path!r} in repo={repo!r}.")
+        return
+    click.echo(f"{'id':>6} {'change':<7} {'auth':<4} {'commit':<9} captured_at")
+    for r in rows:
+        click.echo(
+            f"{r['id']:>6} {r['change_type']:<7} {r['authorship']:<4} "
+            f"{r['commit_sha'][:8]:<9} {r['captured_at']}"
+        )
+
+
+@revision.command(name="show")
+@click.argument("rev_id", type=int)
+@click.option("--body/--no-body", default=False,
+              help="Include the materialized body in the output.")
+@click.option("--repo-root", type=click.Path(), default=None,
+              help="Override the repo checkout path (for --body).")
+@click.pass_context
+def revision_show(
+    ctx: click.Context, rev_id: int, body: bool, repo_root: str | None,
+) -> None:
+    """Show full metadata for one revision row."""
+    from phdb.db import connect
+    from phdb.file_revisions import get_revision, materialize, triple_deltas
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        row = get_revision(conn, rev_id)
+        if row is None:
+            click.echo(f"No file_revisions row with id={rev_id}")
+            raise SystemExit(1)
+        deltas = triple_deltas(conn, rev_id)
+        body_text = materialize(conn, rev_id, repo_root=repo_root) if body else None
+
+    click.echo(f"Revision id={row['id']}")
+    for k in (
+        "repo", "commit_sha", "file_path", "git_blob_sha", "parent_blob_sha",
+        "change_type", "authorship", "prior_file_path",
+        "summary", "summary_model", "summary_generated_at", "captured_at",
+    ):
+        click.echo(f"  {k}: {row.get(k)}")
+    if deltas:
+        click.echo(f"  triple_deltas: {len(deltas)} row(s)")
+        for d in deltas:
+            click.echo(
+                f"    [{d['op']}] {d.get('subject_label') or d.get('subject_node_pk')}"
+                f" --{d.get('predicate_name') or 'UNKNOWN'}->"
+                f" {d.get('object_label') or d.get('object_node_pk')}"
+            )
+    if body and body_text is not None:
+        click.echo("--- body ---")
+        click.echo(body_text)
+
+
+@revision.command(name="diff")
+@click.argument("rev_a", type=int)
+@click.argument("rev_b", type=int)
+@click.option("--repo-root", type=click.Path(), default=None,
+              help="Override the repo checkout path.")
+@click.option("--context", type=int, default=3, help="Lines of context (default 3).")
+@click.pass_context
+def revision_diff(
+    ctx: click.Context, rev_a: int, rev_b: int, repo_root: str | None, context: int,
+) -> None:
+    """Unified diff between two revisions' bodies (via Python difflib)."""
+    from phdb.db import connect
+    from phdb.file_revisions import diff as _diff
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        text = _diff(conn, rev_a, rev_b, repo_root=repo_root, context=context)
+    if not text:
+        click.echo("(no diff — bodies are identical)")
+        return
+    click.echo(text, nl=False)
+
+
+@revision.command(name="stats")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def revision_stats(ctx: click.Context, repo: str) -> None:
+    """Aggregate stats — total rows, authorship split, top files, daily counts."""
+    from phdb.db import connect
+    from phdb.file_revisions import stats as _stats
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        data = _stats(conn, repo=repo)
+
+    click.echo(f"file_revisions stats — repo={data['repo']}")
+    click.echo(f"  total rows:        {data['total']:,}")
+    if data["total"] == 0:
+        return
+    click.echo(f"  summary coverage:  {data['summary_filled']:,} / {data['total']:,}"
+               f" ({data['summary_coverage']}%)")
+    click.echo("  by authorship:")
+    for k, v in sorted(data["by_authorship"].items()):
+        click.echo(f"    {k:<6} {v:>6,}")
+    click.echo("  by change_type:")
+    for k, v in sorted(data["by_change_type"].items()):
+        click.echo(f"    {k:<7} {v:>6,}")
+    click.echo("  top 10 most-revised files:")
+    for r in data["top_files"]:
+        click.echo(f"    {r['revisions']:>4}  {r['file_path']}")
+    click.echo("  trailing 14 days (captured_at):")
+    for r in data["by_day"]:
+        click.echo(f"    {r['day']}  {r['revisions']:>5,}")
+
+
+@revision.command(name="rerun")
+@click.argument("commit_sha")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--repo-path", type=click.Path(), default=None,
+              help="Override the repo checkout path.")
+@click.pass_context
+def revision_rerun(
+    ctx: click.Context, commit_sha: str, repo: str, repo_path: str | None,
+) -> None:
+    """Delete + re-derive all file_revisions rows for one commit.
+
+    Use after authorship reclassification or a parser fix — the walker
+    skips already-populated commits due to UNIQUE INDEX idempotency,
+    so the path is delete-and-redrive.
+    """
+    from phdb.db import connect
+    from phdb.file_revisions import rerun_commit
+    from phdb.plugins.file_revisions import FileRevisionsPlugin
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        deleted = rerun_commit(conn, commit_sha, repo=repo)
+    click.echo(f"Deleted {deleted} row(s) for commit {commit_sha[:8]}.")
+
+    plugin = FileRevisionsPlugin()
+    source_root = Path(repo_path) if repo_path else Path("___use_default___")
+    # Walker walks "all commits" but is idempotent on the rest; the deleted
+    # commit will re-populate, untouched commits stay as-is.
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        report = plugin.run(source_root, conn, settings, repo=repo)
+    click.echo(
+        f"Walker re-derived: yielded={report.rows_yielded} "
+        f"inserted={report.rows_inserted} skipped={report.rows_skipped}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dissolution Tracking CLI — Outputs/Plans/Dissolution Tracking.md (migration 0041)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def dissolution() -> None:
+    """Vault-DB lifecycle event registry — dissolutions + materialization events."""
+
+
+@dissolution.command(name="declare")
+@click.option("--plan-slug", required=True, help="Driving plan identifier.")
+@click.option("--target-schemas", required=True,
+              help="Comma-separated Schema.org @types now owning the content.")
+@click.option("--target-tables", required=True,
+              help="Comma-separated phdb table names now owning the content.")
+@click.option("--migration", "migration_id", default=None,
+              help="Schema migration id; optional per Q3.")
+@click.option("--commit-sha", default=None, help="Driving commit (optional).")
+@click.option("--rationale", default=None,
+              help="Required when --migration is omitted.")
+@click.option("--dissolved-at", default=None,
+              help="ISO 8601 timestamp; defaults to now.")
+@click.option("--declared-by", default="code",
+              help="'cowork' / 'code' / 'backfill'.")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_declare(  # noqa: PLR0913 — Click flags
+    ctx: click.Context,
+    plan_slug: str,
+    target_schemas: str,
+    target_tables: str,
+    migration_id: str | None,
+    commit_sha: str | None,
+    rationale: str | None,
+    dissolved_at: str | None,
+    declared_by: str,
+    repo: str,
+) -> None:
+    """Declare one dissolution wave."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    schemas = [s.strip() for s in target_schemas.split(",") if s.strip()]
+    tables = [t.strip() for t in target_tables.split(",") if t.strip()]
+    try:
+        with write_lock(settings.db_path), connect(settings.db_path) as conn:
+            new_id = dis.declare(
+                conn,
+                plan_slug=plan_slug,
+                target_schemas=schemas,
+                target_tables=tables,
+                migration_id=migration_id,
+                commit_sha=commit_sha,
+                rationale=rationale,
+                dissolved_at=dissolved_at,
+                declared_by=declared_by,
+                repo=repo,
+            )
+    except ValueError as e:
+        click.echo(f"Validation error: {e}", err=True)
+        raise SystemExit(2) from e
+    click.echo(f"Declared dissolution id={new_id} plan_slug={plan_slug}")
+
+
+@dissolution.command(name="list")
+@click.option("--plan", "plan_slug", default=None,
+              help="Filter by plan slug.")
+@click.option("--migration", "migration_id", default=None,
+              help="Filter by migration_id.")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_list(
+    ctx: click.Context,
+    plan_slug: str | None,
+    migration_id: str | None,
+    repo: str,
+) -> None:
+    """List dissolution waves."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        if plan_slug:
+            rows = dis.list_for_plan(conn, plan_slug, repo=repo)
+        elif migration_id:
+            rows = dis.list_for_migration(conn, migration_id, repo=repo)
+        else:
+            rows = dis.list_waves(conn, repo=repo)
+    if not rows:
+        click.echo("No dissolutions found.")
+        return
+    click.echo(f"{'id':>4} {'dissolved_at':<25} {'migration':<35} plan_slug")
+    for r in rows:
+        click.echo(
+            f"{r['id']:>4} {r['dissolved_at']:<25}"
+            f" {(r.get('migration_id') or '(none)'):<35} {r['plan_slug']}"
+        )
+
+
+@dissolution.command(name="show")
+@click.argument("dissolution_id", type=int)
+@click.pass_context
+def dissolution_show(ctx: click.Context, dissolution_id: int) -> None:
+    """Show full metadata for one dissolution row."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        row = dis.get(conn, dissolution_id)
+        if row is None:
+            click.echo(f"No dissolutions row with id={dissolution_id}")
+            raise SystemExit(1)
+        link_count = conn.execute(
+            "SELECT COUNT(*) FROM file_revision_dissolutions"
+            " WHERE dissolution_pk = ?",
+            (dissolution_id,),
+        ).fetchone()[0]
+
+    click.echo(f"Dissolution id={row['id']}")
+    for k in (
+        "repo", "plan_pk", "plan_slug", "migration_id", "commit_sha",
+        "target_schemas", "target_tables", "rationale",
+        "dissolved_at", "declared_at", "declared_by",
+    ):
+        click.echo(f"  {k}: {row.get(k)}")
+    click.echo(f"  linked_file_revisions: {link_count}")
+
+
+@dissolution.command(name="lookup")
+@click.argument("vault_path")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--json", "as_json", is_flag=True,
+              help="Emit JSON instead of human-readable text.")
+@click.pass_context
+def dissolution_lookup(
+    ctx: click.Context, vault_path: str, repo: str, as_json: bool,
+) -> None:
+    """Reverse-query — full lifecycle for a vault path."""
+    import json as _json
+
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        result = dis.lookup_vault_path(conn, vault_path, repo=repo)
+
+    if as_json:
+        click.echo(_json.dumps(result, indent=2, default=str))
+        return
+    click.echo(f"Lifecycle for {vault_path!r} (repo={repo})")
+    if not result["lifecycle"]:
+        click.echo("  (no events recorded)")
+        return
+    for ev in result["lifecycle"]:
+        if ev["event_type"] == "dissolution":
+            click.echo(
+                f"  [dissolved]    {ev['event_at']}"
+                f"  plan={ev['plan_slug']}  -> {ev['target_tables']}"
+            )
+        else:
+            click.echo(
+                f"  [materialized] {ev['event_at']}"
+                f"  via {ev['materializer']} (kind={ev['materialization_kind']})"
+                f"  source_table={ev['source_table']}"
+            )
+
+
+@dissolution.command(name="backfill")
+@click.option("--wave", default=None,
+              help="Only backfill one wave (plan_slug); omit to run all.")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_backfill(
+    ctx: click.Context, wave: str | None, repo: str,
+) -> None:
+    """Run the Phase 5 backfill script (one or all known waves)."""
+    from phdb.db import connect
+    from phdb.dissolutions.backfill_known_waves import (
+        WAVES, run_backfill,
+    )
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    selected = [w for w in WAVES if wave is None or w["plan_slug"] == wave]
+    if not selected:
+        click.echo(f"No wave with plan_slug={wave!r}.")
+        raise SystemExit(1)
+
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        results = run_backfill(conn, selected, repo=repo)
+    for r in results:
+        click.echo(
+            f"  [{r['plan_slug']}] dissolution_pk={r['dissolution_pk']}"
+            f"  matched={r['matched']}  inserted={r['inserted']}"
+        )
+
+
+@dissolution.command(name="reclassify")
+@click.argument("dissolution_id", type=int)
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_reclassify(
+    ctx: click.Context, dissolution_id: int, repo: str,
+) -> None:
+    """Re-link file_revisions delete rows for one dissolution wave.
+
+    Re-runs reclassify_wave() against the file_path_patterns embedded
+    in the wave registry. Use after walker re-runs or new file_revisions
+    rows landing.
+    """
+    from phdb.db import connect
+    from phdb.dissolutions.backfill_known_waves import WAVES, reclassify_one
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        result = reclassify_one(conn, dissolution_id, WAVES, repo=repo)
+    click.echo(
+        f"Reclassify id={dissolution_id}: matched={result['matched']}"
+        f"  inserted={result['inserted']}"
+    )
+
+
+@dissolution.command(name="validate")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_validate(ctx: click.Context, repo: str) -> None:
+    """Run the audit invariants and report pass/fail."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        report = dis.validate_all(conn, repo=repo)
+    verdict = "PASS" if report["pass"] else "FAIL"
+    click.echo(
+        f"[{verdict}] checks_run={report['checks_run']}"
+        f"  errors={report['error_count']}"
+        f"  warnings={report['warning_count']}"
+        f"  info={report['info_count']}"
+    )
+    for f in report["findings"]:
+        click.echo(f"  [{f['severity']}] {f['check']}: {f['detail']}")
+    if not report["pass"]:
+        raise SystemExit(1)
+
+
+@dissolution.command(name="waves")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_waves(ctx: click.Context, repo: str) -> None:
+    """List dissolution waves with linked file counts."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        waves = dis.list_waves(conn, repo=repo)
+    if not waves:
+        click.echo("No dissolution waves recorded.")
+        return
+    click.echo(f"{'id':>4} {'files':>6} {'dissolved_at':<25} plan_slug")
+    for w in waves:
+        click.echo(
+            f"{w['id']:>4} {w['linked_files']:>6} {w['dissolved_at']:<25} {w['plan_slug']}"
+        )
+
+
+@dissolution.command(name="status")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--json", "as_json", is_flag=True,
+              help="Emit JSON instead of human-readable text.")
+@click.pass_context
+def dissolution_status(ctx: click.Context, repo: str, as_json: bool) -> None:
+    """Registry health overview."""
+    import json as _json
+
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        report = dis.status_overview(conn, repo=repo)
+    if as_json:
+        click.echo(_json.dumps(report, indent=2))
+        return
+    click.echo(f"Dissolution registry status — repo={report['repo']}")
+    click.echo(f"  total dissolutions:           {report['total_dissolutions']}")
+    click.echo(f"  linked file_revisions:        {report['total_linked_revisions']}")
+    click.echo(f"  materialization events:       {report['total_materialization_events']}")
+    click.echo(f"  without migration_id:         {report['dissolutions_without_migration']}")
+    click.echo(f"  audit pass:                   {report['audit_pass']}")
+    click.echo(f"    errors:                     {report['audit_errors']}")
+    click.echo(f"    warnings:                   {report['audit_warnings']}")
+
+
+@dissolution.command(name="audit")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_audit(ctx: click.Context, repo: str) -> None:
+    """Run audit_invariants and print findings."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        report = dis.audit_invariants(conn, repo=repo)
+    click.echo(
+        f"Audit — checks_run={report['checks_run']}"
+        f"  findings={len(report['findings'])}"
+    )
+    for f in report["findings"]:
+        click.echo(f"  [{f['severity']:<7}] {f['check']}: {f['detail']}")
+
+
+@dissolution.command(name="materialize-log")
+@click.option("--file-path", required=True,
+              help="Vault-relative POSIX path of the materialized file.")
+@click.option("--source-table", required=True,
+              help="phdb table the content was materialized from.")
+@click.option("--source-row-id", type=int, default=None,
+              help="Row id in source_table (omit for aggregate materializations).")
+@click.option("--materializer", required=True,
+              help="Tool that performed the materialization.")
+@click.option("--kind", "materialization_kind", default="stub",
+              type=click.Choice(["stub", "aggregate", "full"]),
+              help="Materialization kind.")
+@click.option("--source-dissolution-pk", type=int, default=None,
+              help="Dissolution that originally moved the content.")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.pass_context
+def dissolution_materialize_log(  # noqa: PLR0913 — Click flags
+    ctx: click.Context,
+    file_path: str,
+    source_table: str,
+    source_row_id: int | None,
+    materializer: str,
+    materialization_kind: str,
+    source_dissolution_pk: int | None,
+    repo: str,
+) -> None:
+    """Manually record a materialization event (for one-off backfill)."""
+    from phdb import dissolutions as dis
+    from phdb.db import connect
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        new_id = dis.record_materialization(
+            conn,
+            file_path=file_path,
+            source_table=source_table,
+            source_row_id=source_row_id,
+            materializer=materializer,
+            materialization_kind=materialization_kind,
+            source_dissolution_pk=source_dissolution_pk,
+            repo=repo,
+        )
+    click.echo(f"Recorded materialization event id={new_id}")
+
+
+@dissolution.command(name="detect")
+@click.option("--json", "as_json", is_flag=True, default=True,
+              help="Emit JSON (default; orchestrator-friendly).")
+@click.option("--repo-root", type=click.Path(), default=None,
+              help="Repo path to inspect; defaults to vault.")
+@click.pass_context
+def dissolution_detect(
+    ctx: click.Context, as_json: bool, repo_root: str | None,
+) -> None:
+    """Auto-detect heuristic — scan staged + recent commits for dissolution signal.
+
+    Output (JSON): { detected, plan_slug_guess, migration_id_guess, files,
+                     suggested_target_schemas, signal }
+    """
+    import json as _json
+
+    from phdb.dissolutions.detect import detect_candidate
+
+    candidate = detect_candidate(repo_root=repo_root)
+    if as_json:
+        click.echo(_json.dumps(candidate, indent=2, default=str))
+    else:
+        click.echo(f"detected: {candidate['detected']}")
+        if candidate["detected"]:
+            click.echo(f"  signal:        {candidate['signal']}")
+            click.echo(f"  plan_slug:     {candidate.get('plan_slug_guess')}")
+            click.echo(f"  migration_id:  {candidate.get('migration_id_guess')}")
+            click.echo(f"  files:         {len(candidate.get('files', []))}")
+
+
+# ---------------------------------------------------------------------------
 # Facet review CLI — Phase 8C of the phdb Plugin Architecture plan
 # ---------------------------------------------------------------------------
 

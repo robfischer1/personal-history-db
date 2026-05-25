@@ -1378,6 +1378,136 @@ class Photograph(ActionSchema):
 
 
 # ---------------------------------------------------------------------------
+# FileRevision — git-for-ideas intelligence layer (migration 0039)
+# ---------------------------------------------------------------------------
+
+
+class FileRevision(ActionSchema):
+    """One row per (repo, commit_sha, file_path) where a markdown file changed.
+
+    Bodies are referenced via ``git_blob_sha`` rather than duplicated —
+    git already holds them. Materialize through ``git cat-file -p``.
+    See ``Outputs/Plans/Git for Ideas.md`` for the full design.
+    """
+
+    table_name = "file_revisions"
+    schema_type = "FileRevision"
+    date_column = "captured_at"
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'FileRevision'"),
+        FieldSpec("repo", "TEXT", nullable=False),
+        FieldSpec("commit_sha", "TEXT", nullable=False),
+        FieldSpec("file_path", "TEXT", nullable=False),
+        FieldSpec("git_blob_sha", "TEXT", nullable=False),
+        FieldSpec("parent_blob_sha", "TEXT"),
+        FieldSpec("change_type", "TEXT", nullable=False),
+        FieldSpec("authorship", "TEXT", nullable=False),
+        FieldSpec("prior_file_path", "TEXT"),
+        FieldSpec("summary", "TEXT"),
+        FieldSpec("summary_model", "TEXT"),
+        FieldSpec("summary_generated_at", "TEXT"),
+        FieldSpec(
+            "captured_at", "TEXT", nullable=False,
+            default="(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        ),
+    ]
+    indexes = [
+        IndexSpec(name="idx_file_revisions_dedup",
+                  columns=["repo", "commit_sha", "file_path"], unique=True),
+        IndexSpec(name="idx_file_revisions_history",
+                  columns=["file_path", "commit_sha"]),
+        IndexSpec(name="idx_file_revisions_authorship",
+                  columns=["authorship", "captured_at"]),
+        IndexSpec(name="idx_file_revisions_unsumm",
+                  columns=["captured_at"], where_clause="summary IS NULL"),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Dissolution + MaterializationEvent — vault-DB lifecycle registry
+# (migration 0041; Outputs/Plans/Dissolution Tracking.md)
+# ---------------------------------------------------------------------------
+
+
+class Dissolution(ActionSchema):
+    """One row per vault-to-DB dissolution wave.
+
+    Wave-level grain (per Q2): each entry records the driving plan,
+    optional migration_id (Q3), commit_sha (nullable for multi-commit
+    waves), target Schema.org @types + target phdb tables, rationale
+    (required when migration_id is NULL per Q11), and timestamps.
+    File membership is JOINed via the ``file_revision_dissolutions``
+    link table — see ``v_file_revisions_classified`` view.
+    """
+
+    table_name = "dissolutions"
+    schema_type = "DissolutionEvent"
+    date_column = "dissolved_at"
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False, default="'DissolutionEvent'"),
+        FieldSpec("repo", "TEXT", nullable=False, default="'vault'"),
+        FieldSpec("plan_pk", "INTEGER", references="plans(id)"),
+        FieldSpec("plan_slug", "TEXT", nullable=False),
+        FieldSpec("migration_id", "TEXT"),
+        FieldSpec("commit_sha", "TEXT"),
+        FieldSpec("target_schemas", "TEXT", nullable=False),
+        FieldSpec("target_tables", "TEXT", nullable=False),
+        FieldSpec("rationale", "TEXT"),
+        FieldSpec("dissolved_at", "TEXT", nullable=False),
+        FieldSpec(
+            "declared_at", "TEXT", nullable=False,
+            default="(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        ),
+        FieldSpec("declared_by", "TEXT", nullable=False),
+    ]
+    indexes = [
+        IndexSpec(name="idx_dissolutions_dedup",
+                  columns=["plan_pk", "migration_id"], unique=True),
+        IndexSpec(name="idx_dissolutions_plan_slug", columns=["plan_slug"]),
+        IndexSpec(name="idx_dissolutions_dissolved_at", columns=["dissolved_at"]),
+        IndexSpec(name="idx_dissolutions_repo_dissolved",
+                  columns=["repo", "dissolved_at"]),
+    ]
+
+
+class MaterializationEvent(ActionSchema):
+    """One row per file materialized from a phdb-canonical source.
+
+    Phase 8 (Q13 override): every materializer
+    (articles_materialize.py, tasks_materialize.py, gen_todo_md.py)
+    logs a row. ``source_dissolution_pk`` is best-effort (NULL when
+    the materializer can't resolve the source wave).
+    """
+
+    table_name = "materialization_events"
+    schema_type = "MaterializationEvent"
+    date_column = "materialized_at"
+    fields = [
+        FieldSpec("id", "INTEGER", primary_key=True),
+        FieldSpec("schema_type", "TEXT", nullable=False,
+                  default="'MaterializationEvent'"),
+        FieldSpec("repo", "TEXT", nullable=False, default="'vault'"),
+        FieldSpec("file_path", "TEXT", nullable=False),
+        FieldSpec("source_dissolution_pk", "INTEGER",
+                  references="dissolutions(id)"),
+        FieldSpec("source_table", "TEXT", nullable=False),
+        FieldSpec("source_row_id", "INTEGER"),
+        FieldSpec("materializer", "TEXT", nullable=False),
+        FieldSpec("materialized_at", "TEXT", nullable=False),
+        FieldSpec("materialization_kind", "TEXT", nullable=False,
+                  default="'stub'"),
+    ]
+    indexes = [
+        IndexSpec(name="idx_materialization_events_path_ts",
+                  columns=["file_path", "materialized_at"]),
+        IndexSpec(name="idx_materialization_events_source",
+                  columns=["source_dissolution_pk"]),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # All schemas — order matters for registry walk (entities first, then actions)
 # ---------------------------------------------------------------------------
 
@@ -1441,6 +1571,11 @@ ACTION_SCHEMAS: list[type[ActionSchema]] = [
     SessionEvent,
     # Browser-session-shaped (migration 0034)
     SessionTab,
+    # File revision intelligence layer (migration 0039)
+    FileRevision,
+    # Vault-DB lifecycle registry (migration 0041)
+    Dissolution,
+    MaterializationEvent,
 ]
 
 
@@ -1466,15 +1601,18 @@ __all__ = [
     "CreativeWork",
     "DigitalDocumentAction",
     "DigitalDocumentFile",
+    "Dissolution",
     "ENTITY_SCHEMAS",
     "EmailMessage",
     "Event",
     "ExerciseAction",
+    "FileRevision",
     "FollowAction",
     "GeoShape",
     "InviteAction",
     "JoinAction",
     "LikeAction",
+    "MaterializationEvent",
     "MedicalRecord",
     "Message",
     "Movie",

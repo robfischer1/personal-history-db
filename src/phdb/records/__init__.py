@@ -14,8 +14,11 @@ from phdb.records.connection import Connection
 from phdb.records.consumed_item import ConsumedItem
 from phdb.records.contact import Contact
 from phdb.records.digital_document import DigitalDocument
+from phdb.records.dissolution import Dissolution
 from phdb.records.email_message import EmailMessage
 from phdb.records.exercise_set import ExerciseSet
+from phdb.records.file_revision import FileRevision
+from phdb.records.materialization_event import MaterializationEvent
 from phdb.records.geo_trace import GeoTrace
 from phdb.records.health_observation import HealthObservation
 from phdb.records.media_play import MediaPlay
@@ -37,10 +40,13 @@ __all__ = [
     "ConsumedItem",
     "Contact",
     "DigitalDocument",
+    "Dissolution",
     "EmailMessage",
     "ExerciseSet",
+    "FileRevision",
     "GeoTrace",
     "HealthObservation",
+    "MaterializationEvent",
     "MediaPlay",
     "Photograph",
     "Provenance",

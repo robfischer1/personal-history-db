@@ -4,7 +4,7 @@
 > are overwritten on next ingest. Schema descriptions and column
 > notes live on the dataclass schemas in `phdb.schemas.canonical`.
 
-**Regenerated at:** 2026-05-24T22:14:20Z
+**Regenerated at:** 2026-05-24T23:46:43Z
 
 ## Entity tables
 
@@ -44,15 +44,19 @@ declare ``emits = [<@type>]`` in their manifest.
 | `conversations_messages` | Conversation | 0 | `date_sent` | claude_chat, claude_code, facebook_unified |
 | `creative_works` | CreativeWork | 0 | `date_created` | claude_chat, staged_md |
 | `digital_documents` | DigitalDocument | 0 | `date_created` | apple_dbs, apple_notes_full, claude_chat, google_drive, onedrive, staged_md |
+| `dissolutions` | DissolutionEvent | 0 | `dissolved_at` | — |
 | `documents` | DigitalDocument | 0 | `mtime` | apple_dbs, apple_notes_full, claude_chat, google_drive, onedrive, staged_md |
 | `emails` | EmailMessage | 1 | `date_sent` | mbox, staged_md |
 | `events` | Event | 0 | `date_occurred` | calendar, facebook_unified |
 | `exercise_actions` | ExerciseAction | 0 | `date_performed` | apple_health, apple_health_backup, google_fit, strong |
+| `file_revisions` | FileRevision | 0 | `captured_at` | file_revisions |
+| `follow_actions` | FollowAction | 0 | `date_followed` | youtube_activity |
 | `geo_shapes` | GeoShape | 0 | `date_recorded` | google_timeline |
 | `invite_actions` | InviteAction | 0 | `date_invited` | calendar, facebook_unified |
 | `join_actions` | JoinAction | 0 | `date_joined` | facebook_unified |
 | `like_actions` | LikeAction | 0 | `date_liked` | facebook_unified |
 | `listen_actions` | ListenAction | 0 | `date_listened` | spotify |
+| `materialization_events` | MaterializationEvent | 0 | `materialized_at` | — |
 | `medical_records` | MedicalRecord | 0 | `date_recorded` | apple_health, apple_health_backup |
 | `observations` | Observation | 0 | `date_observed` | apple_health, apple_health_backup, google_fit, staged_md |
 | `order_actions` | OrderAction | 0 | `date_ordered` | amazon |
@@ -705,6 +709,30 @@ Indexes:
 Indexes:
 - `idx_digital_documents_dedup` — UNIQUE (source_file_id, raw_hash)
 
+### `dissolutions` — DissolutionEvent
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'DissolutionEvent' |
+| `repo` | TEXT | no |  | 'vault' |
+| `plan_pk` | INTEGER | yes |  |  |
+| `plan_slug` | TEXT | no |  |  |
+| `migration_id` | TEXT | yes |  |  |
+| `commit_sha` | TEXT | yes |  |  |
+| `target_schemas` | TEXT | no |  |  |
+| `target_tables` | TEXT | no |  |  |
+| `rationale` | TEXT | yes |  |  |
+| `dissolved_at` | TEXT | no |  |  |
+| `declared_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+| `declared_by` | TEXT | no |  |  |
+
+Indexes:
+- `idx_dissolutions_dedup` — UNIQUE (plan_pk, migration_id)
+- `idx_dissolutions_plan_slug` — (plan_slug)
+- `idx_dissolutions_dissolved_at` — (dissolved_at)
+- `idx_dissolutions_repo_dissolved` — (repo, dissolved_at)
+
 ### `documents` — DigitalDocument
 
 | Column | Type | Null | PK | Default |
@@ -826,6 +854,60 @@ Indexes:
 - `idx_exercise_actions_dedup` — UNIQUE (source_file_id, raw_hash)
 - `idx_exercise_actions_date` — (date_performed)
 - `idx_exercise_actions_type` — (type_identifier)
+
+### `file_revisions` — FileRevision
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'FileRevision' |
+| `repo` | TEXT | no |  |  |
+| `commit_sha` | TEXT | no |  |  |
+| `file_path` | TEXT | no |  |  |
+| `git_blob_sha` | TEXT | no |  |  |
+| `parent_blob_sha` | TEXT | yes |  |  |
+| `change_type` | TEXT | no |  |  |
+| `authorship` | TEXT | no |  |  |
+| `prior_file_path` | TEXT | yes |  |  |
+| `summary` | TEXT | yes |  |  |
+| `summary_model` | TEXT | yes |  |  |
+| `summary_generated_at` | TEXT | yes |  |  |
+| `captured_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_file_revisions_dedup` — UNIQUE (repo, commit_sha, file_path)
+- `idx_file_revisions_history` — (file_path, commit_sha)
+- `idx_file_revisions_authorship` — (authorship, captured_at)
+- `idx_file_revisions_unsumm` — (captured_at) WHERE summary IS NULL
+
+### `follow_actions` — FollowAction
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'FollowAction' |
+| `follow_key` | TEXT | yes |  |  |
+| `subject` | TEXT | yes |  |  |
+| `platform_name` | TEXT | yes |  |  |
+| `channel_name` | TEXT | yes |  |  |
+| `web_page_id` | INTEGER | yes |  |  |
+| `direction` | TEXT | no |  | 'self' |
+| `date_followed` | TEXT | yes |  |  |
+| `body_text` | TEXT | yes |  |  |
+| `body_text_source` | TEXT | yes |  |  |
+| `body_text_hash` | TEXT | yes |  |  |
+| `is_bulk` | INTEGER | no |  | 1 |
+| `bulk_signal` | TEXT | yes |  |  |
+| `source_byte_offset` | INTEGER | yes |  |  |
+| `source_byte_length` | INTEGER | yes |  |  |
+| `raw_hash` | TEXT | yes |  |  |
+| `source_file_id` | INTEGER | yes |  |  |
+| `created_at` | TEXT | no |  | (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) |
+
+Indexes:
+- `idx_follow_actions_dedup` — UNIQUE (source_file_id, raw_hash)
+- `idx_follow_actions_date` — (date_followed)
+- `idx_follow_actions_web_page_id` — (web_page_id)
 
 ### `geo_shapes` — GeoShape
 
@@ -951,6 +1033,25 @@ Indexes:
 Indexes:
 - `idx_listen_actions_dedup` — UNIQUE (source_file_id, raw_hash)
 - `idx_listen_actions_date` — (date_listened)
+
+### `materialization_events` — MaterializationEvent
+
+| Column | Type | Null | PK | Default |
+|:---|:---|:---:|:---:|:---|
+| `id` | INTEGER | yes | yes |  |
+| `schema_type` | TEXT | no |  | 'MaterializationEvent' |
+| `repo` | TEXT | no |  | 'vault' |
+| `file_path` | TEXT | no |  |  |
+| `source_dissolution_pk` | INTEGER | yes |  |  |
+| `source_table` | TEXT | no |  |  |
+| `source_row_id` | INTEGER | yes |  |  |
+| `materializer` | TEXT | no |  |  |
+| `materialized_at` | TEXT | no |  |  |
+| `materialization_kind` | TEXT | no |  | 'stub' |
+
+Indexes:
+- `idx_materialization_events_path_ts` — (file_path, materialized_at)
+- `idx_materialization_events_source` — (source_dissolution_pk)
 
 ### `medical_records` — MedicalRecord
 
