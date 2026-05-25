@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 ActionKind = Literal["quantify", "progress"]
-FrontierReason = Literal["unaddressed", "under-informed"]
+FrontierReason = Literal["unaddressed", "under-informed", "below-threshold"]
 
 
 @dataclass

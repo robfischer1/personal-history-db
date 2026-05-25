@@ -20,20 +20,38 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from typing import Any
 
 from .models import DisciplineNode, FrontierEntry, StructuralEdge
 from .vocabulary import PRED_CHILD_OF
 
-_NODE_WIDTH = 220
-_NODE_HEIGHT = 60
-_COL_SPACING = 60
-_ROW_SPACING = 40
+_NODE_WIDTH = 180  # -30% from 260 — tighter cards
+_NODE_HEIGHT = 80
+
+# Radial layout — Programming at center, categories on a ring, leaves on an outer ring.
+_RADIAL_CENTER = (700, 700)
+_R_CATEGORY = 260  # category-ring radius from center
+_R_LEAF = 600  # leaf-ring radius from center
+_INTER_CLUSTER_GAP_RAD = 0.18  # angular gap (radians) inserted between adjacent clusters
+
+# Edge labels — empty by default; predicate type is signalled by color instead.
+_EDGE_LABEL: dict[str, str] = {
+    "prerequisiteOf": "",
+    "childOf": "",
+}
+
+# Edge colors by predicate. JSON Canvas preset colors are "1"-"6".
+# Prereq edges get a colored stroke; structural childOf edges stay default-gray.
+_EDGE_COLOR_BY_PREDICATE: dict[str, str] = {
+    "prerequisiteOf": "4",  # green — forward path: you build on this
+}
 
 # Obsidian Canvas preset colors (1-6). Used to highlight frontier nodes by reason.
 _COLOR_BY_REASON: dict[str, str] = {
     "unaddressed": "5",  # purple — needs progress
     "under-informed": "3",  # yellow — needs re-probe
+    "below-threshold": "2",  # red — addressed but sitting below the front; lift it
 }
 
 
@@ -64,28 +82,24 @@ def render_canvas(
         for entry in frontier:
             frontier_reasons[entry.node.label] = entry.reason
 
-    depths = _compute_depths(nodes, valid_edges)
-    by_depth: dict[int, list[str]] = {}
-    for label, depth in depths.items():
-        by_depth.setdefault(depth, []).append(label)
+    positions = _compute_layout(nodes, valid_edges)
 
     canvas_nodes: list[dict[str, Any]] = []
-    for depth, labels_at_depth in sorted(by_depth.items()):
-        for col, label in enumerate(sorted(labels_at_depth)):
-            x = col * (_NODE_WIDTH + _COL_SPACING)
-            y = depth * (_NODE_HEIGHT + _ROW_SPACING)
-            canvas_nodes.append(_node_payload(label, x, y, nodes, frontier_reasons))
+    for label, (x, y) in positions.items():
+        canvas_nodes.append(_node_payload(label, x, y, nodes, frontier_reasons))
 
     canvas_edges: list[dict[str, Any]] = []
     for edge in valid_edges:
-        canvas_edges.append(
-            {
-                "id": _edge_id(edge),
-                "fromNode": _node_id(edge.subject),
-                "toNode": _node_id(edge.object),
-                "label": edge.predicate,
-            }
-        )
+        payload: dict[str, Any] = {
+            "id": _edge_id(edge),
+            "fromNode": _node_id(edge.subject),
+            "toNode": _node_id(edge.object),
+            "label": _EDGE_LABEL.get(edge.predicate, edge.predicate),
+        }
+        color = _EDGE_COLOR_BY_PREDICATE.get(edge.predicate)
+        if color is not None:
+            payload["color"] = color
+        canvas_edges.append(payload)
 
     canvas = {"nodes": canvas_nodes, "edges": canvas_edges}
     return json.dumps(canvas, indent=2, ensure_ascii=False)
@@ -126,6 +140,92 @@ def _node_payload(
         reason = frontier_reasons[label]
         payload["color"] = _COLOR_BY_REASON.get(reason, "1")
     return payload
+
+
+def _compute_layout(
+    nodes: list[DisciplineNode],
+    edges: list[StructuralEdge],
+) -> dict[str, tuple[int, int]]:
+    """Radial (web) layout — root at center, categories on ring 1, leaves on ring 2.
+
+    - Depth-0 nodes (root) sit at ``_RADIAL_CENTER``.
+    - Depth-1 nodes (categories) are placed evenly around a circle of radius
+      ``_R_CATEGORY`` from center.
+    - Depth-2 nodes (leaves) fan out within their parent category's angular
+      wedge at radius ``_R_LEAF``. Adjacent leaves alternate radii (push some
+      slightly outward) so labels don't visually collide on the arc.
+    - Anything deeper or unplaced falls back to a row beneath the diagram.
+    """
+    children_of: dict[str, list[str]] = {n.label: [] for n in nodes}
+    for edge in edges:
+        if edge.predicate == PRED_CHILD_OF:
+            # subject childOf object → subject is child of object
+            children_of[edge.object].append(edge.subject)
+    for parent in children_of:
+        children_of[parent].sort()
+
+    depths = _compute_depths(nodes, edges)
+    positions: dict[str, tuple[int, int]] = {}
+
+    cx, cy = _RADIAL_CENTER
+    depth_0 = sorted([lbl for lbl, d in depths.items() if d == 0])
+    depth_1 = sorted([lbl for lbl, d in depths.items() if d == 1])
+
+    # Roots at center
+    for root in depth_0:
+        positions[root] = (cx - _NODE_WIDTH // 2, cy - _NODE_HEIGHT // 2)
+
+    # Global even leaf spacing: every leaf gets the same angular slot around
+    # the circle. Each category sits at the angular center of its own children.
+    # Small inter-cluster gaps separate one category's children from the next.
+    n_cats = max(len(depth_1), 1)
+    total_leaves = sum(len(children_of.get(c, [])) for c in depth_1)
+
+    if total_leaves > 0:
+        gap = _INTER_CLUSTER_GAP_RAD
+        usable = 2 * math.pi - gap * n_cats
+        step = usable / total_leaves
+        cursor = -math.pi / 2 - usable / 2 - gap / 2  # start so the layout is top-centered
+        for cat in depth_1:
+            kids = children_of.get(cat, [])
+            kid_angles: list[float] = []
+            for kid in kids:
+                # Center each leaf in its slot.
+                theta = cursor + step / 2
+                lx = cx + _R_LEAF * math.cos(theta) - _NODE_WIDTH // 2
+                ly = cy + _R_LEAF * math.sin(theta) - _NODE_HEIGHT // 2
+                positions[kid] = (int(lx), int(ly))
+                kid_angles.append(theta)
+                cursor += step
+            cursor += gap  # gap before the next cluster begins
+
+            # Category sits at the angular center of its children (or directly
+            # at its own slot if it has no children, fallback to first slot).
+            if kid_angles:
+                theta_cat = sum(kid_angles) / len(kid_angles)
+            else:
+                theta_cat = -math.pi / 2  # top fallback
+            cx_cat = cx + _R_CATEGORY * math.cos(theta_cat) - _NODE_WIDTH // 2
+            cy_cat = cy + _R_CATEGORY * math.sin(theta_cat) - _NODE_HEIGHT // 2
+            positions[cat] = (int(cx_cat), int(cy_cat))
+    else:
+        # Fall back to fixed even spacing if no leaves are present yet.
+        for i, cat in enumerate(depth_1):
+            theta = -math.pi / 2 + i * (2 * math.pi / n_cats)
+            x = cx + _R_CATEGORY * math.cos(theta) - _NODE_WIDTH // 2
+            y = cy + _R_CATEGORY * math.sin(theta) - _NODE_HEIGHT // 2
+            positions[cat] = (int(x), int(y))
+
+    # Fallback for unplaced nodes — single row beneath everything.
+    placed = set(positions.keys())
+    unplaced = [n.label for n in nodes if n.label not in placed]
+    if unplaced:
+        fallback_y = cy + _R_LEAF + _LEAF_RADIAL_JITTER + _NODE_HEIGHT * 2
+        col_step = _NODE_WIDTH + 60
+        for i, label in enumerate(sorted(unplaced)):
+            positions[label] = (i * col_step, fallback_y)
+
+    return positions
 
 
 def _compute_depths(

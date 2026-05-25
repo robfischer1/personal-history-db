@@ -74,6 +74,9 @@ def test_canvas_color_differs_by_reason() -> None:
 
 
 def test_canvas_layout_uses_childof_depth() -> None:
+    """Radial layout — root at center; deeper nodes farther from center."""
+    from phdb.skill_graph.canvas import _RADIAL_CENTER
+
     nodes = [
         DisciplineNode(label="Programming"),
         DisciplineNode(label="JS"),
@@ -85,16 +88,38 @@ def test_canvas_layout_uses_childof_depth() -> None:
     ]
     parsed = _parse(render_canvas(nodes, edges))
     by_label = {n["text"].split("\n")[0]: n for n in parsed["nodes"]}
-    # Programming at depth 0, JS at depth 1, React at depth 2.
-    assert by_label["Programming"]["y"] < by_label["JS"]["y"]
-    assert by_label["JS"]["y"] < by_label["React"]["y"]
+
+    cx, cy = _RADIAL_CENTER
+
+    def dist_sq(n: dict[str, Any]) -> int:
+        # Distance from layout center to the node's top-left, squared.
+        return (n["x"] - cx) ** 2 + (n["y"] - cy) ** 2
+
+    # Programming (depth 0) sits at center; JS (depth 1) on the inner ring;
+    # React (depth 2) further out still. Distance grows monotonically.
+    assert dist_sq(by_label["Programming"]) < dist_sq(by_label["JS"])
+    assert dist_sq(by_label["JS"]) < dist_sq(by_label["React"])
 
 
-def test_canvas_edges_carry_predicate_label() -> None:
-    nodes = [DisciplineNode(label="A"), DisciplineNode(label="B")]
-    edges = [StructuralEdge("A", "prerequisiteOf", "B")]
+def test_canvas_edges_use_color_not_label_for_predicate() -> None:
+    """Edge labels are empty; predicate type is signalled by color.
+
+    prerequisiteOf edges carry a `color`; childOf edges stay default-gray
+    (no `color` key), so the renderer never relies on the label.
+    """
+    nodes = [DisciplineNode(label="A"), DisciplineNode(label="B"), DisciplineNode(label="C")]
+    edges = [
+        StructuralEdge("A", "prerequisiteOf", "B"),
+        StructuralEdge("B", "childOf", "C"),
+    ]
     parsed = _parse(render_canvas(nodes, edges))
-    assert parsed["edges"][0]["label"] == "prerequisiteOf"
+    edges_out = parsed["edges"]
+    # All labels are empty.
+    assert {e["label"] for e in edges_out} == {""}
+    # Exactly one edge has a color (the prereq one).
+    colored = [e for e in edges_out if "color" in e]
+    assert len(colored) == 1
+    assert colored[0]["fromNode"]  # sanity — the prereq edge's color field is populated
 
 
 def test_canvas_empty_inputs() -> None:

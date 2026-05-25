@@ -32,23 +32,30 @@ def compute_frontier(
 ) -> list[FrontierEntry]:
     """Return the frontier entries (no action edges attached yet).
 
-    A node X is on the frontier iff:
-    1. X is unaddressed (readiness is None) OR under-informed (stale), AND
-    2. X has no prerequisites OR at least one prerequisite is on the front
-       (readiness >= threshold AND fresh).
+    Three frontier reasons:
+    - ``unaddressed`` — no readiness recorded yet.
+    - ``under-informed`` — readiness present but ``last_verified`` stale or absent.
+    - ``below-threshold`` — readiness present, fresh, but below the front threshold.
+
+    The first two are gated by the prereq satisfaction check (you can only
+    reach an unmeasured node if at least one prerequisite is on the front).
+    ``below-threshold`` is exempt — the node is already being practiced and
+    needs lifting, regardless of upstream state.
 
     Args:
         snapshot: The current skill-graph state.
         readiness_threshold: Minimum readiness for a node to count as on the front.
         staleness_days: Older `last_verified` = under-informed.
-        now: Override for testing; defaults to `datetime.now()`.
+        now: Override for testing; defaults to `datetime.now()`. May be naive
+            or tz-aware; the comparator normalizes against each node's
+            stored timestamp.
 
     Returns:
         Frontier entries. Use `edges.generate_actions` to attach action edges,
         then `ranker.rank_actions` to score them.
     """
     if now is None:
-        now = datetime.now()  # noqa: DTZ005 — naive datetime by design; ISO timestamps may be naive.
+        now = datetime.now()  # noqa: DTZ005 — caller may pass tz-aware; we normalize per-node.
 
     nodes_by_label = {n.label: n for n in snapshot.nodes}
 
@@ -63,12 +70,16 @@ def compute_frontier(
     entries: list[FrontierEntry] = []
 
     for node in snapshot.nodes:
-        reason = _frontier_reason(node, staleness_cutoff)
+        reason = _frontier_reason(node, staleness_cutoff, readiness_threshold)
         if reason is None:
             continue
-        prereqs = prereqs_by_node.get(node.label, [])
-        if prereqs and not _prereqs_satisfied(prereqs, nodes_by_label, readiness_threshold):
-            continue
+        # below-threshold nodes are already being practiced — surface them
+        # regardless of whether prereqs are on the front. Unaddressed and
+        # under-informed nodes need the prereq gate.
+        if reason in ("unaddressed", "under-informed"):
+            prereqs = prereqs_by_node.get(node.label, [])
+            if prereqs and not _prereqs_satisfied(prereqs, nodes_by_label, readiness_threshold):
+                continue
         entries.append(FrontierEntry(node=node, reason=reason))
 
     return entries
@@ -77,6 +88,7 @@ def compute_frontier(
 def _frontier_reason(
     node: DisciplineNode,
     staleness_cutoff: datetime,
+    readiness_threshold: float,
 ) -> FrontierReason | None:
     """Return why `node` is on the frontier, or None if it isn't."""
     if node.readiness is None:
@@ -88,8 +100,16 @@ def _frontier_reason(
     except ValueError:
         # Malformed timestamp — treat as under-informed so it gets re-probed.
         return "under-informed"
-    if verified_at < staleness_cutoff:
+    # Normalize tz: if one side has tzinfo and the other doesn't, drop tz
+    # on both sides for the comparison.
+    cutoff = staleness_cutoff
+    if (verified_at.tzinfo is None) != (cutoff.tzinfo is None):
+        verified_at = verified_at.replace(tzinfo=None)
+        cutoff = cutoff.replace(tzinfo=None)
+    if verified_at < cutoff:
         return "under-informed"
+    if node.readiness < readiness_threshold:
+        return "below-threshold"
     return None
 
 

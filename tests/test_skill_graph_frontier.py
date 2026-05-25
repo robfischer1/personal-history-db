@@ -113,7 +113,8 @@ def test_permissive_any_prereq_unlocks_node() -> None:
 
 
 def test_threshold_override() -> None:
-    """Lowering the readiness threshold can unlock dependent nodes."""
+    """A fresh node below the threshold surfaces as below-threshold;
+    lowering the threshold clears it and unlocks dependents instead."""
     snapshot = SkillGraphSnapshot(
         nodes=[
             DisciplineNode(label="JS", readiness=0.25, last_verified=iso(NOW)),  # low but fresh
@@ -122,14 +123,49 @@ def test_threshold_override() -> None:
         structural_edges=[StructuralEdge("JS", "prerequisiteOf", "React")],
     )
 
-    # Default threshold 0.3 — JS below the front; React's prereq unmet.
-    # JS itself is addressed+fresh (not on frontier).
+    # Default threshold 0.3 — JS is fresh but below the front -> below-threshold
+    # reason; React's prereq unmet (JS not on the front), so React is excluded.
     default = compute_frontier(snapshot, now=NOW)
-    assert default == []
+    assert {e.node.label for e in default} == {"JS"}
+    assert default[0].reason == "below-threshold"
 
-    # Lower threshold to 0.2 — JS clears, React unlocks.
+    # Lower threshold to 0.2 — JS clears (no longer below-threshold), React unlocks.
     lowered = compute_frontier(snapshot, now=NOW, readiness_threshold=0.2)
     assert {e.node.label for e in lowered} == {"React"}
+
+
+def test_below_threshold_exempt_from_prereq_gate() -> None:
+    """A below-threshold node surfaces even when its own prereqs aren't on the front."""
+    snapshot = SkillGraphSnapshot(
+        nodes=[
+            DisciplineNode(label="Programming", readiness=0.2, last_verified=iso(NOW)),  # below threshold
+            DisciplineNode(label="Python", readiness=0.15, last_verified=iso(NOW)),  # below threshold; needs Programming
+        ],
+        structural_edges=[StructuralEdge("Programming", "prerequisiteOf", "Python")],
+    )
+    frontier = compute_frontier(snapshot, now=NOW)
+    # Both surface as below-threshold despite Python's prereq (Programming) not being on the front.
+    assert {e.node.label for e in frontier} == {"Programming", "Python"}
+    assert all(e.reason == "below-threshold" for e in frontier)
+
+
+def test_tz_aware_now_compares_against_tz_aware_last_verified() -> None:
+    """Mixed naive/aware datetimes shouldn't TypeError — they get normalized."""
+    from datetime import UTC
+
+    aware_now = datetime(2026, 5, 19, 12, 0, 0, tzinfo=UTC)
+    snapshot = SkillGraphSnapshot(
+        nodes=[
+            DisciplineNode(
+                label="Python",
+                readiness=0.7,
+                last_verified="2026-05-19T11:00:00+00:00",  # tz-aware ISO
+            )
+        ],
+        structural_edges=[],
+    )
+    # Must not TypeError. Python is fresh (1 hour ago) + above threshold → not frontier.
+    assert compute_frontier(snapshot, now=aware_now) == []
 
 
 def test_staleness_threshold_override() -> None:
