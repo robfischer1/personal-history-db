@@ -1000,6 +1000,124 @@ def revision_rerun(
     )
 
 
+@revision.command(name="prepare-batch")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--limit", type=int, default=10,
+              help="Max rows to prepare (default 10).")
+@click.option("--repo-root", type=click.Path(), default=None,
+              help="Override the repo checkout path.")
+@click.option("--format", "fmt", type=click.Choice(["json", "table"]),
+              default="json",
+              help="json = full prompts for orchestrator dispatch; "
+                   "table = one-line routing summary.")
+@click.pass_context
+def revision_prepare_batch(
+    ctx: click.Context,
+    repo: str,
+    limit: int,
+    repo_root: str | None,
+    fmt: str,
+) -> None:
+    """Build ready-to-dispatch prompts for unsummarized file_revisions rows.
+
+    Phase 4 runs as orchestrator-driven subagent dispatch — this command
+    materializes bodies + builds prompts; the orchestrator (a Claude Code
+    session) calls Haiku / Sonnet subagents in parallel and writes the
+    returned summaries back via ``phdb revision write-summary``.
+
+    Output (json mode) is one JSON object per line with fields:
+    rev_id, model_tier, change_type, file_path, combined_bytes, prompt,
+    system_prompt, skip. Lines with skip=true should be persisted via
+    ``phdb revision write-summary --skip``.
+    """
+    import json
+    from phdb.db import connect
+    from phdb.plugins.file_revisions import prepare_batch
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        items = prepare_batch(conn, repo=repo, limit=limit, repo_root=repo_root)
+
+    if not items:
+        click.echo("(no unsummarized rows)")
+        return
+
+    if fmt == "table":
+        click.echo(f"{'rev_id':>7} {'tier':<7} {'change':<7} "
+                   f"{'bytes':>7}  file_path")
+        for it in items:
+            tag = "SKIP" if it.skip else it.model_tier
+            click.echo(
+                f"{it.rev_id:>7} {tag:<7} {it.change_type:<7} "
+                f"{it.combined_bytes:>7}  {it.file_path}"
+            )
+        return
+
+    for it in items:
+        payload = {
+            "rev_id": it.rev_id,
+            "repo": it.repo,
+            "commit_sha": it.commit_sha,
+            "file_path": it.file_path,
+            "change_type": it.change_type,
+            "model_tier": it.model_tier,
+            "combined_bytes": it.combined_bytes,
+            "skip": it.skip,
+            "system_prompt": it.system_prompt,
+            "prompt": it.prompt,
+        }
+        click.echo(json.dumps(payload, ensure_ascii=False))
+
+
+@revision.command(name="write-summary")
+@click.argument("rev_id", type=int)
+@click.option("--model", required=False, default=None,
+              help="Model tier the summary came from (e.g. 'haiku', 'sonnet').")
+@click.option("--summary", default=None,
+              help="Summary text. Pass '-' to read from stdin.")
+@click.option("--skip", is_flag=True, default=False,
+              help="Persist the SKIP_MODEL_UNREADABLE sentinel "
+                   "(use when both blobs are empty).")
+@click.pass_context
+def revision_write_summary(
+    ctx: click.Context,
+    rev_id: int,
+    model: str | None,
+    summary: str | None,
+    skip: bool,
+) -> None:
+    """Persist one summary returned by a Claude Code subagent.
+
+    Two modes:
+      - ``--summary 'text...' --model haiku`` — normal write
+      - ``--skip`` — write the SKIP_MODEL_UNREADABLE sentinel so the row
+        leaves the unsummarized queue
+    """
+    import sys
+    from phdb.db import connect
+    from phdb.plugins.file_revisions import record_skip, record_summary
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+
+    if skip:
+        with write_lock(settings.db_path), connect(settings.db_path) as conn:
+            record_skip(conn, rev_id=rev_id)
+        click.echo(f"Skipped rev_id={rev_id} (sentinel written).")
+        return
+
+    if not model:
+        raise click.UsageError("--model is required when --skip is not set.")
+    if summary == "-":
+        summary = sys.stdin.read()
+    if not summary or not summary.strip():
+        raise click.UsageError("--summary text is required (or pass '-' for stdin).")
+
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        record_summary(conn, rev_id=rev_id, summary=summary, model=model)
+    click.echo(f"Wrote summary for rev_id={rev_id} (model={model}, len={len(summary)}).")
+
+
 # ---------------------------------------------------------------------------
 # Dissolution Tracking CLI — Outputs/Plans/Dissolution Tracking.md (migration 0041)
 # ---------------------------------------------------------------------------

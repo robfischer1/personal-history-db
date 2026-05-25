@@ -15,5 +15,19 @@ See ``Outputs/Plans/Git for Ideas.md`` and the accompanying
 from __future__ import annotations
 
 from phdb.plugins.file_revisions.plugin import FileRevisionsPlugin
+from phdb.plugins.file_revisions.summarizer import (
+    Item,
+    pick_model,
+    prepare_batch,
+    record_skip,
+    record_summary,
+)
 
-__all__ = ["FileRevisionsPlugin"]
+__all__ = [
+    "FileRevisionsPlugin",
+    "Item",
+    "pick_model",
+    "prepare_batch",
+    "record_skip",
+    "record_summary",
+]
