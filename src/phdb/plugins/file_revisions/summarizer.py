@@ -446,6 +446,7 @@ def prepare_bundles(
     repo: str = "vault",
     bundle_size: int = 5,
     bundle_count: int = 4,
+    bundle_size_sonnet: int | None = None,
     repo_root: str | None = None,
     staging_dir: Path | None = None,
     skip_patterns: list[str] | None = None,
@@ -460,6 +461,12 @@ def prepare_bundles(
     then packs into ``bundle_count`` bundle files. Each bundle is written
     to ``staging_dir / bundle-<id>.txt`` with a system-prompt header + per-
     revision sections delimited by ``### REV <id> ###`` markers.
+
+    ``bundle_size_sonnet`` overrides ``bundle_size`` for the sonnet tier.
+    Large-body revisions (rename/delete or oversize add/modify) route to
+    sonnet and quickly blow past sonnet's 200K-token context when packed
+    30-per-bundle; setting ``bundle_size_sonnet=5`` keeps sonnet bundles
+    in the safe ~150-500KB range while still packing haiku densely.
 
     Returns a list of ``Bundle`` records that the orchestrator dispatches
     in parallel — one ``Agent(model=bundle.model_tier)`` call per bundle,
@@ -531,8 +538,9 @@ def prepare_bundles(
 
     def pack_tier(tier: str, src: list[Item]) -> None:
         nonlocal next_id
-        for chunk_start in range(0, len(src), bundle_size):
-            chunk = src[chunk_start:chunk_start + bundle_size]
+        size = bundle_size_sonnet if (tier == SONNET_TIER and bundle_size_sonnet is not None) else bundle_size
+        for chunk_start in range(0, len(src), size):
+            chunk = src[chunk_start:chunk_start + size]
             if not chunk:
                 continue
             body = BUNDLE_SYSTEM_PROMPT + "\n\n" + _build_bundle_prompt(chunk)

@@ -1122,6 +1122,10 @@ def revision_write_summary(
 @click.option("--repo", default="vault", help="Repo name (default: vault).")
 @click.option("--bundle-size", type=int, default=5,
               help="Revisions per bundle / agent call (default 5).")
+@click.option("--bundle-size-sonnet", type=int, default=None,
+              help="Override --bundle-size for sonnet-tier bundles. "
+                   "Large-body revisions route to sonnet and blow Sonnet's "
+                   "200K context when packed 30/bundle; set to 5 for safety.")
 @click.option("--bundle-count", type=int, default=4,
               help="Number of bundles to stage (default 4).")
 @click.option("--repo-root", type=click.Path(), default=None,
@@ -1139,6 +1143,7 @@ def revision_prepare_bundles(  # noqa: PLR0913 — Click flags
     ctx: click.Context,
     repo: str,
     bundle_size: int,
+    bundle_size_sonnet: int | None,
     bundle_count: int,
     repo_root: str | None,
     staging_dir: str | None,
@@ -1164,6 +1169,7 @@ def revision_prepare_bundles(  # noqa: PLR0913 — Click flags
         bundles = prepare_bundles(
             conn, repo=repo,
             bundle_size=bundle_size, bundle_count=bundle_count,
+            bundle_size_sonnet=bundle_size_sonnet,
             repo_root=repo_root, staging_dir=staging,
             skip_patterns=list(skip_pattern) if skip_pattern else None,
             skip_deletes=skip_deletes,
