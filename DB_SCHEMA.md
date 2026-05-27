@@ -4,7 +4,7 @@
 > are overwritten on next ingest. Schema descriptions and column
 > notes live on the dataclass schemas in `phdb.schemas.canonical`.
 
-**Regenerated at:** 2026-05-24T23:46:43Z
+**Regenerated at:** 2026-05-27T00:07:32Z
 
 ## Entity tables
 
