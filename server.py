@@ -496,9 +496,50 @@ def coverage_map(domain: str | None = None, year: int | None = None) -> dict[str
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="personal-history-db MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="Transport protocol (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Bind host for HTTP transports (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8101,
+        help="Bind port for HTTP transports (default: 8101)",
+    )
+    args = parser.parse_args()
+
     if not DB_PATH.exists():
         print(f"WARNING: DB not found at {DB_PATH}", file=sys.stderr)
-    mcp.run()
+
+    print(
+        f"personal-history-db: db={DB_PATH}, transport={args.transport}",
+        file=sys.stderr,
+    )
+
+    if args.transport != "stdio":
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        )
+        print(
+            f"personal-history-db: listening on {args.host}:{args.port}",
+            file=sys.stderr,
+        )
+
+    mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":
