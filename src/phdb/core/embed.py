@@ -138,6 +138,14 @@ def get_embed_status(
                 (MIN_CHUNK_CHARS,),
             ).fetchone()[0]
 
+    for tname, _ in reg.embeddable_typed_tables:
+        if _has_table(conn, tname):
+            n_eligible += conn.execute(
+                f"SELECT COUNT(*) FROM [{tname}] "
+                "WHERE is_bulk=0 AND body_text IS NOT NULL AND length(body_text) >= ?",
+                (MIN_CHUNK_CHARS,),
+            ).fetchone()[0]
+
     for tname, _ in reg.embeddable_document_tables:
         if not _has_table(conn, tname):
             continue
@@ -193,10 +201,10 @@ def get_embed_status(
 
 # ---- Pipeline ----
 
-def _pending_comm_sql(table: str) -> str:
+def _pending_comm_sql(table: str, date_column: str = "date_sent") -> str:
     """Generate pending-embed SQL for a typed communication table."""
     return f"""\
-SELECT m.id, m.subject, m.body_text, m.sender_address, m.date_sent
+SELECT m.id, m.subject, m.body_text, m.sender_address, m.[{date_column}]
   FROM [{table}] m
  WHERE m.is_bulk = 0
    AND m.body_text IS NOT NULL
@@ -339,7 +347,11 @@ def run_embed_pipeline(
     reg = registry or default_registry()
     sources: list[tuple[str, str, str]] = []
     for tname, schema_type in reg.embeddable_communication_tables:
-        sources.append((_pending_comm_sql(tname), tname, schema_type))
+        date_col = reg.date_column(tname, default="date_sent")
+        sources.append((_pending_comm_sql(tname, date_col), tname, schema_type))
+    for tname, schema_type in reg.embeddable_typed_tables:
+        date_col = reg.date_column(tname)
+        sources.append((_pending_comm_sql(tname, date_col), tname, schema_type))
     for tname, schema_type in reg.embeddable_document_tables:
         if not _has_table(conn, tname):
             continue
@@ -392,7 +404,10 @@ def run_embed_pipeline(
     if not total_pending:
         return EmbedResult()
 
-    comm_table_names = {t for t, _ in reg.embeddable_communication_tables}
+    comm_style_tables = (
+        {t for t, _ in reg.embeddable_communication_tables}
+        | {t for t, _ in reg.embeddable_typed_tables}
+    )
 
     for source_table, schema_type, pending in all_pending:
         for row in pending:
@@ -408,7 +423,7 @@ def run_embed_pipeline(
                 continue
 
             title = (subject or "(no subject)")[:160]
-            if source_table in comm_table_names:
+            if source_table in comm_style_tables:
                 meta = json.dumps({"sender": meta_col3, "date_sent": meta_col4})
             else:
                 meta = json.dumps({"bucket": meta_col3, "mtime": meta_col4})

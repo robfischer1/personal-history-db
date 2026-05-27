@@ -47,24 +47,32 @@ _DEFAULT_TYPED_TABLES: tuple[TypedTableSpec, ...] = (
     TypedTableSpec("listen_actions", "date_listened", schema_type="ListenAction"),
     TypedTableSpec("watch_actions", "date_watched", schema_type="WatchAction"),
     TypedTableSpec("actions", "date_performed", schema_type="Action"),
-    TypedTableSpec("events", "date_occurred", schema_type="Event"),
+    TypedTableSpec("events", "date_occurred", embeddable=True,
+                   embed_schema_type="Event", schema_type="Event"),
     TypedTableSpec("products", "date_recorded", schema_type="Product"),
-    TypedTableSpec("order_actions", "date_ordered", schema_type="OrderAction"),
+    TypedTableSpec("order_actions", "date_ordered", embeddable=True,
+                   embed_schema_type="OrderAction", schema_type="OrderAction"),
     TypedTableSpec("like_actions", "date_liked", schema_type="LikeAction"),
     TypedTableSpec("persons", "date_recorded", schema_type="Person"),
-    TypedTableSpec("social_postings", "date_posted", schema_type="SocialPosting"),
-    TypedTableSpec("comments", "date_posted", schema_type="Comment"),
+    TypedTableSpec("social_postings", "date_posted", embeddable=True,
+                   embed_schema_type="SocialMediaPosting", schema_type="SocialPosting"),
+    TypedTableSpec("comments", "date_posted", embeddable=True,
+                   embed_schema_type="Comment", schema_type="Comment"),
     TypedTableSpec("places", "date_recorded", schema_type="Place"),
     TypedTableSpec("travel_actions", "date_traveled", schema_type="TravelAction"),
     TypedTableSpec("geo_shapes", "date_recorded", schema_type="GeoShape"),
     TypedTableSpec("books", "date_recorded", schema_type="Book"),
-    TypedTableSpec("medical_records", "date_recorded", schema_type="MedicalRecord"),
-    TypedTableSpec("reviews", "date_reviewed", schema_type="Review"),
+    TypedTableSpec("medical_records", "date_recorded", embeddable=True,
+                   embed_schema_type="MedicalRecord", schema_type="MedicalRecord"),
+    TypedTableSpec("reviews", "date_reviewed", embeddable=True,
+                   embed_schema_type="Review", schema_type="Review"),
     TypedTableSpec("invite_actions", "date_invited", schema_type="InviteAction"),
-    TypedTableSpec("creative_works", "date_created", schema_type="CreativeWork"),
+    TypedTableSpec("creative_works", "date_created", embeddable=True,
+                   embed_schema_type="CreativeWork", schema_type="CreativeWork"),
     TypedTableSpec("web_pages", "date_recorded", schema_type="WebPage"),
     TypedTableSpec("join_actions", "date_joined", schema_type="JoinAction"),
-    TypedTableSpec("digital_documents", "date_created", schema_type="DigitalDocument"),
+    TypedTableSpec("digital_documents", "date_created", embeddable=True,
+                   embed_schema_type="DigitalDocument", schema_type="DigitalDocument"),
     TypedTableSpec("things", "date_recorded", schema_type="Thing"),
 )
 
@@ -124,6 +132,15 @@ class Registry:
             (t.name, t.embed_schema_type or t.schema_type or "Message")
             for t in self.typed_tables.values()
             if t.is_communication and t.embeddable
+        ]
+
+    @property
+    def embeddable_typed_tables(self) -> list[tuple[str, str]]:
+        """[(table_name, schema_type)] for non-comm typed tables that embed."""
+        return [
+            (t.name, t.embed_schema_type or t.schema_type or "Thing")
+            for t in self.typed_tables.values()
+            if t.embeddable and not t.is_communication
         ]
 
     @property
