@@ -39,6 +39,7 @@ from phdb.query import (  # noqa: E402
     find_messages_by_participant as _find_messages_by_participant,
     find_threads_by_subject as _find_threads_by_subject,
     get_chunk as _get_chunk,
+    get_conversation as _get_conversation,
     get_message as _get_message,
     get_thread as _get_thread,
     list_sources as _list_sources,
@@ -227,6 +228,36 @@ def get_thread(thread_id: str | None = None,
         thread_id=thread_id,
         msg_id=msg_id,
         max_messages=max_messages,
+    )
+
+
+@mcp.tool()
+def get_conversation(
+    participant: str,
+    since: str | None = None,
+    until: str | None = None,
+    max_messages: int = 100,
+) -> dict[str, Any]:
+    """Fetch a full bidirectional conversation with a specific person.
+
+    Resolves names to phone numbers/addresses via contact lookup, then
+    retrieves both inbound (from them) and outbound (to them) messages
+    interleaved chronologically. Works across iMessage, SMS, Discord, etc.
+
+    Use this when you need the actual back-and-forth dialogue with someone,
+    not just messages they sent. For one-directional lookups, use
+    find_messages_by_participant instead.
+
+    Args:
+        participant: Name or address fragment — e.g. "Rashawn", "Ashleigh",
+            "+1602". Resolved via contact_name_lookup for name-to-phone mapping.
+        since: Lower date bound, ISO 8601.
+        until: Upper date bound, ISO 8601.
+        max_messages: Max messages returned (default 100).
+    """
+    return _get_conversation(
+        _get_conn(), participant,
+        since=since, until=until, max_messages=max_messages,
     )
 
 

@@ -62,6 +62,7 @@ __all__ = [
     "corpus_stats",
     "find_messages_by_participant",
     "find_threads_by_subject",
+    "get_conversation",
     "get_message",
     "get_thread",
     "top_correspondents",
@@ -191,6 +192,79 @@ def get_thread(
     }
 
 
+def get_conversation(
+    conn: sqlite3.Connection,
+    participant: str,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    max_messages: int = 100,
+) -> dict[str, Any]:
+    """Fetch a full bidirectional conversation with a participant.
+
+    Resolves the participant name via contact_name_lookup, then retrieves
+    both inbound (from them) and outbound (to them) messages across all
+    communication tables, interleaved chronologically.
+    """
+    resolved = _resolve_addresses(conn, participant)
+    p = f"%{participant.lower()}%"
+
+    direct_matches = conn.execute(
+        "SELECT DISTINCT LOWER(sender_address) FROM chat_messages"
+        " WHERE LOWER(sender_name) LIKE ? OR LOWER(sender_address) LIKE ?",
+        (p, p),
+    ).fetchall()
+    all_addrs = list(set(resolved + [r[0] for r in direct_matches if r[0]]))
+
+    if not all_addrs:
+        return {"error": f"No addresses found for participant {participant!r}"}
+
+    placeholders = ",".join("?" for _ in all_addrs)
+
+    where_clauses: list[str] = []
+    where_args: list[Any] = []
+    if since:
+        where_clauses.append("date_sent >= ?")
+        where_args.append(since)
+    if until:
+        where_clauses.append("date_sent <= ?")
+        where_args.append(until)
+    extra_where = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    inbound_sql = (
+        f"SELECT id AS msg_id, 'inbound' AS direction, sender_name, sender_address,"
+        f" date_sent, substr(body_text, 1, 500) AS body_preview, 'chat_messages' AS source_table"
+        f" FROM chat_messages"
+        f" WHERE LOWER(sender_address) IN ({placeholders}){extra_where}"
+    )
+    outbound_sql = (
+        f"SELECT cm.id AS msg_id, 'outbound' AS direction, cm.sender_name, cm.sender_address,"
+        f" cm.date_sent, substr(cm.body_text, 1, 500) AS body_preview, 'chat_messages' AS source_table"
+        f" FROM chat_messages cm"
+        f" JOIN nodes rn ON rn.source_table = 'chat_messages' AND rn.source_id = cm.id"
+        f" JOIN triples t ON t.subject_node_id = rn.id"
+        f" JOIN predicates pred ON pred.id = t.predicate_id AND pred.name = 'sentTo'"
+        f" JOIN nodes cn ON cn.id = t.object_node_id AND cn.kind = 'contact'"
+        f" WHERE cm.direction = 'outbound'"
+        f" AND cn.normalized_label IN ({placeholders}){extra_where}"
+    )
+    sql = (
+        f"SELECT * FROM ({inbound_sql} UNION {outbound_sql})"
+        f" ORDER BY date_sent DESC LIMIT ?"
+    )
+    args = all_addrs + where_args + all_addrs + where_args + [max_messages]
+    rows = conn.execute(sql, args).fetchall()
+
+    return {
+        "participant": participant,
+        "resolved_addresses": all_addrs,
+        "since": since,
+        "until": until,
+        "message_count": len(rows),
+        "messages": [dict(r) for r in rows],
+    }
+
+
 def corpus_stats(
     conn: sqlite3.Connection,
     *,
@@ -240,6 +314,20 @@ def corpus_stats(
     }
 
 
+def _resolve_addresses(conn: sqlite3.Connection, participant: str) -> list[str]:
+    """Resolve a name fragment to matching addresses via contact_name_lookup."""
+    p = f"%{participant.lower()}%"
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT LOWER(address) FROM contact_name_lookup"
+            " WHERE LOWER(display_name) LIKE ?",
+            (p,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
 def find_messages_by_participant(
     conn: sqlite3.Connection,
     participant: str,
@@ -253,6 +341,7 @@ def find_messages_by_participant(
 ) -> dict[str, Any]:
     """Find messages where a person appears as sender, recipient, or either."""
     p = f"%{participant.lower()}%"
+    resolved_addrs = _resolve_addresses(conn, participant)
 
     comm_cte = (
         "WITH comm AS ("
@@ -272,13 +361,27 @@ def find_messages_by_participant(
 
     selectors: list[tuple[str, list[Any]]] = []
     if role in ("sender", "any"):
+        sender_clauses = [
+            "LOWER(sender_address) LIKE ?",
+            "LOWER(COALESCE(sender_name, '')) LIKE ?",
+        ]
+        sender_args: list[Any] = [p, p]
+        if resolved_addrs:
+            placeholders = ",".join("?" for _ in resolved_addrs)
+            sender_clauses.append(f"LOWER(sender_address) IN ({placeholders})")
+            sender_args.extend(resolved_addrs)
         selectors.append((
             "SELECT id AS msg_id, 'sender' AS matched_via FROM comm"
-            " WHERE LOWER(sender_address) LIKE ?"
-            " OR LOWER(COALESCE(sender_name, '')) LIKE ?",
-            [p, p],
+            f" WHERE {' OR '.join(sender_clauses)}",
+            sender_args,
         ))
     if role in ("recipient", "any"):
+        recip_clauses = ["n_obj.normalized_label LIKE ?"]
+        recip_args: list[Any] = [p]
+        if resolved_addrs:
+            placeholders = ",".join("?" for _ in resolved_addrs)
+            recip_clauses.append(f"n_obj.normalized_label IN ({placeholders})")
+            recip_args.extend(resolved_addrs)
         selectors.append((
             "SELECT n_sub.source_id AS msg_id, 'recipient' AS matched_via"
             " FROM triples t"
@@ -286,8 +389,8 @@ def find_messages_by_participant(
             " JOIN nodes n_obj ON n_obj.id = t.object_node_id"
             " JOIN predicates p ON p.id = t.predicate_id"
             " WHERE p.name = 'sentTo'"
-            " AND n_obj.normalized_label LIKE ?",
-            [p],
+            f" AND ({' OR '.join(recip_clauses)})",
+            recip_args,
         ))
     if not selectors:
         return {"error": f"role must be 'sender', 'recipient', or 'any'; got {role!r}"}
@@ -326,7 +429,7 @@ def find_messages_by_participant(
     )
     rows = conn.execute(sql, union_args + where_args + [limit]).fetchall()
 
-    return {
+    result: dict[str, Any] = {
         "participant": participant,
         "role": role,
         "since": since,
@@ -347,6 +450,9 @@ def find_messages_by_participant(
             for r in rows
         ],
     }
+    if resolved_addrs:
+        result["resolved_addresses"] = resolved_addrs
+    return result
 
 
 def find_threads_by_subject(
