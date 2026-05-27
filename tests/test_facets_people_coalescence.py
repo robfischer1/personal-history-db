@@ -267,6 +267,125 @@ class TestNamedLocationPredicate:
         assert pred(a, b) is True
 
 
+class TestAliasListPredicate:
+    def test_matches_when_both_in_alias_list(self):
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["erica", "veneficusmalfoy", "rayvenmoonlight@hotmail.com"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address="erica")
+        b = _emit(address="VeneficusMalfoy")
+        assert pred(a, b) is True
+
+    def test_matches_same_value_twice(self):
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["erica", "veneficusmalfoy"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address="Erica")
+        b = _emit(address="erica")
+        assert pred(a, b) is True
+
+    def test_no_match_when_one_value_not_in_list(self):
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["erica", "veneficusmalfoy"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address="erica")
+        b = _emit(address="someone_else")
+        assert pred(a, b) is False
+
+    def test_no_match_when_neither_in_list(self):
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["erica", "veneficusmalfoy"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address="alice")
+        b = _emit(address="bob")
+        assert pred(a, b) is False
+
+    def test_none_value_does_not_match(self):
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["erica"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address=None)
+        b = _emit(address="erica")
+        assert pred(a, b) is False
+
+    def test_empty_string_does_not_match(self):
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["erica"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address="")
+        b = _emit(address="erica")
+        assert pred(a, b) is False
+
+    def test_normalize_applies_to_aliases_at_build_time(self):
+        # Aliases include mixed-case entries; lowercase normalize
+        # should fold them so emissions match regardless of case.
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["Erica", "VENEFICUSMALFOY"],
+            "normalize": "lowercase",
+        })
+        a = _emit(address="erica")
+        b = _emit(address="veneficusmalfoy")
+        assert pred(a, b) is True
+
+    def test_no_normalize_preserves_case(self):
+        # Without normalize, exact string membership only.
+        pred = build_predicate({
+            "shape": "alias_list",
+            "field": "address",
+            "aliases": ["Erica"],
+        })
+        a = _emit(address="Erica")
+        b = _emit(address="erica")
+        # b's value is not in the alias set without normalization.
+        assert pred(a, b) is False
+
+    def test_load_from_toml_with_aliases(self, tmp_path: Path):
+        toml_path = tmp_path / "rules.toml"
+        toml_path.write_text("""
+[[rules.people]]
+name = "manual_alias_erica"
+shape = "alias_list"
+field = "address"
+aliases = [
+    "erica",
+    "veneficusmalfoy",
+    "rayvenmoonlight@hotmail.com",
+]
+normalize = "lowercase"
+confidence = 1.0
+notes = "Hand-curated cluster."
+""", encoding="utf-8")
+        rules = load_rules_from_toml(toml_path, facet="people")
+        assert len(rules) == 1
+        assert rules[0].name == "manual_alias_erica"
+        assert rules[0].shape == "alias_list"
+        assert rules[0].confidence == 1.0
+        # Verify the predicate works after TOML round-trip.
+        a = _emit(address="Erica")
+        b = _emit(address="rayvenmoonlight@hotmail.com")
+        assert rules[0].predicate(a, b) is True
+
+
 # ---------------------------------------------------------------------------
 # Coalescer — proposal generation
 # ---------------------------------------------------------------------------

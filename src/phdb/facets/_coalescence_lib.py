@@ -17,12 +17,15 @@ Architecture (per Phase 0 Q31 + Phase 8 plan):
   audit table. Each merge appends one entry; ``unmerge`` reads from
   this table to reverse.
 - ``load_rules_from_toml`` — parse a TOML rule pack into evaluator-
-  ready ``CoalescenceRule`` instances. Supports five rule shapes:
+  ready ``CoalescenceRule`` instances. Supports six rule shapes:
   ``exact_field`` (single-field equality with optional normalize),
   ``two_field`` (compound equality), ``regex`` (regex match on a
   field), ``geo_radius_meters`` (placeholder predicate; the real
-  geo math lives in ``phdb.facets.places.coalescence``), and
-  ``named_location`` (string-match on a place name field).
+  geo math lives in ``phdb.facets.places.coalescence``),
+  ``named_location`` (string-match on a place name field), and
+  ``alias_list`` (hand-curated set of known equivalents for one
+  underlying entity — both emissions must have a field value in
+  the alias set).
 - ``Coalescer`` — proposal generator. Given rules + emissions,
   returns ``MergeProposal``s. **Does not write to DB.** The caller
   (a facet plugin's ``coalesce()`` impl) decides accept/reject and
@@ -75,9 +78,10 @@ class CoalescenceRule:
 
     ``shape`` records which rule shape was used to construct the
     predicate (``exact_field``, ``two_field``, ``regex``,
-    ``geo_radius_meters``, ``named_location``). The TOML loader
-    populates this for downstream introspection (e.g., the Phase 8C
-    review CLI surfaces "which kind of rule fired?" to the user).
+    ``geo_radius_meters``, ``named_location``, ``alias_list``). The
+    TOML loader populates this for downstream introspection (e.g.,
+    the Phase 8C review CLI surfaces "which kind of rule fired?" to
+    the user).
     """
 
     name: str
@@ -253,6 +257,44 @@ def _named_location_predicate(
     return _exact_field_predicate(field_name, normalize)
 
 
+def _alias_list_predicate(
+    field_name: str,
+    aliases: Iterable[Any],
+    normalize: str | None,
+) -> Callable[[Any, Any], bool]:
+    """Hand-curated alias match — both emissions' field values appear in the alias set.
+
+    Use case: a known cluster of handles/identifiers that all refer to
+    the same underlying entity but share no derivable property (e.g.,
+    one person's AIM screen name, MSN email, and Discord handle).
+    Rules-engine predicates require an equivalence judgment two
+    emissions must satisfy *together*; this predicate satisfies that
+    contract by treating "membership in the alias set" as the
+    equivalence relation.
+
+    The alias list is normalized once at build time; the emission
+    values are normalized on each call.
+    """
+    alias_set = {
+        _normalize(value, normalize)
+        for value in aliases
+        if value is not None
+    }
+    alias_set.discard(None)
+    alias_set.discard("")
+
+    def pred(a: Any, b: Any) -> bool:
+        va = _normalize(_emission_field(a, field_name), normalize)
+        vb = _normalize(_emission_field(b, field_name), normalize)
+        if va is None or vb is None:
+            return False
+        if isinstance(va, str) and not va:
+            return False
+        return va in alias_set and vb in alias_set
+
+    return pred
+
+
 _PREDICATE_BUILDERS: dict[str, Callable[..., Callable[[Any, Any], bool]]] = {
     "exact_field": lambda fields, normalize, **_: _exact_field_predicate(
         fields[0], normalize,
@@ -266,6 +308,9 @@ _PREDICATE_BUILDERS: dict[str, Callable[..., Callable[[Any, Any], bool]]] = {
     "geo_radius_meters": lambda **_: _geo_radius_placeholder(),
     "named_location": lambda fields, normalize, **_: _named_location_predicate(
         fields[0], normalize,
+    ),
+    "alias_list": lambda fields, normalize, aliases, **_: _alias_list_predicate(
+        fields[0], aliases, normalize,
     ),
 }
 
@@ -282,6 +327,7 @@ def build_predicate(rule_dict: dict[str, Any]) -> Callable[[Any, Any], bool]:
         fields = [rule_dict["field"]]
     normalize = rule_dict.get("normalize")
     pattern = rule_dict.get("pattern", "")
+    aliases = list(rule_dict.get("aliases") or [])
     builder = _PREDICATE_BUILDERS.get(shape)
     if builder is None:
         raise ValueError(f"unknown rule shape: {shape!r}")
@@ -289,6 +335,7 @@ def build_predicate(rule_dict: dict[str, Any]) -> Callable[[Any, Any], bool]:
         fields=fields,
         normalize=normalize,
         pattern=pattern,
+        aliases=aliases,
     )
 
 

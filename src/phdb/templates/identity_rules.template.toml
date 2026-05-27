@@ -14,6 +14,10 @@
 #   - two_field             — both named fields must match
 #   - regex                 — regex with optional capture group
 #   - named_location        — same name (normalized) = same place
+#   - alias_list            — both emissions must have a field value
+#                             that appears in a hand-curated alias set
+#                             (config: field, aliases = [...],
+#                             optional normalize)
 #
 # Rule shapes added by phdb.facets.places.coalescence (Phase 8B):
 #   - geo_radius_meters     — haversine within radius_m meters
@@ -79,6 +83,35 @@ normalize = "lowercase"
 confidence = 0.40
 require_manual_review = true
 notes = "Lowest confidence; routed to Phase 8C review CLI."
+
+# ────────────────────────────────────────────────────────────────────
+# Hand-curated alias clusters — use alias_list when a single real
+# person operated multiple handles across protocols/eras that share
+# no derivable property (no common email local-part, no shared
+# phone, no matching display name). Each rule asserts: any two
+# emissions whose <field> is in this list refer to the same person.
+#
+# Confidence ≥ 0.90 auto-merges; for hand-curated clusters this is
+# usually 1.0 (you've manually verified the cluster). Lower the
+# confidence and set require_manual_review = true if you want the
+# cluster to surface in the review CLI before being applied.
+#
+# Example: one person who migrated AIM → MSN → MSN-Plus over years,
+# using a different handle on each protocol plus an RP persona.
+# ────────────────────────────────────────────────────────────────────
+#
+# [[rules.people]]
+# name = "manual_alias_example"
+# shape = "alias_list"
+# field = "address"
+# aliases = [
+#     "example_aim_handle",
+#     "example_msn@hotmail.com",
+#     "example_rp_persona",
+# ]
+# normalize = "lowercase"
+# confidence = 1.0
+# notes = "Hand-curated — verified same person across AIM/MSN/RP."
 
 # ────────────────────────────────────────────────────────────────────
 # Places rules — copied from phdb.facets.places.coalescence defaults.
