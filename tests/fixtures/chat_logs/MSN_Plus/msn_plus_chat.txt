@@ -1,0 +1,25 @@
+.--------------------------------------------------------------------.
+| Session Start: Monday, July 05, 2004                               |
+| Participants:                                                      |
+|    TestOwner (testowner@example.com)                               |
+|    Alice (alice123@example.com)                                    |
+.--------------------------------------------------------------------.
+[02:30:15 PM] Alice: Hey are you there?
+[02:30:22 PM] TestOwner: Yeah what's up
+[02:30:45 PM] Alice: Just wanted to see how you're doing after the
+              move
+[02:31:01 PM] TestOwner: Pretty good, still unpacking
+
+
+.--------------------------------------------------------------------.
+| Session Start: Tuesday, July 06, 2004                              |
+| Participants:                                                      |
+|    TestOwner (testowner@example.com)                               |
+|    Alice. (alice123@example.com)                                   |
+.--------------------------------------------------------------------.
+[08:15:30 PM] Alice. says:
+[08:15:30 PM] TestOwner!
+[08:15:42 PM] Hey Alice!
+[08:16:01 PM] Alice. says:
+[08:16:01 PM] What are you up to tonight?
+[08:16:15 PM] Not much, just coding

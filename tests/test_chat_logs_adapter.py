@@ -140,6 +140,17 @@ class TestDetectFormat:
     def test_bracketed(self) -> None:
         assert detect_format(Path("test.log"), b"[14:30] User: hello\n[14:31] Other: hi") == "bracketed_time"
 
+    def test_msn_plus(self) -> None:
+        head = b".----.\n| Session Start: Monday, July 05, 2004 |\n"
+        assert detect_format(Path("test.txt"), head) == "msn_plus"
+
+    def test_msn_plus_over_bracketed(self) -> None:
+        head = (
+            b".----.\n| Session Start: Monday, July 05, 2004 |\n"
+            b".----.\n[02:30:15 PM] Alice: hello\n"
+        )
+        assert detect_format(Path("test.txt"), head) == "msn_plus"
+
 
 class TestParseAimHtml:
     def test_basic(self) -> None:
@@ -170,6 +181,81 @@ class TestParseBracketedTimeLog:
         assert len(sessions[0].messages) == 4
         assert "multi-line" in (sessions[0].messages[2].body_text or "")
         assert "continuation" in (sessions[0].messages[2].body_text or "")
+
+
+class TestParseMsnPlusLog:
+    def test_multi_session(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        assert len(sessions) == 2
+
+    def test_standard_format_messages(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        s = sessions[0]
+        assert len(s.messages) == 4
+        assert s.messages[0].sender_name == "Alice"
+        assert s.messages[1].sender_name == "TestOwner"
+
+    def test_participants_as_addresses(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        s = sessions[0]
+        assert s.my_handle == "testowner@example.com"
+        assert s.remote_handle == "alice123@example.com"
+        assert s.messages[0].sender_address == "alice123@example.com"
+        assert s.messages[1].sender_address == "testowner@example.com"
+
+    def test_continuation_line(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        msg = sessions[0].messages[2]
+        assert "after the" in msg.body_text
+        assert "move" in msg.body_text
+
+    def test_session_date(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        assert sessions[0].session_date == "2004-07-05"
+        assert sessions[1].session_date == "2004-07-06"
+
+    def test_ampm_timestamp(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        assert sessions[0].messages[0].date_sent == "2004-07-05T14:30:15"
+        assert sessions[1].messages[0].date_sent == "2004-07-06T20:15:30"
+
+    def test_says_variant_messages(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        s = sessions[1]
+        assert len(s.messages) == 4
+        assert s.messages[0].sender_name == "Alice."
+        assert s.messages[0].sender_address == "alice123@example.com"
+        assert s.messages[1].sender_name == "TestOwner"
+        assert s.messages[1].sender_address == "testowner@example.com"
+
+    def test_says_variant_body_text(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        s = sessions[1]
+        assert s.messages[0].body_text == "TestOwner!"
+        assert s.messages[1].body_text == "Hey Alice!"
+
+    def test_protocol_is_msn(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        assert sessions[0].protocol == "msn"
+        assert sessions[1].protocol == "msn"
+
+    def test_no_header_lines_as_messages(self) -> None:
+        file_path = FIXTURES / "MSN_Plus" / "msn_plus_chat.txt"
+        sessions = parse_file(file_path, FIXTURES)
+        all_senders = {m.sender_name for s in sessions for m in s.messages}
+        assert "| Session Start" not in all_senders
+        assert "| Participants" not in all_senders
+        for sender in all_senders:
+            assert not sender.startswith("|")
 
 
 # ---- Integration tests ----
@@ -286,12 +372,12 @@ class TestChatLogsPluginIntegration:
         assert report.rows_yielded >= 0
 
     def test_multi_session_file(self, chat_db: Path, chat_settings: Settings, chat_plugin: ChatLogsPlugin) -> None:
-        """The MSN plaintext file has 2 sessions — both should create separate threads."""
+        """Multi-session files should create separate threads per session."""
         chat_settings.db_path = chat_db
         with connect(chat_db) as conn:
             chat_plugin.run(FIXTURES, conn, chat_settings)
             msn_threads = conn.execute(
                 "SELECT label FROM nodes WHERE kind = 'thread' AND label LIKE '%msn:%'"
             ).fetchall()
-        assert len(msn_threads) == 2
+        assert len(msn_threads) >= 2
 

@@ -1,0 +1,17 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "msn_plus"
+version = "0.1.0"
+description = "MSN Messenger Plus! chat log ingester — bar-framed session headers, AM/PM timestamps"
+kind = "source"
+entry_point = "phdb.plugins.msn_plus.plugin:MsnPlusPlugin"
+
+[source]
+emits = ["Message"]
+entity_refs = []
+formats_used = ["chat_logs_text", "chat_upserts"]
+records_required = ["ChatMessage", "Recipient"]
+facets_projected = ["Person", "Time", "Thread"]
+sidecars = []

@@ -1,9 +1,10 @@
 """Legacy IM chat logs parser — yields ChatMessage records grouped by session.
 
-Supports three formats:
+Supports four formats:
   1. AIM HTML (.htm) — color-coded SPAN/FONT blocks
   2. Plaintext session (.log/.txt) — Trillian-derived Session Start/Close format
   3. Bracketed-time (.log/.txt) — [HH:MM] Sender: msg format
+  4. MSN Messenger Plus! (.txt) — bar-framed session headers, [HH:MM:SS AM/PM] timestamps
 
 Pure parser: no DB, no identity.
 """
@@ -49,6 +50,17 @@ BRACKETED_TIME_MSG_RE = re.compile(
 )
 EVENTS_LOG_RE = re.compile(
     r"^\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M\s+-\s+", re.MULTILINE
+)
+
+MSN_PLUS_BAR_RE = re.compile(r"^\.\-{4,}\.\s*$")
+MSN_PLUS_SESSION_RE = re.compile(
+    r"^\|\s*Session Start:\s+\w+,\s+(\w+\s+\d{1,2},\s+\d{4})\s*\|?\s*$",
+)
+MSN_PLUS_PARTICIPANT_RE = re.compile(
+    r"^\|\s{2,}(.+?)\s+\(([^)]+)\)\s*\|?\s*$",
+)
+MSN_PLUS_TIME_RE = re.compile(
+    r"^\[(\d{1,2}:\d{2}:\d{2})\s+(AM|PM)\]\s+(.*)$", re.I,
 )
 
 
@@ -186,6 +198,8 @@ def detect_format(file_path: Path, head_bytes: bytes) -> str:
         "<HTML" in head.upper() or "<BODY" in head.upper() or "<SPAN" in head.upper()
     ):
         return "aim_html"
+    if re.search(r"^\|\s*Session Start:", head, re.MULTILINE):
+        return "msn_plus"
     if BRACKETED_TIME_MSG_RE.search(head):
         return "bracketed_time"
     head_lines = [line for line in head.split("\n") if line.strip()]
@@ -436,6 +450,187 @@ def _parse_bracketed_time_log(
     )]
 
 
+def _parse_msn_plus_time(
+    time_str: str, ampm: str, session_date: datetime | None,
+) -> str | None:
+    if not session_date:
+        return None
+    bits = time_str.split(":")
+    try:
+        h, mi = int(bits[0]), int(bits[1])
+        s = int(bits[2]) if len(bits) > 2 else 0
+    except (ValueError, IndexError):
+        return session_date.date().isoformat()
+    if ampm.upper() == "PM" and h != 12:
+        h += 12
+    elif ampm.upper() == "AM" and h == 12:
+        h = 0
+    try:
+        return datetime(
+            session_date.year, session_date.month, session_date.day, h, mi, s,
+        ).isoformat()
+    except ValueError:
+        return session_date.date().isoformat()
+
+
+def _parse_msn_plus_messages(
+    lines: list[str],
+    name_to_handle: dict[str, str],
+    local_name: str | None,
+    local_addr: str | None,
+    session_date: datetime | None,
+    source_str: str,
+    file_relpath: str,
+    session_index: int,
+) -> list[ChatMessage]:
+    raw: list[tuple[str, str, str | None, str]] = []
+    pending_sender: tuple[str, str] | None = None
+
+    for line in lines:
+        stripped = line.rstrip()
+        if not stripped:
+            continue
+
+        if not stripped.startswith("[") and raw:
+            prev_name, prev_addr, prev_ts, prev_body = raw[-1]
+            raw[-1] = (prev_name, prev_addr, prev_ts, prev_body + "\n" + stripped.strip())
+            continue
+
+        m = MSN_PLUS_TIME_RE.match(stripped)
+        if not m:
+            continue
+
+        time_str, ampm, rest = m.group(1), m.group(2), m.group(3).strip()
+        if not rest:
+            continue
+        ts = _parse_msn_plus_time(time_str, ampm, session_date)
+
+        rest_lower = rest.lower()
+        says_match = False
+        for pname, phandle in name_to_handle.items():
+            if rest_lower.startswith(pname) and rest_lower[len(pname):].strip() == "says:":
+                pending_sender = (rest[: len(pname)], phandle)
+                says_match = True
+                break
+        if says_match:
+            continue
+
+        colon_space = rest.find(": ")
+        if colon_space > 0:
+            possible_name = rest[:colon_space].strip()
+            handle = name_to_handle.get(possible_name.lower())
+            if handle:
+                body = rest[colon_space + 2:]
+                if body.strip():
+                    raw.append((possible_name, handle, ts, body))
+                    pending_sender = None
+                continue
+
+        if pending_sender:
+            sender_name, sender_addr = pending_sender
+            pending_sender = None
+        else:
+            sender_name = local_name or "unknown"
+            sender_addr = local_addr or "unknown"
+
+        raw.append((sender_name, sender_addr, ts, rest))
+
+    messages: list[ChatMessage] = []
+    for i, (sname, saddr, ts, body) in enumerate(raw):
+        if len(body) > _MAX_BODY_LEN:
+            body = body[:_MAX_BODY_LEN]
+        messages.append(_make_message(
+            sname, saddr, ts, body,
+            source_str, file_relpath, session_index, i,
+        ))
+    return messages
+
+
+def _parse_msn_plus_log(
+    content: str, file_path: Path, fallback_date: datetime | None,
+    source_str: str, file_relpath: str,
+) -> list[ChatSession]:
+    content = _strip_msn_color_codes(content)
+    lines = content.split("\n")
+    sessions: list[ChatSession] = []
+
+    state = "outside"
+    session_date: datetime | None = None
+    participants: list[tuple[str, str]] = []
+    msg_lines: list[str] = []
+
+    def _flush() -> None:
+        nonlocal session_date, participants, msg_lines
+        if not msg_lines:
+            session_date = None
+            participants = []
+            msg_lines = []
+            return
+
+        name_to_handle: dict[str, str] = {}
+        for name, handle in participants:
+            name_to_handle[name.lower()] = _normalize_handle(handle) or handle.lower()
+
+        local_name = participants[0][0] if participants else None
+        local_addr = _normalize_handle(participants[0][1]) if participants else None
+        remote_addr = _normalize_handle(participants[1][1]) if len(participants) > 1 else None
+
+        s_date = session_date or fallback_date
+        msgs = _parse_msn_plus_messages(
+            msg_lines, name_to_handle, local_name, local_addr,
+            s_date, source_str, file_relpath, len(sessions),
+        )
+
+        if msgs:
+            sessions.append(ChatSession(
+                protocol="msn",
+                my_handle=local_addr,
+                remote_handle=remote_addr,
+                start_ts=msgs[0].date_sent if msgs else None,
+                end_ts=msgs[-1].date_sent if msgs else None,
+                session_date=s_date.date().isoformat() if s_date else None,
+                messages=msgs,
+            ))
+
+        session_date = None
+        participants = []
+        msg_lines = []
+
+    for line in lines:
+        line = line.rstrip("\r")
+
+        if MSN_PLUS_BAR_RE.match(line):
+            if state == "outside":
+                state = "in_header"
+            elif state == "in_header":
+                state = "in_messages"
+                msg_lines = []
+            elif state == "in_messages":
+                _flush()
+                state = "in_header"
+            continue
+
+        if state == "in_header":
+            m_sess = MSN_PLUS_SESSION_RE.match(line)
+            if m_sess:
+                try:
+                    session_date = datetime.strptime(m_sess.group(1), "%B %d, %Y")
+                except ValueError:
+                    pass
+                continue
+            m_part = MSN_PLUS_PARTICIPANT_RE.match(line)
+            if m_part:
+                participants.append((m_part.group(1).strip(), m_part.group(2).strip()))
+                continue
+            continue
+
+        if state == "in_messages":
+            msg_lines.append(line)
+
+    _flush()
+    return sessions
+
+
 def parse_file(file_path: Path, root: Path) -> list[ChatSession]:
     """Parse a single chat log file, returning sessions with ChatMessage records."""
     try:
@@ -461,6 +656,8 @@ def parse_file(file_path: Path, root: Path) -> list[ChatSession]:
     if fmt == "aim_html":
         s = _parse_aim_html(content, file_path, file_date, source_str, file_relpath)
         return [s] if s else []
+    if fmt == "msn_plus":
+        return _parse_msn_plus_log(content, file_path, file_date, source_str, file_relpath)
     if fmt == "plaintext":
         return _parse_plaintext_log(content, file_path, file_date, source_str, file_relpath)
     if fmt == "bracketed_time":
