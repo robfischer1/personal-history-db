@@ -237,7 +237,7 @@ def get_conversation(
         f" FROM chat_messages"
         f" WHERE LOWER(sender_address) IN ({placeholders}){extra_where}"
     )
-    outbound_sql = (
+    outbound_triple_sql = (
         f"SELECT cm.id AS msg_id, 'outbound' AS direction, cm.sender_name, cm.sender_address,"
         f" cm.date_sent, substr(cm.body_text, 1, 500) AS body_preview, 'chat_messages' AS source_table"
         f" FROM chat_messages cm"
@@ -248,11 +248,27 @@ def get_conversation(
         f" WHERE cm.direction = 'outbound'"
         f" AND cn.normalized_label IN ({placeholders}){extra_where}"
     )
+    outbound_thread_sql = (
+        f"SELECT cm.id AS msg_id, 'outbound' AS direction, cm.sender_name, cm.sender_address,"
+        f" cm.date_sent, substr(cm.body_text, 1, 500) AS body_preview, 'chat_messages' AS source_table"
+        f" FROM chat_messages cm"
+        f" JOIN nodes n1 ON n1.source_table = 'chat_messages' AND n1.source_id = cm.id"
+        f" JOIN triples t1 ON t1.subject_node_id = n1.id"
+        f" JOIN predicates p1 ON p1.id = t1.predicate_id AND p1.name = 'inThread'"
+        f" WHERE cm.direction = 'outbound'"
+        f" AND t1.object_node_id IN ("
+        f"   SELECT t2.object_node_id FROM triples t2"
+        f"   JOIN predicates p2 ON p2.id = t2.predicate_id AND p2.name = 'inThread'"
+        f"   JOIN nodes n2 ON n2.id = t2.subject_node_id AND n2.source_table = 'chat_messages'"
+        f"   JOIN chat_messages cm2 ON cm2.id = n2.source_id"
+        f"   WHERE LOWER(cm2.sender_address) IN ({placeholders})"
+        f" ){extra_where}"
+    )
     sql = (
-        f"SELECT * FROM ({inbound_sql} UNION {outbound_sql})"
+        f"SELECT * FROM ({inbound_sql} UNION {outbound_triple_sql} UNION {outbound_thread_sql})"
         f" ORDER BY date_sent DESC LIMIT ?"
     )
-    args = all_addrs + where_args + all_addrs + where_args + [max_messages]
+    args = all_addrs + where_args + all_addrs + where_args + all_addrs + where_args + [max_messages]
     rows = conn.execute(sql, args).fetchall()
 
     return {

@@ -1,0 +1,17 @@
+[phdb]
+manifest_version = 1
+
+[plugin]
+name = "discord_dce"
+version = "0.1.0"
+description = "DiscordChatExporter JSON export ingester (bidirectional)"
+kind = "source"
+entry_point = "phdb.plugins.discord_dce.plugin:DiscordDcePlugin"
+
+[source]
+emits = ["Message"]
+entity_refs = []
+formats_used = ["discord_dce_json", "chat_upserts"]
+records_required = ["ChatMessage", "Attachment", "Recipient"]
+facets_projected = ["Person", "Time", "Thread"]
+sidecars = ["attachments"]
