@@ -11,6 +11,8 @@ import click
 if TYPE_CHECKING:
     import sqlite3
 
+    from phdb.service.config import ServiceConfig
+
 from phdb import __version__
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -744,6 +746,24 @@ def schema_diff(ctx: click.Context) -> None:
         click.echo(line)
 
 
+@schema.command(name="inventory")
+@click.option("--output", "-o", default=None, help="Output path (default: INVENTORY.md at cwd).")
+@click.option("--dry-run", is_flag=True, help="Print to stdout instead of writing.")
+def schema_inventory(output: str | None, dry_run: bool) -> None:
+    """Regenerate INVENTORY.md from the plugin discovery system."""
+    from pathlib import Path as P
+
+    from phdb.tools.schema_doc import DEFAULT_INVENTORY_PATH, regenerate_inventory
+
+    content = regenerate_inventory()
+    if dry_run:
+        click.echo(content)
+        return
+    target = P(output) if output else DEFAULT_INVENTORY_PATH
+    target.write_text(content, encoding="utf-8")
+    click.echo(f"Wrote {len(content):,} bytes to {target}")
+
+
 # ---------------------------------------------------------------------------
 # Revision CLI — Git for Ideas (migration 0039 + plugin file_revisions)
 # ---------------------------------------------------------------------------
@@ -1284,6 +1304,145 @@ def revision_bulk_skip(  # noqa: PLR0913 — Click flags
     )
     if not apply and result["total"] > 0:
         click.echo("  (re-run with --apply to write sentinels)")
+
+
+# ---------------------------------------------------------------------------
+# Vault Notes CLI — Git for Ideas Phase 8 (migration 0042)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def note() -> None:
+    """Vault note index — lookup, search, list, read, backfill, stats."""
+
+
+@note.command(name="lookup")
+@click.argument("query")
+@click.pass_context
+def note_lookup(ctx: click.Context, query: str) -> None:
+    """Exact-match lookup by name or file_path."""
+    from phdb.db import connect
+    from phdb.vault_notes import lookup
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        result = lookup(conn, query)
+    if result is None:
+        click.echo(f"No note found for: {query}")
+        raise SystemExit(1)
+    for k, v in result.items():
+        if k == "body":
+            click.echo(f"  body: ({len(v)} chars)" if v else "  body: (none)")
+        else:
+            click.echo(f"  {k}: {v}")
+
+
+@note.command(name="search")
+@click.argument("query")
+@click.option("--limit", type=int, default=20, help="Max results.")
+@click.pass_context
+def note_search(ctx: click.Context, query: str, limit: int) -> None:
+    """Full-text search over vault notes (name + description + body)."""
+    from phdb.db import connect
+    from phdb.vault_notes import search
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        results = search(conn, query, limit=limit)
+    if not results:
+        click.echo("No results.")
+        return
+    click.echo(f"{len(results)} result(s):\n")
+    for r in results:
+        status_tag = f" [{r['status']}]" if r.get("status") != "live" else ""
+        click.echo(f"  {r['name']}{status_tag}")
+        click.echo(f"    path: {r['file_path']}")
+        if r.get("snippet"):
+            click.echo(f"    …{r['snippet']}…")
+        click.echo()
+
+
+@note.command(name="list")
+@click.option("--status", type=click.Choice(["live", "dissolved", "deleted"]),
+              default=None, help="Filter by status.")
+@click.option("--type", "at_type", default=None, help="Filter by @type.")
+@click.option("--limit", type=int, default=50, help="Max results.")
+@click.pass_context
+def note_list(ctx: click.Context, status: str | None, at_type: str | None, limit: int) -> None:
+    """Browse vault notes with optional filters."""
+    from phdb.db import connect
+    from phdb.vault_notes import list_notes
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        results = list_notes(conn, status=status, at_type=at_type, limit=limit)
+    if not results:
+        click.echo("No notes match the filter.")
+        return
+    click.echo(f"{len(results)} note(s):\n")
+    for r in results:
+        status_tag = f" [{r['status']}]" if r.get("status") != "live" else ""
+        type_tag = f" @{r['at_type']}" if r.get("at_type") else ""
+        click.echo(f"  {r['name']}{type_tag}{status_tag}")
+        click.echo(f"    {r['file_path']}")
+
+
+@note.command(name="read")
+@click.argument("name_or_path")
+@click.pass_context
+def note_read(ctx: click.Context, name_or_path: str) -> None:
+    """Print the body text of one vault note."""
+    from phdb.db import connect
+    from phdb.vault_notes import read_note
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        body = read_note(conn, name_or_path)
+    if body is None:
+        click.echo(f"No note found for: {name_or_path}")
+        raise SystemExit(1)
+    click.echo(body)
+
+
+@note.command(name="backfill")
+@click.option("--repo", default="vault", help="Repo name (default: vault).")
+@click.option("--repo-path", type=click.Path(), default=None,
+              help="Override the repo checkout path.")
+@click.pass_context
+def note_backfill(ctx: click.Context, repo: str, repo_path: str | None) -> None:
+    """Populate vault_notes from file_revisions + live disk state."""
+    from phdb.db import connect
+    from phdb.vault_notes import backfill
+    from phdb.writelock import write_lock
+
+    settings = ctx.obj["settings"]
+    root = Path(repo_path) if repo_path else Path.home() / "Forge" / "Obsidian"
+    with write_lock(settings.db_path), connect(settings.db_path) as conn:
+        result = backfill(conn, root, repo=repo)
+    click.echo(f"Backfill complete:")
+    for k, v in result.items():
+        click.echo(f"  {k}: {v}")
+
+
+@note.command(name="stats")
+@click.pass_context
+def note_stats(ctx: click.Context) -> None:
+    """Show vault_notes aggregate stats."""
+    from phdb.db import connect
+    from phdb.vault_notes import stats
+
+    settings = ctx.obj["settings"]
+    with connect(settings.db_path, readonly=True) as conn:
+        s = stats(conn)
+    click.echo(f"Total notes: {s['total']}")
+    click.echo(f"With body:   {s['with_body']}")
+    click.echo("\nBy status:")
+    for status, count in s.get("by_status", {}).items():
+        click.echo(f"  {status}: {count}")
+    if s.get("by_at_type"):
+        click.echo("\nTop @types:")
+        for entry in s["by_at_type"]:
+            click.echo(f"  {entry['at_type'] or '(none)'}: {entry['count']}")
 
 
 # ---------------------------------------------------------------------------
@@ -2167,3 +2326,203 @@ def facets_stats(
     for facet_name in sorted(_FACET_REGISTRY):
         pending = load_pending(facet_name, inst_dir)
         click.echo(f"  {facet_name:20s} {len(pending):>6}")
+
+
+# ── Service CLI ────────────────────────────────────────────────────────────────
+
+
+@cli.group()
+def service() -> None:
+    """Directory watchers and scheduled tasks."""
+
+
+def _load_service_config(ctx: click.Context, config_path: str | None) -> ServiceConfig:
+    from phdb.service.config import ServiceConfig as ServiceConfig  # noqa: F811
+
+    if config_path:
+        path = Path(config_path)
+    else:
+        settings = ctx.obj["settings"]
+        if settings.instance_dir:
+            path = Path(settings.instance_dir) / "service.toml"
+        else:
+            raise click.ClickException(
+                "No instance dir found. Pass --config or set PHDB_INSTANCE_DIR."
+            )
+
+    if not path.is_file():
+        raise click.ClickException(f"Service config not found: {path}")
+
+    return ServiceConfig.load(path)
+
+
+def _resolve_data_dir(ctx: click.Context) -> Path:
+    settings = ctx.obj["settings"]
+    if settings.data_dir:
+        return Path(settings.data_dir)
+    return Path(settings.db_path).parent
+
+
+@service.command()
+@click.option("--config", "config_path", type=click.Path(), default=None,
+              help="Path to service.toml (default: instance_dir/service.toml).")
+@click.pass_context
+def start(ctx: click.Context, config_path: str | None) -> None:
+    """Start the service (foreground). Ctrl+C to stop."""
+    from phdb.service.runner import ServiceRunner
+
+    config = _load_service_config(ctx, config_path)
+    warnings = config.validate()
+    for w in warnings:
+        click.echo(f"warning: {w}", err=True)
+
+    data_dir = _resolve_data_dir(ctx)
+    runner = ServiceRunner(config, data_dir)
+    sys.exit(runner.start())
+
+
+@service.command()
+@click.option("--config", "config_path", type=click.Path(), default=None)
+@click.pass_context
+def stop(ctx: click.Context, config_path: str | None) -> None:
+    """Stop a running service instance."""
+    from phdb.service.runner import ServiceRunner
+
+    config = _load_service_config(ctx, config_path)
+    data_dir = _resolve_data_dir(ctx)
+    runner = ServiceRunner(config, data_dir)
+
+    if not runner.is_running():
+        click.echo("Service is not running.")
+        return
+
+    pid = runner._read_pid()
+    if runner.stop():
+        click.echo(f"Stop signal sent to pid {pid}.")
+    else:
+        click.echo("Failed to send stop signal.", err=True)
+        sys.exit(1)
+
+
+@service.command()
+@click.option("--config", "config_path", type=click.Path(), default=None)
+@click.pass_context
+def status(ctx: click.Context, config_path: str | None) -> None:
+    """Show service status and job configuration."""
+    from phdb.service.runner import ServiceRunner
+
+    config = _load_service_config(ctx, config_path)
+    data_dir = _resolve_data_dir(ctx)
+    runner = ServiceRunner(config, data_dir)
+
+    pid = runner._read_pid()
+    running = runner.is_running()
+
+    click.echo(f"Service: {'RUNNING' if running else 'STOPPED'}")
+    if running:
+        click.echo(f"PID:     {pid}")
+    click.echo(f"PID file: {runner.pid_path}")
+    click.echo(f"Log file: {runner.log_path}")
+
+    if config.watch_jobs:
+        click.echo(f"\nWatchers ({len(config.watch_jobs)}):")
+        for job in config.watch_jobs:
+            flag = "on" if job.enabled else "OFF"
+            click.echo(f"  [{flag}] {job.name}")
+            click.echo(f"        path: {job.path}")
+            click.echo(f"        patterns: {', '.join(job.patterns)}")
+            click.echo(f"        debounce: {job.debounce}s")
+            click.echo(f"        command: {job.command}")
+
+    if config.schedule_jobs:
+        click.echo(f"\nSchedules ({len(config.schedule_jobs)}):")
+        for job in config.schedule_jobs:
+            flag = "on" if job.enabled else "OFF"
+            click.echo(f"  [{flag}] {job.name}")
+            click.echo(f"        interval: {job.interval}")
+            if job.at:
+                click.echo(f"        at: {job.at}")
+            click.echo(f"        command: {job.command}")
+
+
+@service.command(name="run")
+@click.argument("name")
+@click.option("--config", "config_path", type=click.Path(), default=None)
+@click.pass_context
+def run_job(ctx: click.Context, name: str, config_path: str | None) -> None:
+    """Run a single schedule job by name (blocking)."""
+    from phdb.service.scheduler import Scheduler
+
+    config = _load_service_config(ctx, config_path)
+
+    job = next((j for j in config.schedule_jobs if j.name == name), None)
+    if job is None:
+        available = [j.name for j in config.schedule_jobs]
+        raise click.ClickException(
+            f"Unknown schedule job: {name!r}. Available: {', '.join(available)}"
+        )
+
+    click.echo(f"Running schedule/{name}: {job.command}")
+    scheduler = Scheduler()
+    scheduler.add(job)
+    code, err = scheduler.run_now(name)
+    if code == 0:
+        click.echo("Done.")
+    else:
+        click.echo(f"Failed (exit {code}): {err}", err=True)
+        sys.exit(1)
+
+
+@service.command()
+@click.option("--config", "config_path", type=click.Path(), default=None)
+@click.option("--service-name", default="phdb-service", help="NSSM service name.")
+@click.pass_context
+def install(ctx: click.Context, config_path: str | None, service_name: str) -> None:
+    """Register as a Windows service via NSSM."""
+    import shutil
+
+    nssm = shutil.which("nssm")
+    if nssm is None:
+        raise click.ClickException(
+            "NSSM not found on PATH. Install it: winget install nssm"
+        )
+
+    _load_service_config(ctx, config_path)
+
+    python = sys.executable
+    args = ["service", "start"]
+    if config_path:
+        args.extend(["--config", config_path])
+
+    import subprocess
+    result = subprocess.run(
+        [nssm, "install", service_name, python, "-m", "phdb"] + args,
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise click.ClickException(f"NSSM install failed: {result.stderr}")
+
+    click.echo(f"Service '{service_name}' installed.")
+    click.echo(f"  Start: nssm start {service_name}")
+    click.echo(f"  Stop:  nssm stop {service_name}")
+    click.echo(f"  Remove: phdb service uninstall --service-name {service_name}")
+
+
+@service.command()
+@click.option("--service-name", default="phdb-service", help="NSSM service name.")
+def uninstall(service_name: str) -> None:
+    """Remove the Windows service via NSSM."""
+    import shutil
+    import subprocess
+
+    nssm = shutil.which("nssm")
+    if nssm is None:
+        raise click.ClickException("NSSM not found on PATH.")
+
+    result = subprocess.run(
+        [nssm, "remove", service_name, "confirm"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise click.ClickException(f"NSSM remove failed: {result.stderr}")
+    click.echo(f"Service '{service_name}' removed.")

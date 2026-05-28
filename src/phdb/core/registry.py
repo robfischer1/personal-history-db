@@ -89,6 +89,9 @@ _DEFAULT_DOCUMENT_TABLES: tuple[TypedTableSpec, ...] = (
                    embed_schema_type="Quotation"),
     TypedTableSpec("web_pages", "last_seen", embeddable=True,
                    embed_schema_type="WebPage"),
+    TypedTableSpec("vault_notes", "updated_at", embeddable=True,
+                   embed_schema_type="VaultNote",
+                   embed_body_column="body"),
 )
 
 

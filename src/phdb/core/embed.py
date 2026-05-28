@@ -171,6 +171,12 @@ def get_embed_status(
                 " ) >= ?",
                 (MIN_CHUNK_CHARS,),
             ).fetchone()[0]
+        elif tname == "vault_notes":
+            n_eligible += conn.execute(
+                "SELECT COUNT(*) FROM vault_notes "
+                "WHERE status = 'live' AND body IS NOT NULL AND length(body) >= ?",
+                (MIN_CHUNK_CHARS,),
+            ).fetchone()[0]
         else:
             n_eligible += conn.execute(
                 f"SELECT COUNT(*) FROM [{tname}] "
@@ -301,11 +307,27 @@ SELECT wp.id,
  ORDER BY wp.id
 """
 
+_PENDING_VAULT_NOTES_SQL = """\
+SELECT vn.id, vn.name, vn.body, vn.at_type, vn.updated_at
+  FROM vault_notes vn
+ WHERE vn.status = 'live'
+   AND vn.body IS NOT NULL
+   AND length(vn.body) >= ?
+   AND NOT EXISTS (
+       SELECT 1 FROM chunks d
+        WHERE d.source_table = 'vault_notes'
+          AND d.source_id = vn.id
+          AND d.embedded_at IS NOT NULL
+   )
+ ORDER BY vn.id
+"""
+
 _DOCUMENT_PENDING_SQL: dict[str, str] = {
     "documents": _PENDING_DOCUMENTS_SQL,
     "articles": _PENDING_ARTICLES_SQL,
     "clippings": _PENDING_CLIPPINGS_SQL,
     "web_pages": _PENDING_WEB_PAGES_SQL,
+    "vault_notes": _PENDING_VAULT_NOTES_SQL,
 }
 
 _UPSERT_CHUNK_SQL = """\

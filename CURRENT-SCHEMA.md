@@ -1,7 +1,7 @@
 ---
 created: 2026-05-06
-updated: 2026-05-14
-status: snapshot — post-typed-tables-reshape
+updated: 2026-05-27
+status: superseded
 type: project-reference
 related:
   - "[[REWRITE_PLAN]]"
@@ -10,6 +10,8 @@ related:
 ---
 
 # Personal-History-DB — Current Schema Snapshot
+
+> **Superseded.** This manual snapshot covers migrations 0001–0009 only. The live DB is at migration 0042 with 100+ tables and 52 declared schemas. Use `phdb schema regenerate` to produce the current `DB_SCHEMA.md`, which includes entity tables, action/document tables, infrastructure tables, facet plugins, and migration history — all from the live DB.
 
 Static reference of the SQL schema as defined by migrations 0001–0009 in `src/phdb/migrations/project/`. Documents the table definitions, indexes, triggers, and constraints that the framework produces.
 

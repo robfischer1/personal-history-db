@@ -38,6 +38,7 @@ from phdb.authorship import get_authorship
 from phdb.core.graph import _WIKILINK_RE, get_predicate, resolve_node
 from phdb.core.plugin import PhdbSourcePlugin
 from phdb.log import get_logger
+from phdb.vault_notes import mark_deleted, mark_renamed, upsert as vault_notes_upsert
 
 if TYPE_CHECKING:
     from phdb.settings import Settings
@@ -366,6 +367,9 @@ class FileRevisionsSummary:
     commits_skipped_no_changes: int = 0
     deltas_added: int = 0
     deltas_removed: int = 0
+    vault_notes_upserted: int = 0
+    vault_notes_deleted: int = 0
+    vault_notes_renamed: int = 0
     unknown_predicates: set[str] = field(default_factory=set)
     errors: list[str] = field(default_factory=list)
 
@@ -619,6 +623,19 @@ class FileRevisionsPlugin(PhdbSourcePlugin):
                             f"delta {block.sha[:8]} {change.path}: {exc}"
                         )
 
+                    # Phase 8 — vault_notes current-state sync.
+                    try:
+                        self._sync_vault_note(
+                            conn, blob_reader=blob_reader,
+                            change=change, commit_sha=block.sha,
+                            authorship=authorship, report=report,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — defensive
+                        log.warning(
+                            "[%s] vault_notes sync failed sha=%s path=%s: %s",
+                            self.name, block.sha[:8], change.path, exc,
+                        )
+
                     batch_count += 1
                     if batch_count >= self.BATCH_SIZE:
                         conn.commit()
@@ -628,11 +645,14 @@ class FileRevisionsPlugin(PhdbSourcePlugin):
 
         log.info(
             "[%s] Done: repo=%s commits=%d rows_yielded=%d inserted=%d "
-            "skipped=%d deltas+%d -%d unknown_preds=%d errors=%d",
+            "skipped=%d deltas+%d -%d vn_upsert=%d vn_del=%d vn_ren=%d "
+            "unknown_preds=%d errors=%d",
             self.name, repo,
             report.commits_processed, report.rows_yielded,
             report.rows_inserted, report.rows_skipped,
             report.deltas_added, report.deltas_removed,
+            report.vault_notes_upserted, report.vault_notes_deleted,
+            report.vault_notes_renamed,
             len(report.unknown_predicates), len(report.errors),
         )
         return report
@@ -833,6 +853,46 @@ class FileRevisionsPlugin(PhdbSourcePlugin):
         if cur.rowcount == 0:
             return None
         return int(cur.lastrowid or 0)
+
+    def _sync_vault_note(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        blob_reader: _BatchedBlobReader,
+        change: _RawChange,
+        commit_sha: str,
+        authorship: str,
+        report: FileRevisionsSummary,
+    ) -> None:
+        """Keep vault_notes in sync with the file_revisions row just inserted."""
+        change_type = _change_type_for_status(change.status)
+
+        if change_type == "delete":
+            if mark_deleted(conn, change.path, commit_sha):
+                report.vault_notes_deleted += 1
+            return
+
+        if change_type == "rename":
+            if change.prior_path:
+                if mark_renamed(conn, change.prior_path, change.path, commit_sha):
+                    report.vault_notes_renamed += 1
+
+        if change.sha_new and set(change.sha_new) != {"0"}:
+            body = blob_reader.read(change.sha_new)
+        else:
+            body = ""
+
+        if body:
+            vault_notes_upsert(
+                conn,
+                file_path=change.path,
+                body=body,
+                blob_sha=change.sha_new,
+                commit_sha=commit_sha,
+                authorship=authorship,
+                is_first=(change_type == "add"),
+            )
+            report.vault_notes_upserted += 1
 
     def _emit_triple_deltas(
         self,

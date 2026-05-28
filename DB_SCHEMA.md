@@ -4,7 +4,7 @@
 > are overwritten on next ingest. Schema descriptions and column
 > notes live on the dataclass schemas in `phdb.schemas.canonical`.
 
-**Regenerated at:** 2026-05-27T00:07:32Z
+**Regenerated at:** 2026-05-27T15:56:29Z
 
 ## Entity tables
 
@@ -38,7 +38,7 @@ declare ``emits = [<@type>]`` in their manifest.
 | `bookmarks` | BookmarkAction | 0 | `first_seen_in_instrument` | apple_dbs, browser_bookmarks, raindrop |
 | `books_legacy` | BookLegacy | 0 | `date_recorded` | — |
 | `browse_actions` | BrowseAction | 0 | `visit_time` | apple_dbs |
-| `chat_messages` | Message | 0 | `date_sent` | apple_dbs, chat_logs, discord, facebook_unified, google_voice, imessage, phone_sms, sms_xml, staged_md |
+| `chat_messages` | Message | 0 | `date_sent` | apple_dbs, chat_logs, discord, discord_dce, facebook_unified, google_voice, imessage, msn_plus, phone_sms, sms_xml, staged_md |
 | `clippings` | Quotation | 0 | `mtime` | clippings |
 | `comments` | Comment | 0 | `date_posted` | facebook_unified |
 | `conversations_messages` | Conversation | 0 | `date_sent` | claude_chat, claude_code, facebook_unified |
@@ -87,7 +87,104 @@ Facet plugins subscribe to source-plugin emissions via the
 | `time` | Time | `time_buckets` |
 | `topics` | Topic | `topic_clusters` |
 
-## Column detail
+## Infrastructure tables
+
+Tables present in the live DB that are not declared in the `phdb.schemas`
+registry. Includes core infrastructure (chunks, nodes, triples), FTS virtual
+tables, git-history tables, and plugin-internal tables.
+
+| Table | Rows | Columns |
+|:---|---:|:---|
+| `_web_pages_safari_backup` | 0 | `id`, `schema_type`, `page_key`, `subject`, `sender_address`, `sender_name` (+10 more) |
+| `attachments` | 0 | `id`, `schema_type`, `message_id`, `filename`, `content_type`, `content_disposition` (+3 more) |
+| `browser_history` | 0 | `id`, `schema_type`, `url`, `title`, `timestamp`, `visit_duration_ms` (+7 more) |
+| `chunk_scores` | 0 | `chunk_id`, `score`, `tier`, `base_value`, `tier_override`, `last_recomputed` |
+| `chunks` | 0 | `id`, `schema_type`, `source_table`, `source_id`, `chunk_index`, `chunk_strategy` (+7 more) |
+| `commit_authorship` | 0 | `id`, `repo`, `sha`, `authorship_class`, `source`, `commit_date` (+2 more) |
+| `commit_authorship_repos` | 0 | `id`, `repo`, `repo_path`, `default_class`, `first_commit_date`, `notes` (+1 more) |
+| `connections` | 0 | `id`, `schema_type`, `instrument`, `dedupe_key`, `profile_url`, `profile_id` (+17 more) |
+| `engagements` | 0 | `id`, `chunk_id`, `timestamp`, `event_type`, `source` |
+| `entity_places` | 0 | `id`, `schema_type`, `name`, `identifier`, `address`, `geo` (+7 more) |
+| `facet_coalescence_log` | 0 | `id`, `facet_type`, `facet_node_id`, `rule_name`, `confidence`, `source_table` (+3 more) |
+| `file_revision_dissolutions` | 0 | `id`, `file_revision_pk`, `dissolution_pk` |
+| `geo_traces` | 0 | `id`, `parent_message_id`, `source_kind`, `point_idx`, `ts`, `lat` (+7 more) |
+| `hr_samples` | 0 | `id`, `parent_message_id`, `ts`, `bpm` |
+| `nodes` | 2 | `id`, `label`, `normalized_label`, `kind`, `vault_path`, `source_table` (+2 more) |
+| `organizations` | 0 | `id`, `schema_type`, `additional_type`, `name`, `identifier`, `url` (+5 more) |
+| `people` | 0 | `id`, `schema_type`, `additional_type`, `name`, `identifier`, `email` (+11 more) |
+| `people_resolution` | 0 | `id`, `address`, `person_note_path`, `confidence`, `resolved_at`, `resolution_method` |
+| `predicates` | 50 | `id`, `name`, `inverse_predicate_id`, `symmetric`, `description`, `tier` |
+| `qualifiers` | 0 | `id`, `triple_id`, `key`, `value` |
+| `record_metadata` | 0 | `id`, `message_id`, `key`, `value` |
+| `revision_triple_deltas` | 0 | `id`, `revision_pk`, `op`, `subject_node_pk`, `predicate_pk`, `object_node_pk` |
+| `schema_migrations` | 41 | `migration_id`, `applied_at` |
+| `search_history` | 0 | `id`, `query`, `url`, `clicked_url`, `timestamp`, `source` (+5 more) |
+| `software_applications` | 0 | `id`, `schema_type`, `name`, `identifier`, `url`, `categories` (+5 more) |
+| `source_files` | 1 | `id`, `schema_type`, `source_path`, `source_org`, `file_kind`, `file_size` (+6 more) |
+| `supplements` | 0 | `id`, `schema_type`, `additional_type`, `name`, `identifier`, `description` (+7 more) |
+| `triples` | 1 | `id`, `subject_node_id`, `predicate_id`, `object_node_id`, `observed_at`, `provenance` (+2 more) |
+| `vault_notes` | 0 | `id`, `schema_type`, `file_path`, `name`, `description`, `at_type` (+8 more) |
+| `workout_events` | 0 | `id`, `workout_message_id`, `event_type`, `date`, `duration_seconds` |
+| `workout_statistics` | 0 | `id`, `workout_message_id`, `stat_type`, `value_min`, `value_avg`, `value_max` (+4 more) |
+| `writing_deltas` | 0 | `id`, `schema_type`, `session_pk`, `session_id`, `ts`, `event_type` (+11 more) |
+| `writing_sessions` | 0 | `id`, `schema_type`, `session_id`, `note_path`, `vault_folder`, `note_type` (+13 more) |
+
+## Applied migrations
+
+**41 migrations applied.**
+
+| Migration | Range |
+|:---|:---|
+| First | `0001_init` |
+| Latest | `0042_vault_notes` |
+
+<details><summary>Full list</summary>
+
+- `0001_init`
+- `0002_conversation_generalization`
+- `0003_health_sidecars`
+- `0004_bookmarks`
+- `0005_connections`
+- `0006_ai_sessions`
+- `0007_chunks_rename`
+- `0008_documents_typed_table`
+- `0009_documents_migrate`
+- `0010_source_files_session_uuid`
+- `0011_decay_scoring`
+- `0012_predicate_table`
+- `0013_articles_table`
+- `0014_commit_authorship`
+- `0015_writing_deltas`
+- `0016_photographs`
+- `0017_clippings_table`
+- `0018_predicate_tiers`
+- `0019_observations_table`
+- `0020_chat_messages_table`
+- `0021_remaining_typed_tables`
+- `0022_drop_messages`
+- `0023_web_pages_entity`
+- `0024_browse_actions`
+- `0025_google_activity_fk`
+- `0026_bookmark_triple_predicates`
+- `0027_read_actions`
+- `0028_bookmark_column_cleanup`
+- `0029_facet_coalescence_log`
+- `0030_consumed_media_tables`
+- `0031_vault_entity_tables`
+- `0032_session_tables`
+- `0033_tasks_plans_tables`
+- `0034_browser_sessions`
+- `0035_browser_history`
+- `0036_search_history`
+- `0038_agent_session_uuid_backfill`
+- `0039_file_revisions`
+- `0040_follow_actions`
+- `0041_dissolutions`
+- `0042_vault_notes`
+
+</details>
+
+## Column detail (declared schemas)
 
 ### `books` — Book
 

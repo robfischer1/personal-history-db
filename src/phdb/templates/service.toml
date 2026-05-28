@@ -1,0 +1,36 @@
+# phdb service configuration — directory watchers and scheduled tasks
+#
+# Place this file in your instance directory (personal-history-instance/).
+# Start the service:  phdb service start
+# Check status:       phdb service status
+# Run one job:        phdb service run <name>
+
+[service]
+log_file = "service.log"      # relative to data_dir
+pid_file = "service.pid"      # relative to data_dir
+log_max_bytes = 5242880       # 5 MB
+log_backup_count = 3
+
+# ── Directory watchers ─────────────────────────────────────────────────────
+# Triggered by filesystem events (create, modify, delete, rename).
+# Requires: pip install personal-history-db[service]
+#
+# Each watcher watches a directory for matching file changes, debounces
+# events, then runs the command. Use {path} for the changed file path
+# or {paths} for all changed paths (space-separated, quoted).
+
+# [service.watch.my-vault]
+# path = "/path/to/vault"
+# patterns = ["*.md"]
+# ignore_dirs = [".obsidian", ".git", "attachments"]
+# debounce = 5
+# command = "phdb revision capture"
+
+# ── Scheduled tasks ────────────────────────────────────────────────────────
+# Triggered on interval. Intervals: "15m", "1h", "24h", "weekly".
+# Optional: at = "02:00" (time of day, for display/documentation).
+
+# [service.schedule.embed]
+# interval = "24h"
+# at = "02:00"
+# command = "phdb embed run --limit 500"
